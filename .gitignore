@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+dist-ssr/
+*.local
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+vite-error.log
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# env (commit only a sanitized example)
+.env*
+!.env.example
+
+# lockfiles (commit exactly one; you already use npm)
+# If you want to keep package-lock.json, remove the line below.
+# yarn.lock
+# pnpm-lock.yaml
