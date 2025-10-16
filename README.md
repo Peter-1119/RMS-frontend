@@ -28,4 +28,15 @@ git clone RMS-frontend
 cd RMS-frontend
 
 npm install
+npm install axios
+npm install vue-router@next
+
+npm install @tiptap/vue-3 @tiptap/core
+npm install @tiptap/extension-paragraph @tiptap/extension-text @tiptap/extension-document @tiptap/extension-history
+npm install @tiptap/extension-table @tiptap/extension-table-row @tiptap/extension-table-header @tiptap/extension-table-cell
+npm install @tiptap/extension-color @tiptap/extension-text-style
+npm install @tiptap/extension-image
+npm install @tiptap/starter-kit @tiptap/extension-placeholder
+npm install @tiptap/extension-document
+
 npm run dev

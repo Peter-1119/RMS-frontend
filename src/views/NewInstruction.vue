@@ -12,12 +12,7 @@
     </div>
 
     <div class="steps-navigation">
-      <div
-        v-for="(step, index) in steps"
-        :key="index"
-        :class="['step-item', { 'active': currentStep === index + 1, 'completed': currentStep > index + 1 }]"
-        @click="goToStep(index + 1)"
-      >
+      <div v-for="(step, index) in steps" :key="index" :class="['step-item', { 'active': currentStep === index + 1, 'completed': currentStep > index + 1 }]" @click="goToStep(index + 1)">
         <div class="step-circle">{{ index }}</div>
         <div class="step-label">{{ step.label }}</div>
       </div>
@@ -141,15 +136,14 @@
             <button class="remove-btn" @click="relativeDocumentRemove(docInfo.id)">x</button>
           </div>
         </div>
+        <DocSearchWindow 
+          v-if="docWindowVisible"
+          headerName="相關文件選取"
+          :existingDocs="relativeDocuments"
+          @add-new-doc="addRelativeDocument"
+          @close-window="docWindowVisible=false">
+        </DocSearchWindow>
       </div>
-
-      <DocSearchWindow 
-        v-if="docWindowVisible"
-        headerName="相關文件選取"
-        :existingDocs="relativeDocuments"
-        @add-new-doc="addRelativeDocument"
-        @close-window="docWindowVisible=false">
-      </DocSearchWindow>
 
       <div v-if="currentStep === 8" class="step-content">
         <h2>使用表單</h2>
@@ -167,15 +161,14 @@
             <button class="remove-btn" @click="formRemove(formInfo.id)">x</button>
           </div>
         </div>
+        <FormSearchWindow 
+          v-if="formWindowVisible"
+          headerName="表單選取"
+          :existingForms="usedForms"
+          @add-new-form="addUsedForm"
+          @close-window="formWindowVisible=false">
+        </FormSearchWindow>
       </div>
-
-      <FormSearchWindow 
-        v-if="formWindowVisible"
-        headerName="表單選取"
-        :existingForms="usedForms"
-        @add-new-form="addUsedForm"
-        @close-window="formWindowVisible=false">
-      </FormSearchWindow>
 
       <div v-if="currentStep === 9" class="step-content">
         <div style="display: flex; justify-content: space-between;">
