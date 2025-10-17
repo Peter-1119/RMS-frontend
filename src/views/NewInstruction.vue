@@ -77,22 +77,22 @@
           <button class="layer-action-btn add" @click="addManagementLayer">新增下一層</button>
         </div>
         
-        <template v-for="(blockContent, blockIndex) in managementBlocks" :key="blockContent.id">
-          <div v-if="blockIndex === 0" class="management-combination-block">
-            <ManagementSpecificBlock
-              :machines="[]"
-              :managementBlock="blockContent"
-              @update-table-data="updateManagementBlockData">
-            </ManagementSpecificBlock>
-          </div>
-          <div v-if="blockIndex !== 0" class="management-content-bloc">
-            <DynamicEditorBlock
-              :blockEditors="blockContent"
-              @delete-block="removeManagementLayer(blockContent.id)"
-              @update-block="updateManagementBlockData"
-            ></DynamicEditorBlock>
-          </div>
-        </template>
+        <div class="management-combination-block">
+          <ManagementSpecificBlock
+            :machines="form.attribute.machines"
+            :managementBlock="managementSpecific"
+            @update-table-data="updateManagementTableData">
+          </ManagementSpecificBlock>
+        </div>
+        <div v-if="managementBlocks.length > 0" class="management-content-bloc">
+          <DynamicEditorBlock
+            v-for="blk in managementBlocks"
+            :key="blk.id"
+            :block-editors="blk"
+            @update-block="updateManagementBlockData"
+            @delete-block="removeManagementLayer"
+          />
+        </div>
       </div>
 
       <div v-if="currentStep === 5" class="step-content">
@@ -257,7 +257,11 @@ const form = reactive({
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
 const getProject = val => { if (val) form.attribute.applyProject = val }
-const getMachines = val => { form.attribute.machines = val ? val.join(', ') : '' }
+const getMachines = val => { 
+  form.attribute.machines = val
+  console.log("machines: ", form.attribute.machines)
+  // form.attribute.machines = val ? val.join(', ') : ''
+}
 
 // ---------- process (step 3) ----------
 const processFlowData = ref({
@@ -269,7 +273,21 @@ const processFlowData = ref({
 })
 
 // ---------- 管理條件 (step 4) ----------
-const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
+const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
+
+// handler for ManagementSpecificBlock
+const updateManagementTableData = (payload) => {
+  managementSpecific.value = payload
+}
+
+const managementBlocks = ref([
+  // one layer to begin with; first element’s data[0] is the "title + selector" row
+  { id: 0, step: 3, tier: 2, data: [
+      { content_id: null, client_temp_id: `tmp-0`, option: 0, jsonHeader: null, jsonContent: null, files: [] }
+  ] }
+])
+
+// const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
 const addManagementLayer = () => {
   managementBlocks.value.push({
     id: ++itemID, step: 3, tier: managementBlocks.value.length + 1,
@@ -277,12 +295,63 @@ const addManagementLayer = () => {
   })
 }
 const removeManagementLayer = id => {
+  console.log("management blocks: ", managementBlocks.value)
+  console.log("id: ", id)
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
-  console.log("management: ", managementBlocks.value)
 }
 const updateManagementBlockData = payload => {
   const idx = managementBlocks.value.findIndex(b => b.id === payload.id)
   if (idx !== -1) managementBlocks.value[idx] = payload
+}
+
+const serializeManagementStep = () => {
+  const rows = []
+
+  // 3.1 管理基本條件 (table) -> sub_no = 1
+  if (managementSpecific.value?.data?.jsonContent) {
+    rows.push({
+      step_type: 1,                  // 管理條件
+      tier_no: managementSpecific.value.tier || 1,
+      sub_no: 1,                     // 固定 3.1
+      content_type: 2,               // table
+      header_json: null,             // 3.1 沒有標題編輯器就留 null
+      header_text: null,
+      content_json: managementSpecific.value.data.jsonContent,
+      content_text: null,            // 可不存純文字
+      files: [],                     // 3.1 沒有 files 欄位
+      metadata: { source: 'mgmt-3.1' }
+    })
+  }
+
+  // 3.2+ 其他管理條件 (DynamicEditorBlock)
+  // 每個 tier 一個 block，每個 block 的 data[] 是一組小節
+  managementBlocks.value.forEach(blk => {
+    const tier = blk.tier
+    blk.data.forEach((item, idx) => {
+      // map option → content_type
+      // 0: title only → 0 (we still store header_json)
+      // 1: text&picture → 1 (store header_json, content_text/json optional, files)
+      // 2: table → 2 (store header_json, content_json; table images are inside json)
+      const content_type =
+        item.option === 0 ? 0 :
+        item.option === 1 ? 1 : 2
+
+      rows.push({
+        step_type: 1,                      // 管理條件
+        tier_no: tier,
+        sub_no: idx + 2,                   // 從 3.2 開始
+        content_type,
+        header_json: item.jsonHeader || null,
+        header_text: null,                 // 你不需要搜尋就不存
+        content_json: content_type === 2 ? (item.jsonContent || null) : null,
+        content_text: content_type === 1 ? null : null, // 如需，這裡可放純文字摘要
+        files: Array.isArray(item.files) ? item.files : [],
+        metadata: { source: 'mgmt-dynamic' }
+      })
+    })
+  })
+
+  return rows
 }
 
 // ---------- 製造條件參數一覽表 (step 5) ----------
@@ -353,70 +422,97 @@ const serializeForSave = () => ({
   usedForms: toPlain(usedForms.value),
 })
 
-// Keep token in URL & localStorage so refresh won’t lose it.
 const saveDraft = async () => {
   const t = await ensureDraftToken()
   if (!t) return
-  const payload = {
-    token: t,  // undefined on first save
-    form,                                   // your form reactive object
-    // later: managementBlocks, manufacturingBlocks, exceptionBlocks, etc.
-  }
 
   try {
-    const res = await axios.post(`${API_BASE_URL}/drafts/save`, payload)
-    const { success, token, message, issueTime } = res.data || {}
-    if (!success) return alert(message || '儲存失敗')
+    // 1) attributes
+    const { data: a } = await axios.post(`${API_BASE_URL}/drafts/save`, {
+      token: t,
+      form,
+    })
+    if (!a?.success) return alert(a?.message || '屬性儲存失敗')
 
-    if (!draftToken.value && token) {
-      setToken(token) // adopt server-issued token so subsequent saves are updates
-    }
-
+    // 2) process flow (你已經有)
     await axios.post(`${API_BASE_URL}/drafts/save-process-flow`, {
       token: t,
       processFlow: {
-        mode: processFlowData.value.mode, // if you kept 0/1
+        mode: processFlowData.value.mode,
         cols: processFlowData.value.cols,
         header_json: processFlowData.value.header_json,
         items: processFlowData.value.items,
-        file: processFlowData.value.file, // {asset_id,url,path} or null
+        file: processFlowData.value.file,
       }
     })
 
-    alert((message || '草稿已儲存') + (issueTime ? `（時間：${issueTime}）` : ''))
+    // 3) management step (NEW)
+    const mgmtRows = serializeManagementStep()
+    await axios.post(`${API_BASE_URL}/drafts/save-management`, {
+      token: t,
+      rows: mgmtRows,
+    })
+
+    alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
     console.error(e)
     alert('儲存草稿失敗')
   }
 }
 
+
 onMounted(async () => {
   const t = await ensureDraftToken()
-  if (!t) return  // brand new, nothing to load
+  if (!t) return
 
   try {
+    // 1) attributes
     const res = await axios.get(`${API_BASE_URL}/drafts/${t}`)
-    if (res.data?.success) {
-      // map back into your UI state
-      Object.assign(form, res.data.form || {})
-      // if you also store/manage other blocks later, load them here too
-      // e.g. managementBlocks.value = res.data.managementBlocks || []
+    if (res.data?.success) Object.assign(form, res.data.form || {})
 
-      // normalize/ensure token in URL/localStorage
-      setToken(res.data.token, { persist: true, updateUrl: true })
-    } else {
-      alert(res.data?.message || '載入草稿失敗')
-    }
+    // 2) process flow
+    const pf = await axios.get(`${API_BASE_URL}/drafts/${t}/process-flow`)
+    if (pf.data?.success) processFlowData.value = pf.data.processFlow
 
-    const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/process-flow`)
-    if (data.success) {
-      processFlowData.value = data.processFlow
+    // 3) management step (NEW → rebuild your two UIs)
+    const mg = await axios.get(`${API_BASE_URL}/drafts/${t}/management`)
+    if (mg.data?.success) {
+      const { specific, dynamics } = mg.data
+
+      // 3.1
+      if (specific) {
+        managementSpecific.value = {
+          id: 0,
+          step: 3,
+          tier: specific.tier_no || 1,
+          data: {
+            jsonContent: specific.content_json || null,
+            arrayData: specific.arrayData || []
+          }
+        }
+      }
+
+      // 3.2+ dynamic
+      managementBlocks.value = (dynamics || []).map((blk, i) => ({
+        id: i + 1,
+        step: 3,
+        tier: blk.tier_no,
+        data: blk.items.map(it => ({
+          content_id: it.content_id || null,
+          client_temp_id: it.client_temp_id || null,
+          option: it.option,                // 0/1/2
+          jsonHeader: it.jsonHeader || null,
+          jsonContent: it.jsonContent || null,
+          files: it.files || []
+        }))
+      }))
     }
   } catch (e) {
     console.error(e)
     alert('載入草稿失敗')
   }
 })
+
 
 </script>
 

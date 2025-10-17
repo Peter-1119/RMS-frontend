@@ -208,7 +208,7 @@ const radioInputChange = (idx) => {
 
 const emitDelete = () => {
   if (!confirm('確定要刪除此區塊?')) return
-  emit('delete-block', { id: localBlockContents.id, tier: localBlockContents.tier })
+  emit('delete-block', localBlockContents.id)
 }
 
 const addRow = idx => editors[idx]?.chain().focus().addRowAfter().run()
