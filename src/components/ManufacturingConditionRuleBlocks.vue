@@ -46,6 +46,7 @@
 <script setup>
 /* ===== Compact, production-style Composition API ===== */
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { v1 as uuidv1 } from 'uuid'
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
@@ -348,7 +349,7 @@ function makeParamEditor(json,onUpdate){
 /* ===== Public actions ===== */
 function addBlock(){
   const id = idSeq++
-  blocks.value.push({ id, code:`XXXX${blocks.value.length + 1}`, data:{} })
+  blocks.value.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, id, code:`XXXX${blocks.value.length + 1}`, data:{} })
   nextTick(()=> initEditors(blocks.value.length-1))
 }
 function delBlock(i){
@@ -658,7 +659,7 @@ onBeforeUnmount(()=>{
 /* ===== Exports to parent (if needed) ===== */
 function exportData(){
   return blocks.value.map((b,i)=>({
-    id:b.id, code:b.code, data:{
+    content_id: b.content_id, client_temp_id: b.client_temp_id, id:b.id, code:b.code, data:{
       jsonConditionContent: condEditors.value[i]?.getJSON(),
       jsonParameterContent: paramEditors.value[i]?.getJSON(),
       arrayConditionData: extractTableArray(condEditors.value[i]),

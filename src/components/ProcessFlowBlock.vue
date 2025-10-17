@@ -19,9 +19,10 @@ const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
 const props = defineProps({
   modelValue: {
     type: Object,
-    default: () => ({ mode: 0, header_json: null, items: [], file_url: null, file_path: null })
+    default: () => ({ mode: 'table', cols: 9, header_json: null, items: [], file: null })
   },
-  cols: { type: Number, default: 9 }
+  cols: { type: Number, default: 9 },
+  token: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -167,20 +168,21 @@ async function handleFile(ev){
   uploading.value = true
   try{
     const ext = (f.name.split('.').pop()||'').toLowerCase()
+    const url = `${API_BASE_URL}/api/upload/image?token=${props.token}`
     if(ext==='drawio'){
       const fd = new FormData(); fd.append('drawioFile', f)
       const res = await axios.post(`${API_BASE_URL}/drawioToPng`, fd, { responseType:'arraybuffer', headers:{'Content-Type':'multipart/form-data'} })
       const blob = new Blob([res.data], {type:'image/png'})
       const png = new File([blob], `flow_${Date.now()}.png`, {type:'image/png'})
       const up = new FormData(); up.append('file', png)
-      const r2 = await axios.post(`${API_BASE_URL}/api/upload/image`, up)
-      if(!r2.data?.success) throw new Error(r2.data?.message||'upload failed')
-      m.value.file_url = r2.data.url; m.value.file_path = r2.data.path_to_save
+      const r = await axios.post(url, up)
+      if(!r.data?.success) throw new Error(r.data?.message||'upload failed')
+      m.value.file = { asset_id: r.data.asset_id, url: r.data.url, path: r.data.path_to_save }
     }else{
       const up = new FormData(); up.append('file', f)
-      const r = await axios.post(`${API_BASE_URL}/api/upload/image`, up)
+      const r = await axios.post(url, up)
       if(!r.data?.success) throw new Error(r.data?.message||'upload failed')
-      m.value.file_url = r.data.url; m.value.file_path = r.data.path_to_save
+      m.value.file = { asset_id: r.data.asset_id, url: r.data.url, path: r.data.path_to_save }
     }
   }catch(e){ console.error(e); alert('上傳失敗') }
   finally{ uploading.value=false }
@@ -194,13 +196,13 @@ const setMode = (mode)=> { m.value.mode = mode }
     <!-- toolbar -->
     <div class="pfb-toolbar">
       <label>選擇模式：</label>
-      <button :class="['mode-btn', m.mode===0 && 'active']" @click="setMode(0)">輸入模式</button>
-      <button :class="['mode-btn', m.mode===1 && 'active']" @click="setMode(1)">上傳模式</button>
+      <button :class="['mode-btn', m.mode==='table' && 'active']" @click="setMode('table')">輸入模式</button>
+      <button :class="['mode-btn', m.mode==='image' && 'active']" @click="setMode('image')">上傳模式</button>
 
-      <button v-if="m.mode===1" class="mode-btn file-upload" @click="pickFile">選擇檔案</button>
+      <button v-if="m.mode==='image'" class="mode-btn file-upload" @click="pickFile">選擇檔案</button>
       <input ref="fileInput" type="file" accept=".drawio,image/*" @change="handleFile" style="display:none" />
       <span v-if="uploading" class="hint">上傳中...</span>
-      <span v-else-if="m.file_url" class="hint">已選檔</span>
+      <span v-else-if="m.file" class="hint">已選檔</span>
 
       <div class="menu color">
         <div class="font-color red"   @click="applyColor('red')"></div>
@@ -213,27 +215,21 @@ const setMode = (mode)=> { m.value.mode = mode }
     <div class="pfb-input-row" @mousedown="activeTarget='header'">
       <label>2.1</label>
       <EditorContent :editor="headerEditor" class="title-editor-content" />
-      <input
-        v-if="m.mode===0"
-        class="process-input"
-        v-model="draftItem"
-        placeholder="輸入流程（Enter 新增）"
-        @keyup.enter="addItem"
-        @focus="activeTarget='header'" />
-      <button v-if="m.mode===0" class="action-btn add-btn" @click="addItem">+</button>
-      <button v-if="m.mode===0" class="action-btn remove-btn" @click="popItem" :disabled="!m.items.length">-</button>
+      <input v-if="m.mode==='table'" class="process-input" v-model="draftItem" placeholder="輸入流程（Enter 新增）" @keyup.enter="addItem" @focus="activeTarget='header'"/>
+      <button v-if="m.mode==='table'" class="action-btn add-btn" @click="addItem">+</button>
+      <button v-if="m.mode==='table'" class="action-btn remove-btn" @click="popItem" :disabled="!m.items.length">-</button>
     </div>
 
     <!-- readonly-like table (editable just for selecting) -->
-    <div v-if="m.mode===0" class="process-table-wrapper">
+    <div v-if="m.mode==='table'" class="process-table-wrapper">
       <div class="pf-table-focusable" tabindex="0" @mousedown="activeTarget='table'" @focus="activeTarget='table'">
         <EditorContent :editor="tableEditor" class="pf-editor" />
       </div>
     </div>
 
     <!-- upload preview -->
-    <div v-else class="upload-body">
-      <div v-if="m.file_url" class="preview"><img :src="fullUrl(m.file_url)" alt="flow" /></div>
+    <div v-else-if="m.mode==='image'" class="upload-body">
+      <div v-if="m.file" class="preview"><img :src="fullUrl(m.file?.url)" alt="flow" /></div>
       <div v-else class="empty">尚未選擇檔案（支援 .drawio / 圖檔）</div>
     </div>
   </div>

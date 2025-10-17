@@ -1,6 +1,6 @@
 <template>
     <div class="block-container">
-        <div class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}" v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockIndex">
+        <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockIndex" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
             <div class="block-header">
                 <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
                 
@@ -8,7 +8,7 @@
                     <EditorContent :editor="titleEditor" class="title-editor-content" />
                 </template>
                 <template v-else>
-                    <input type="text" placeholder="輸入標題" v-model="blockItem.header" class="process-title-input">
+                    <input type="text" placeholder="輸入標題" v-model="blockItem.jsonHeader" class="process-title-input">
                 </template>
 
                 <div class="menu color">
@@ -63,6 +63,7 @@
 
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { v1 as uuidv1 } from 'uuid'
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
@@ -133,11 +134,11 @@ const canMergeOrSplit = idx => {
 // ---------- editor init / lifecycle ----------
 const initTitleEditor = () => {
   titleEditor.value = new Editor({
-    content: localBlockContents.data[0].header || initialDoc(),
+    content: localBlockContents.data[0].jsonHeader || initialDoc(),
     extensions: titleExt,
     editorProps: { attributes: { class: 'title-editor-content' } },
     onFocus: ({ editor }) => setActiveEditor(editor),
-    onUpdate: ({ editor }) => { localBlockContents.data[0].header = editor.getJSON() },
+    onUpdate: ({ editor }) => { localBlockContents.data[0].jsonHeader = editor.getJSON() },
   })
 }
 
@@ -176,14 +177,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  console.log("Management block: ", localBlockContents);
   emit('update-block', localBlockContents)
   titleEditor.value?.destroy()
   Object.values(editors).forEach(e => e.destroy())
 })
 
 // ---------- watchers / emit ----------
-// watch(localBlockContents, nv => emit('update-block', nv), { deep: true })
 watch(() => props.blockEditors.tier, t => {
   tier.value = t
   localBlockContents.tier = t
@@ -191,7 +190,7 @@ watch(() => props.blockEditors.tier, t => {
 
 // ---------- UI handlers ----------
 const addSmallBlock = () => {
-  localBlockContents.data.push({ option: 0, header: '', jsonContent: null, files: [] })
+  localBlockContents.data.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, option: 0, jsonHeader: null, jsonContent: null, files: [] })
 }
 const removeSmallBlock = (idx) => {
   if (!confirm('確定要刪除此子區塊?')) return

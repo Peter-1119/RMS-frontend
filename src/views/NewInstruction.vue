@@ -68,7 +68,7 @@
 
       <div v-if="currentStep === 3" class="step-content">
         <h2>製造流程</h2>
-        <ProcessFlowBlock v-model="processFlowData" :cols="9"/>
+        <ProcessFlowBlock v-model="processFlowData" :cols="9" :token="draftToken"/>
       </div>
 
       <div v-if="currentStep === 4" class="step-content">
@@ -205,6 +205,25 @@ import { useDraftToken } from '@/composables/useDraftToken'
 
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+
+// --- ensure we have a server-side token row ---
+const ensureDraftToken = async () => {
+  if (draftToken.value) return draftToken.value
+  try {
+    const { data } = await axios.post(`${API_BASE_URL}/drafts/init`)
+    if (data?.success && data.token) {
+      setToken(data.token)                  // keep in URL + localStorage
+      return data.token
+    }
+    throw new Error(data?.message || 'init failed')
+  } catch (e) {
+    console.error('drafts/init failed:', e)
+    alert('建立草稿代碼失敗，請稍後再試')
+    return null
+  }
+}
+
 // ---------- nav / steps ----------
 const currentStep = ref(1)
 const steps = [
@@ -215,6 +234,7 @@ const nextStep = () => { if (currentStep.value < steps.length) currentStep.value
 const prevStep = () => { if (currentStep.value > 1) currentStep.value-- }
 
 // ---------- basic form ----------
+let itemID = 0
 const form = reactive({
   documentType: 0,
   documentID: '',
@@ -241,24 +261,24 @@ const getMachines = val => { form.attribute.machines = val ? val.join(', ') : ''
 
 // ---------- process (step 3) ----------
 const processFlowData = ref({
-  mode: 0,
+  mode: 'table',                // instead of 0/1, but you can keep 0/1 if you prefer
+  cols: 9,
   header_json: null,
   items: [],
-  file_url: null,
-  file_path: null,
+  file: null,                   // { asset_id, url, path }
 })
 
 // ---------- 管理條件 (step 4) ----------
 const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
-let managementBlockID = 0
 const addManagementLayer = () => {
   managementBlocks.value.push({
-    id: ++managementBlockID, step: 3, tier: managementBlocks.value.length + 1,
-    data: [{ option: 0, header: null, arrayData: null, jsonContent: null, files: [] }],
+    id: ++itemID, step: 3, tier: managementBlocks.value.length + 1,
+    data: [{ content_id: null, client_temp_id: `tmp-${itemID}`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeManagementLayer = id => {
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
+  console.log("management: ", managementBlocks.value)
 }
 const updateManagementBlockData = payload => {
   const idx = managementBlocks.value.findIndex(b => b.id === payload.id)
@@ -271,11 +291,10 @@ const updateManufacturingTableData = payload => { manufacturingBlocks.value = pa
 
 // ---------- 異常處置 (step 6) ----------
 const exceptionBlocks = ref([])
-let exceptionBlockID = 0
 const addExceptionLayer = () => {
   exceptionBlocks.value.push({
-    id: ++exceptionBlockID, step: 5, tier: exceptionBlocks.value.length + 1,
-    data: [{ option: 0, header: null, arrayData: null, jsonContent: null, files: [] }],
+    id: ++itemID, step: 5, tier: exceptionBlocks.value.length + 1,
+    data: [{ content_id: null, client_temp_id: `"tmp-${itemID}"`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeExceptionLayer = id => {
@@ -290,9 +309,8 @@ const updateExceptionBlockData = payload => {
 // ---------- 相關文件 (step 7) ----------
 const docWindowVisible = ref(false)
 const relativeDocuments = ref([])
-let relativeDocumentID = 0
 const addRelativeDocument = ({ docId, docName }) => {
-  relativeDocuments.value.push({ id: relativeDocumentID++, docId, docName })
+  relativeDocuments.value.push({ id: itemID++, docId, docName })
   docWindowVisible.value = false
 }
 const relativeDocumentRemove = id => {
@@ -302,9 +320,8 @@ const relativeDocumentRemove = id => {
 // ---------- 使用表單 (step 8) ----------
 const formWindowVisible = ref(false)
 const usedForms = ref([])
-let usedFormID = 0
 const addUsedForm = ({ formId, formName }) => {
-  usedForms.value.push({ id: usedFormID++, formId, formName })
+  usedForms.value.push({ id: itemID++, formId, formName })
   formWindowVisible.value = false
 }
 const formRemove = id => {
@@ -338,21 +355,34 @@ const serializeForSave = () => ({
 
 // Keep token in URL & localStorage so refresh won’t lose it.
 const saveDraft = async () => {
+  const t = await ensureDraftToken()
+  if (!t) return
   const payload = {
-    token: draftToken.value || undefined,  // undefined on first save
+    token: t,  // undefined on first save
     form,                                   // your form reactive object
     // later: managementBlocks, manufacturingBlocks, exceptionBlocks, etc.
   }
 
   try {
-    const base = import.meta.env.VITE_APP_API_BASE_URL
-    const res = await axios.post(`${base}/drafts/save`, payload)
+    const res = await axios.post(`${API_BASE_URL}/drafts/save`, payload)
     const { success, token, message, issueTime } = res.data || {}
     if (!success) return alert(message || '儲存失敗')
 
     if (!draftToken.value && token) {
       setToken(token) // adopt server-issued token so subsequent saves are updates
     }
+
+    await axios.post(`${API_BASE_URL}/drafts/save-process-flow`, {
+      token: t,
+      processFlow: {
+        mode: processFlowData.value.mode, // if you kept 0/1
+        cols: processFlowData.value.cols,
+        header_json: processFlowData.value.header_json,
+        items: processFlowData.value.items,
+        file: processFlowData.value.file, // {asset_id,url,path} or null
+      }
+    })
+
     alert((message || '草稿已儲存') + (issueTime ? `（時間：${issueTime}）` : ''))
   } catch (e) {
     console.error(e)
@@ -361,11 +391,11 @@ const saveDraft = async () => {
 }
 
 onMounted(async () => {
-  const t = draftToken.value
+  const t = await ensureDraftToken()
   if (!t) return  // brand new, nothing to load
 
   try {
-    const res = await axios.get(`${import.meta.env.VITE_APP_API_BASE_URL}/drafts/${t}`)
+    const res = await axios.get(`${API_BASE_URL}/drafts/${t}`)
     if (res.data?.success) {
       // map back into your UI state
       Object.assign(form, res.data.form || {})
@@ -376,6 +406,11 @@ onMounted(async () => {
       setToken(res.data.token, { persist: true, updateUrl: true })
     } else {
       alert(res.data?.message || '載入草稿失敗')
+    }
+
+    const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/process-flow`)
+    if (data.success) {
+      processFlowData.value = data.processFlow
     }
   } catch (e) {
     console.error(e)
