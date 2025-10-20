@@ -68,7 +68,7 @@
 
       <div v-if="currentStep === 3" class="step-content">
         <h2>製造流程</h2>
-        <ProcessFlowBlock v-model="processFlowData" :cols="9"/>
+        <ProcessFlowBlock v-model="processFlowData" :cols="9" :token="draftToken"/>
       </div>
 
       <div v-if="currentStep === 4" class="step-content">
@@ -77,32 +77,33 @@
           <button class="layer-action-btn add" @click="addManagementLayer">新增下一層</button>
         </div>
         
-        <template v-for="(blockContent, blockIndex) in managementBlocks" :key="blockContent.id">
-          <div v-if="blockIndex === 0" class="management-combination-block">
-            <ManagementSpecificBlock
-              :machines="[]"
-              :managementBlock="blockContent"
-              @update-table-data="updateManagementBlockData">
-            </ManagementSpecificBlock>
-          </div>
-          <div v-if="blockIndex !== 0" class="management-content-bloc">
-            <DynamicEditorBlock
-              :blockEditors="blockContent"
-              @delete-block="removeManagementLayer(blockContent.id)"
-              @update-block="updateManagementBlockData"
-            ></DynamicEditorBlock>
-          </div>
-        </template>
+        <div class="management-combination-block">
+          <ManagementSpecificBlock
+            :machines="form.attribute.machines"
+            :managementBlock="managementSpecific"
+            @update-table-data="updateManagementTableData">
+          </ManagementSpecificBlock>
+        </div>
+        <div v-if="managementBlocks.length > 0" class="management-content-bloc">
+          <DynamicEditorBlock
+            v-for="blk in managementBlocks"
+            :key="blk.id"
+            :block-editors="blk"
+            @update-block="updateManagementBlockData"
+            @delete-block="removeManagementLayer"
+          />
+        </div>
       </div>
 
       <div v-if="currentStep === 5" class="step-content">
         <h2>製造條件參數一覽表</h2>
         <ManufacturingConditionRuleBlocks
-          :dataBlocks="manufacturingBlocks"
-          :machineData="form.attribute.machines"
-          :currentStep="currentStep"
-          @save="updateManufacturingTableData"
-        ></ManufacturingConditionRuleBlocks>
+          :data-blocks="mcrBlocks"
+          :cond-template="OPTS"
+          :param-template="PARAM_ROWS"
+          :current-step="currentStep"
+          @update:dataBlocks="mcrBlocks = $event"
+          @save="mcrBlocks = $event"/>
       </div>
 
       <div v-if="currentStep === 6" class="step-content">
@@ -111,13 +112,13 @@
           <button class="layer-action-btn add" @click="addExceptionLayer">新增下一層</button>
         </div>
 
-        <template v-for="blockContent in exceptionBlocks" :key="blockContent.id">
-          <DynamicEditorBlock
-            :blockEditors="blockContent"
-            @delete-block="removeExceptionLayer(blockContent.id)"
-            @update-block="updateExceptionBlockData"
-          ></DynamicEditorBlock>
-        </template>
+        <DynamicEditorBlock
+          v-for="blockContent in exceptionBlocks"
+          :key="blockContent.id"
+          :blockEditors="blockContent"
+          @delete-block="removeExceptionLayer(blockContent.id)"
+          @update-block="updateExceptionBlockData"
+        ></DynamicEditorBlock>
       </div>
 
       <div v-if="currentStep === 7" class="step-content">
@@ -205,6 +206,25 @@ import { useDraftToken } from '@/composables/useDraftToken'
 
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+
+// --- ensure we have a server-side token row ---
+const ensureDraftToken = async () => {
+  if (draftToken.value) return draftToken.value
+  try {
+    const { data } = await axios.post(`${API_BASE_URL}/drafts/init`)
+    if (data?.success && data.token) {
+      setToken(data.token)                  // keep in URL + localStorage
+      return data.token
+    }
+    throw new Error(data?.message || 'init failed')
+  } catch (e) {
+    console.error('drafts/init failed:', e)
+    alert('建立草稿代碼失敗，請稍後再試')
+    return null
+  }
+}
+
 // ---------- nav / steps ----------
 const currentStep = ref(1)
 const steps = [
@@ -215,6 +235,7 @@ const nextStep = () => { if (currentStep.value < steps.length) currentStep.value
 const prevStep = () => { if (currentStep.value > 1) currentStep.value-- }
 
 // ---------- basic form ----------
+let itemID = 0
 const form = reactive({
   documentType: 0,
   documentID: '',
@@ -237,27 +258,41 @@ const form = reactive({
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
 const getProject = val => { if (val) form.attribute.applyProject = val }
-const getMachines = val => { form.attribute.machines = val ? val.join(', ') : '' }
+const getMachines = val => { 
+  form.attribute.machines = val
+  console.log("machines: ", form.attribute.machines)
+  // form.attribute.machines = val ? val.join(', ') : ''
+}
 
 // ---------- process (step 3) ----------
 const processFlowData = ref({
-  mode: 0,
+  mode: 'table',                // instead of 0/1, but you can keep 0/1 if you prefer
+  cols: 9,
   header_json: null,
   items: [],
-  file_url: null,
-  file_path: null,
+  file: null,                   // { asset_id, url, path }
 })
 
 // ---------- 管理條件 (step 4) ----------
-const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
-let managementBlockID = 0
+const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
+
+// handler for ManagementSpecificBlock
+const updateManagementTableData = (payload) => {
+  managementSpecific.value = payload
+}
+
+const managementBlocks = ref([])
+
+// const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
 const addManagementLayer = () => {
   managementBlocks.value.push({
-    id: ++managementBlockID, step: 3, tier: managementBlocks.value.length + 1,
-    data: [{ option: 0, header: null, arrayData: null, jsonContent: null, files: [] }],
+    id: ++itemID, step: 3, tier: managementBlocks.value.length + 2,
+    data: [{ content_id: null, client_temp_id: `tmp-${itemID}`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeManagementLayer = id => {
+  console.log("management blocks: ", managementBlocks.value)
+  console.log("id: ", id)
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
 }
 const updateManagementBlockData = payload => {
@@ -265,17 +300,154 @@ const updateManagementBlockData = payload => {
   if (idx !== -1) managementBlocks.value[idx] = payload
 }
 
+const serializeManagementStep = () => {
+  const rows = []
+
+  // 3.1 管理基本條件 (table) -> sub_no = 1
+  if (managementSpecific.value?.data?.jsonContent) {
+    rows.push({
+      step_type: 1,                  // 管理條件
+      tier_no: managementSpecific.value.tier || 1,
+      sub_no: 1,                     // 固定 3.1
+      content_type: 2,               // table
+      header_json: null,             // 3.1 沒有標題編輯器就留 null
+      header_text: null,
+      content_json: managementSpecific.value.data.jsonContent,
+      content_text: null,            // 可不存純文字
+      files: [],                     // 3.1 沒有 files 欄位
+      metadata: { source: 'mgmt-3.1' }
+    })
+  }
+
+  // 3.2+ 其他管理條件 (DynamicEditorBlock)
+  // 每個 tier 一個 block，每個 block 的 data[] 是一組小節
+  managementBlocks.value.forEach(blk => {
+    const tier = blk.tier
+    blk.data.forEach((item, idx) => {
+      // map option → content_type
+      // 0: title only → 0 (we still store header_json)
+      // 1: text&picture → 1 (store header_json, content_text/json optional, files)
+      // 2: table → 2 (store header_json, content_json; table images are inside json)
+      const content_type =
+        item.option === 0 ? 0 :
+        item.option === 1 ? 1 : 2
+
+      rows.push({
+        step_type: 1,                      // 管理條件
+        tier_no: tier,
+        sub_no: idx + 2,                   // 從 3.2 開始
+        content_type,
+        header_json: item.jsonHeader || null,
+        header_text: null,                 // 你不需要搜尋就不存
+        content_json: content_type === 2 ? (item.jsonContent || null) : null,
+        content_text: content_type === 1 ? null : null, // 如需，這裡可放純文字摘要
+        files: Array.isArray(item.files) ? item.files : [],
+        metadata: { source: 'mgmt-dynamic' }
+      })
+    })
+  })
+
+  return rows
+}
+
 // ---------- 製造條件參數一覽表 (step 5) ----------
-const manufacturingBlocks = ref([])
-const updateManufacturingTableData = payload => { manufacturingBlocks.value = payload }
+const mcrBlocks = ref([])
+const paramTemplate = ref(null)   // tiptap JSON for parameter table
+const condTemplate  = ref(null)   // tiptap JSON for condition table
+
+const OPTS = [
+  {name: "銅電式樣", options: [{label:'全鍍',value:'full_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'局部銅電鍍',value:'partial_copper_plating'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'}]},
+  {name: "製品式樣", options: [{label:'雙面板',value:'double_sided'},{label:'多層板外層',value:'mlb_outer'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'多層板內外層局部銅電鍍品',value:'mlb_inner_outer_partial'},{label:'無鍍銅品',value:'no_plating'},{label:'多層板',value:'mlb'},{label:'多層板外層線路',value:'mlb_outer_circuit'},{label:'多層板外層局部銅電鍍品',value:'mlb_outer_partial'},{label:'全板銅電鍍品',value:'full_board_plating'},{label:'局部銅電鍍品',value:'partial_plating'},{label:'多層板內層',value:'mlb_inner'},{label:'單面板',value:'single_sided'},{label:'FP品目',value:'fp_item'},{label:'單面板雙面銅材無鍍銅',value:'single_sided_double_copper_no_plating'}]},
+  {name: "流程", options: [{label:'RTR',value:'rtr'},{label:'RTS',value:'rts'},{label:'SBS',value:'sbs'}]},
+  {name: "原銅厚度", options: [{label:'1',value:'1'},{label:'1/2',value:'1/2'},{label:'1/3',value:'1/3'},{label:'1/4',value:'1/4'}]},
+  {name: "鍍銅厚度", options: [{label:'8',value:'8'},{label:'10',value:'10'},{label:'12',value:'12'},{label:'14',value:'14'},{label:'15',value:'15'},{label:'18',value:'18'}]},
+  {name: "銅材種類", options: [{label:'ED銅',value:'ed_copper'},{label:'非HA銅',value:'non_ha_copper'},{label:'HA銅',value:'ha_copper'},{label:'LCP材',value:'lcp_material'},{label:'LCP',value:'lcp'}]},
+  {name: "乾膜種類", options: [{label:'ADC-301',value:'adc_301'},{label:'FF-1030',value:'ff_1030'},{label:'HS-930',value:'hs_930'},{label:'HW-630',value:'hw_630'},{label:'AQ-209A',value:'aq_209a'},{label:'HY-920',value:'hy_920'},{label:'ADW-401',value:'adw_401'},{label:'H-9540',value:'h_9540'},{label:'FF-1040',value:'ff_1040'},{label:'FF-1020',value:'ff_1020'},{label:'AQ-1558',value:'aq_1558'}]},
+]
+const PARAM_ROWS = [
+  ['槽體','管理項目','規格上限','操作上限','中值','操作下限','規格下限','單位','參數下放','說明'],
+  ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
+  ['熱水洗1','溫度','','','','','','℃','Y',''],
+  ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
+  ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
+  ['剝膜1','作業溫度','','','','','','℃','Y','']
+]
+
+const requestConditionParameterDataStructure = async() => {
+  if (form.attribute.machines.length == 0)
+    return;
+
+  try {
+    const { conditiondata } = await axios.get(`${API_BASE_URL}/get-condition-data`)
+    condTemplate.value = conditiondata.data
+    const { parameterdata } = await axios.get(`${API_BASE_URL}/get-parameter-data`)
+    paramTemplate.value = parameterdata.data
+  } catch (e) {
+    condTemplate.value = OPTS
+    paramTemplate.value = PARAM_ROWS
+    console.error('get condition data failed:', e)
+    alert('取得條件參數失敗')
+    return null
+  }
+}
+
+const loadMCR = async (t) => {
+  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/mcr`)
+  console.log("MCR data: ", data)
+  if (!data?.success) return
+  mcrBlocks.value = (data.blocks || []).map((b, i) => ({
+    id: i + 1,
+    code: b.code || `XXXX${i+1}`,
+    data: {
+      jsonParameterContent: b.data?.jsonParameterContent || null,
+      arrayParameterData:   b.data?.arrayParameterData   || [],
+      jsonConditionContent: b.data?.jsonConditionContent || null,
+      arrayConditionData:   b.data?.arrayConditionData   || [],
+    }
+  }))
+}
+
+const serializeMCRows = () => {
+  // mcrBlocks: [{ code, data:{ jsonParameterContent, arrayParameterData, jsonConditionContent, arrayConditionData } }]
+  const rows = []
+  mcrBlocks.value.forEach((blk, i) => {
+    const tier = i + 1
+    // sub_no 0 — parameter table (code in header_text)
+    rows.push({
+      step_type: 2,
+      tier_no: tier,
+      sub_no: 0,
+      content_type: 2,
+      header_text: blk.code || `XXXX${tier}`,
+      header_json: null,
+      content_json: blk.data?.jsonParameterContent || null,
+      array_content: blk.data?.arrayParameterData || [],   // -> backend writes to content_text
+      files: null,
+      metadata: { source: 'mcr-parameter' },
+    })
+    // sub_no 1 — condition table
+    rows.push({
+      step_type: 2,
+      tier_no: tier,
+      sub_no: 1,
+      content_type: 2,
+      header_text: null,               // no textHeader here
+      header_json: null,
+      content_json: blk.data?.jsonConditionContent || null,
+      array_content: blk.data?.arrayConditionData || [],   // -> backend writes to content_text
+      files: null,
+      metadata: { source: 'mcr-condition' },
+    })
+  })
+  return rows
+}
 
 // ---------- 異常處置 (step 6) ----------
 const exceptionBlocks = ref([])
-let exceptionBlockID = 0
 const addExceptionLayer = () => {
   exceptionBlocks.value.push({
-    id: ++exceptionBlockID, step: 5, tier: exceptionBlocks.value.length + 1,
-    data: [{ option: 0, header: null, arrayData: null, jsonContent: null, files: [] }],
+    id: ++itemID, step: 5, tier: exceptionBlocks.value.length + 1,
+    data: [{ content_id: null, client_temp_id: `"tmp-${itemID}"`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeExceptionLayer = id => {
@@ -287,12 +459,60 @@ const updateExceptionBlockData = payload => {
   if (idx !== -1) exceptionBlocks.value[idx] = payload
 }
 
+const serializeExceptionRows = () => {
+  // exceptionBlocks: [{ id, step:5, tier, data:[{ option, jsonHeader, jsonContent, files:[] }, ...] }, ...]
+  const rows = []
+  exceptionBlocks.value
+    .sort((a,b) => (a.tier||0) - (b.tier||0))
+    .forEach(blk => {
+      const tier = blk.tier
+      ;(blk.data || []).forEach((item, idx) => {
+        const ct =
+          item.option === 0 ? 0 :
+          item.option === 1 ? 1 : 2
+
+        rows.push({
+          step_type: 3,                  // <— EXCEPTIONS
+          tier_no: tier,
+          sub_no: idx + 1,               // 6.1, 6.2, ...
+          content_type: ct,
+          header_text: null,             // we keep title as TipTap JSON (header_json)
+          header_json: item.jsonHeader || null,
+          content_text: null,            // optional plain text; keep null for now
+          content_json: ct === 2 ? (item.jsonContent || null) : null,
+          files: Array.isArray(item.files) ? item.files : [],
+          metadata: { source: 'exceptions' },
+        })
+      })
+    })
+  return rows
+}
+
+const loadExceptions = async (t) => {
+  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/exceptions`)
+  if (!data?.success) return
+
+  // Build the structure DynamicEditorBlock expects
+  exceptionBlocks.value = (data.blocks || []).map((blk, i) => ({
+    id: i + 1,
+    step: 5,                         // your UI step number (not stored in DB)
+    tier: blk.tier_no,
+    data: (blk.items || []).map(it => ({
+      content_id: it.content_id || null,
+      client_temp_id: it.client_temp_id || null,
+      option: it.content_type === 0 ? 0 : it.content_type === 1 ? 1 : 2,
+      jsonHeader: it.header_json || null,
+      jsonContent: it.content_json || null,
+      files: it.files || []
+    }))
+  }))
+}
+
 // ---------- 相關文件 (step 7) ----------
 const docWindowVisible = ref(false)
 const relativeDocuments = ref([])
-let relativeDocumentID = 0
 const addRelativeDocument = ({ docId, docName }) => {
-  relativeDocuments.value.push({ id: relativeDocumentID++, docId, docName })
+  relativeDocuments.value.push({ id: itemID++, docId, docName })
   docWindowVisible.value = false
 }
 const relativeDocumentRemove = id => {
@@ -302,9 +522,8 @@ const relativeDocumentRemove = id => {
 // ---------- 使用表單 (step 8) ----------
 const formWindowVisible = ref(false)
 const usedForms = ref([])
-let usedFormID = 0
 const addUsedForm = ({ formId, formName }) => {
-  usedForms.value.push({ id: usedFormID++, formId, formName })
+  usedForms.value.push({ id: itemID++, formId, formName })
   formWindowVisible.value = false
 }
 const formRemove = id => {
@@ -336,52 +555,103 @@ const serializeForSave = () => ({
   usedForms: toPlain(usedForms.value),
 })
 
-// Keep token in URL & localStorage so refresh won’t lose it.
 const saveDraft = async () => {
-  const payload = {
-    token: draftToken.value || undefined,  // undefined on first save
-    form,                                   // your form reactive object
-    // later: managementBlocks, manufacturingBlocks, exceptionBlocks, etc.
-  }
+  const t = await ensureDraftToken()
+  if (!t) return
 
   try {
-    const base = import.meta.env.VITE_APP_API_BASE_URL
-    const res = await axios.post(`${base}/drafts/save`, payload)
-    const { success, token, message, issueTime } = res.data || {}
-    if (!success) return alert(message || '儲存失敗')
+    // 1) attributes
+    const { data: a } = await axios.post(`${API_BASE_URL}/drafts/save`, {
+      token: t,
+      form,
+    })
+    if (!a?.success) return alert(a?.message || '屬性儲存失敗')
 
-    if (!draftToken.value && token) {
-      setToken(token) // adopt server-issued token so subsequent saves are updates
-    }
-    alert((message || '草稿已儲存') + (issueTime ? `（時間：${issueTime}）` : ''))
+    // 2) process flow (你已經有)
+    await axios.post(`${API_BASE_URL}/drafts/save-process-flow`, {
+      token: t,
+      processFlow: {
+        mode: processFlowData.value.mode,
+        cols: processFlowData.value.cols,
+        header_json: processFlowData.value.header_json,
+        items: processFlowData.value.items,
+        file: processFlowData.value.file,
+      }
+    })
+
+    // 3) management step (NEW)
+    const mgmtRows = serializeManagementStep()
+    await axios.post(`${API_BASE_URL}/drafts/save-management`, {
+      token: t,
+      rows: mgmtRows,
+    })
+
+    const mcrRows = serializeMCRows()
+    await axios.post(`${API_BASE_URL}/drafts/save-mcr`, { token: t, rows: mcrRows })
+
+    const excRows = serializeExceptionRows()
+    await axios.post(`${API_BASE_URL}/drafts/save-exceptions`, { token: t, rows: excRows })
+
+    alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
     console.error(e)
     alert('儲存草稿失敗')
   }
 }
 
+
 onMounted(async () => {
-  const t = draftToken.value
-  if (!t) return  // brand new, nothing to load
+  const t = await ensureDraftToken()
+  if (!t) return
 
   try {
-    const res = await axios.get(`${import.meta.env.VITE_APP_API_BASE_URL}/drafts/${t}`)
-    if (res.data?.success) {
-      // map back into your UI state
-      Object.assign(form, res.data.form || {})
-      // if you also store/manage other blocks later, load them here too
-      // e.g. managementBlocks.value = res.data.managementBlocks || []
+    // 1) attributes
+    const res = await axios.get(`${API_BASE_URL}/drafts/${t}`)
+    if (res.data?.success) Object.assign(form, res.data.form || {})
 
-      // normalize/ensure token in URL/localStorage
-      setToken(res.data.token, { persist: true, updateUrl: true })
-    } else {
-      alert(res.data?.message || '載入草稿失敗')
+    // 2) process flow
+    const pf = await axios.get(`${API_BASE_URL}/drafts/${t}/process-flow`)
+    if (pf.data?.success) processFlowData.value = pf.data.processFlow
+
+    // 3) management step (NEW → rebuild your two UIs)
+    const mg = await axios.get(`${API_BASE_URL}/drafts/${t}/management`)
+    if (mg.data?.success) {
+      const { specific, dynamics } = mg.data
+
+      // 3.1
+      if (specific) {
+        managementSpecific.value = {
+          id: 0,
+          step: 3,
+          tier: specific.tier_no || 1,
+          data: {jsonContent: specific.content_json || null, arrayData: specific.arrayData || []}
+        }
+      }
+
+      // 3.2+ dynamic
+      managementBlocks.value = (dynamics || []).map((blk, i) => ({
+        id: i + 1,
+        step: 3,
+        tier: blk.tier_no,
+        data: blk.items.map(it => ({
+          content_id: it.content_id || null,
+          client_temp_id: it.client_temp_id || null,
+          option: it.option,                // 0/1/2
+          jsonHeader: it.jsonHeader || null,
+          jsonContent: it.jsonContent || null,
+          files: it.files || []
+        }))
+      }))
+
+      await loadMCR(t)
+      await loadExceptions(t)
     }
   } catch (e) {
     console.error(e)
     alert('載入草稿失敗')
   }
 })
+
 
 </script>
 

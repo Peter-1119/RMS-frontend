@@ -29,6 +29,7 @@ cd RMS-frontend
 
 npm install
 npm install axios
+npm install uuid
 npm install vue-router@next
 
 npm install @tiptap/vue-3 @tiptap/core
