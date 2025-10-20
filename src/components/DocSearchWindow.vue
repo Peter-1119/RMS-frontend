@@ -66,17 +66,6 @@ export default{
         }
     },
     computed: {
-        // filteredDocInfos() {
-        //     const keyword = this.searchKeyword.toLowerCase();
-        //     const existingIds = new Set(this.existingDocs.map(f => f.docId));
-
-        //     return this.docInfos.filter(info => {
-        //         const matchKeyword = info.docName.toLowerCase().includes(keyword) || info.docId.toLowerCase().includes(keyword);
-        //         const isExisting = existingIds.has(info.docId);
-
-        //         return matchKeyword && !isExisting;
-        //     })
-        // },
         totalPage() {
             if (!this.results.length)
                 return 1;
@@ -145,12 +134,6 @@ export default{
         closeWindow() {
             console.log("cancel window");
             this.$emit("close-window");
-        }
-    },
-    watch: {
-        // 當搜尋關鍵字改變時，將頁碼重置為 1
-        searchKeyword() {
-            this.currentPage = 1;
         }
     }
 }
