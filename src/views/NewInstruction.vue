@@ -112,13 +112,13 @@
           <button class="layer-action-btn add" @click="addExceptionLayer">新增下一層</button>
         </div>
 
-        <template v-for="blockContent in exceptionBlocks" :key="blockContent.id">
-          <DynamicEditorBlock
-            :blockEditors="blockContent"
-            @delete-block="removeExceptionLayer(blockContent.id)"
-            @update-block="updateExceptionBlockData"
-          ></DynamicEditorBlock>
-        </template>
+        <DynamicEditorBlock
+          v-for="blockContent in exceptionBlocks"
+          :key="blockContent.id"
+          :blockEditors="blockContent"
+          @delete-block="removeExceptionLayer(blockContent.id)"
+          @update-block="updateExceptionBlockData"
+        ></DynamicEditorBlock>
       </div>
 
       <div v-if="currentStep === 7" class="step-content">
@@ -459,6 +459,55 @@ const updateExceptionBlockData = payload => {
   if (idx !== -1) exceptionBlocks.value[idx] = payload
 }
 
+const serializeExceptionRows = () => {
+  // exceptionBlocks: [{ id, step:5, tier, data:[{ option, jsonHeader, jsonContent, files:[] }, ...] }, ...]
+  const rows = []
+  exceptionBlocks.value
+    .sort((a,b) => (a.tier||0) - (b.tier||0))
+    .forEach(blk => {
+      const tier = blk.tier
+      ;(blk.data || []).forEach((item, idx) => {
+        const ct =
+          item.option === 0 ? 0 :
+          item.option === 1 ? 1 : 2
+
+        rows.push({
+          step_type: 3,                  // <— EXCEPTIONS
+          tier_no: tier,
+          sub_no: idx + 1,               // 6.1, 6.2, ...
+          content_type: ct,
+          header_text: null,             // we keep title as TipTap JSON (header_json)
+          header_json: item.jsonHeader || null,
+          content_text: null,            // optional plain text; keep null for now
+          content_json: ct === 2 ? (item.jsonContent || null) : null,
+          files: Array.isArray(item.files) ? item.files : [],
+          metadata: { source: 'exceptions' },
+        })
+      })
+    })
+  return rows
+}
+
+const loadExceptions = async (t) => {
+  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/exceptions`)
+  if (!data?.success) return
+
+  // Build the structure DynamicEditorBlock expects
+  exceptionBlocks.value = (data.blocks || []).map((blk, i) => ({
+    id: i + 1,
+    step: 5,                         // your UI step number (not stored in DB)
+    tier: blk.tier_no,
+    data: (blk.items || []).map(it => ({
+      content_id: it.content_id || null,
+      client_temp_id: it.client_temp_id || null,
+      option: it.content_type === 0 ? 0 : it.content_type === 1 ? 1 : 2,
+      jsonHeader: it.header_json || null,
+      jsonContent: it.content_json || null,
+      files: it.files || []
+    }))
+  }))
+}
+
 // ---------- 相關文件 (step 7) ----------
 const docWindowVisible = ref(false)
 const relativeDocuments = ref([])
@@ -540,6 +589,9 @@ const saveDraft = async () => {
     const mcrRows = serializeMCRows()
     await axios.post(`${API_BASE_URL}/drafts/save-mcr`, { token: t, rows: mcrRows })
 
+    const excRows = serializeExceptionRows()
+    await axios.post(`${API_BASE_URL}/drafts/save-exceptions`, { token: t, rows: excRows })
+
     alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
     console.error(e)
@@ -591,7 +643,8 @@ onMounted(async () => {
         }))
       }))
 
-      loadMCR(t)
+      await loadMCR(t)
+      await loadExceptions(t)
     }
   } catch (e) {
     console.error(e)
