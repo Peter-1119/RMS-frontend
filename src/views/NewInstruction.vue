@@ -555,6 +555,36 @@ const serializeForSave = () => ({
   usedForms: toPlain(usedForms.value),
 })
 
+const loadReferences = async (t) => {
+  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/references`)
+  if (!data?.success) return
+
+  // rebuild UI arrays with local incremental id
+  let nextId = 1
+  relativeDocuments.value = (data.documents || []).map(d => ({
+    id: nextId++,
+    docId: d.docId,
+    docName: d.docName,
+  }))
+  usedForms.value = (data.forms || []).map(f => ({
+    id: nextId++,
+    formId: f.formId,
+    formName: f.formName,
+  }))
+}
+
+const serializeReferences = () => ({
+  // map UI arrays to simple payloads
+  documents: (relativeDocuments.value || []).map(d => ({
+    docId: d.docId,
+    docName: d.docName,
+  })),
+  forms: (usedForms.value || []).map(f => ({
+    formId: f.formId,
+    formName: f.formName,
+  })),
+})
+
 const saveDraft = async () => {
   const t = await ensureDraftToken()
   if (!t) return
@@ -591,6 +621,9 @@ const saveDraft = async () => {
 
     const excRows = serializeExceptionRows()
     await axios.post(`${API_BASE_URL}/drafts/save-exceptions`, { token: t, rows: excRows })
+
+    const { documents, forms } = serializeReferences()
+    await axios.post(`${API_BASE_URL}/drafts/save-references`, { token: t, documents, forms })
 
     alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
@@ -645,6 +678,7 @@ onMounted(async () => {
 
       await loadMCR(t)
       await loadExceptions(t)
+      await loadReferences(t)
     }
   } catch (e) {
     console.error(e)

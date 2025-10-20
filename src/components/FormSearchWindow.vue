@@ -66,17 +66,6 @@ export default{
         }
     },
     computed: {
-        // filteredFormInfos() {
-        //     const keyword = this.searchKeyword.toLowerCase();
-        //     const existingIds = new Set(this.existingForms.map(f => f.formId));
-
-        //     return this.formInfos.filter(info => {
-        //         const matchKeyword = info.formName.toLowerCase().includes(keyword) || info.formId.toLowerCase().includes(keyword);
-        //         const isExisting = existingIds.has(info.formId);
-
-        //         return matchKeyword && !isExisting;
-        //     })
-        // },
         totalPage() {
             if (!this.results.length)
                 return 1;
@@ -114,7 +103,7 @@ export default{
             this.formInfos = res.map((formInfo, index) => ({ id: index, ...formInfo }));
         },
         searchForm(searchKeyword) {
-            const keyword = this.searchKeyword.toLowerCase();
+            const keyword = searchKeyword.toLowerCase();
             const existingIds = new Set(this.existingForms.map(f => f.formId));
 
             this.results =  this.formInfos.filter(info => {
@@ -147,12 +136,6 @@ export default{
         closeWindow() {
             console.log("cancel window");
             this.$emit("close-window");
-        }
-    },
-    watch: {
-        // 當搜尋關鍵字改變時，將頁碼重置為 1
-        searchKeyword() {
-            this.currentPage = 1;
         }
     }
 }
