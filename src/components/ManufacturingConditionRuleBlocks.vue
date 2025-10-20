@@ -44,8 +44,7 @@
 </template>
 
 <script setup>
-/* ===== Compact, production-style Composition API ===== */
-import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
 import { v1 as uuidv1 } from 'uuid'
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import Document from '@tiptap/extension-document'
@@ -62,43 +61,28 @@ import { CellSelection } from 'prosemirror-tables'
 
 /* ===== Props ===== */
 const props = defineProps({
-  dataBlocks: { type: Array, default: () => [] },  // 7.1.1
-  machineData: { type: Object, default: () => ({}) }, // 7.2 future
-  currentStep: { type: Number, default: 0 }
+  dataBlocks: { type: Array, default: () => [] },     // saved blocks
+  // Templates can be:
+  // 1) TipTap JSON doc (object with type:'doc')
+  // 2) Condition: Array<{ name: string, options: {label,value}[] }>
+  // 3) Parameter: 2D array of strings (header + rows)
+  condTemplate:  { type: [Object, Array], default: null },
+  paramTemplate: { type: [Object, Array], default: null },
+  currentStep: { type: Number, default: 0 },
 })
 const emit = defineEmits(['update:dataBlocks','save'])
 
-/* ===== Constants / compact dicts ===== */
-const OPTS = {
-  copperType: [{label:'全鍍',value:'full_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'局部銅電鍍',value:'partial_copper_plating'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'}],
-  productType: [{label:'雙面板',value:'double_sided'},{label:'多層板外層',value:'mlb_outer'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'多層板內外層局部銅電鍍品',value:'mlb_inner_outer_partial'},{label:'無鍍銅品',value:'no_plating'},{label:'多層板',value:'mlb'},{label:'多層板外層線路',value:'mlb_outer_circuit'},{label:'多層板外層局部銅電鍍品',value:'mlb_outer_partial'},{label:'全板銅電鍍品',value:'full_board_plating'},{label:'局部銅電鍍品',value:'partial_plating'},{label:'多層板內層',value:'mlb_inner'},{label:'單面板',value:'single_sided'},{label:'FP品目',value:'fp_item'},{label:'單面板雙面銅材無鍍銅',value:'single_sided_double_copper_no_plating'}],
-  process: [{label:'RTR',value:'rtr'},{label:'RTS',value:'rts'},{label:'SBS',value:'sbs'}],
-  originalThickness: [{label:'1',value:'1'},{label:'1/2',value:'1/2'},{label:'1/3',value:'1/3'},{label:'1/4',value:'1/4'}],
-  platingThickness: [{label:'8',value:'8'},{label:'10',value:'10'},{label:'12',value:'12'},{label:'14',value:'14'},{label:'15',value:'15'},{label:'18',value:'18'}],
-  copperMaterial: [{label:'ED銅',value:'ed_copper'},{label:'非HA銅',value:'non_ha_copper'},{label:'HA銅',value:'ha_copper'},{label:'LCP材',value:'lcp_material'},{label:'LCP',value:'lcp'}],
-  dryFilmType: [{label:'ADC-301',value:'adc_301'},{label:'FF-1030',value:'ff_1030'},{label:'HS-930',value:'hs_930'},{label:'HW-630',value:'hw_630'},{label:'AQ-209A',value:'aq_209a'},{label:'HY-920',value:'hy_920'},{label:'ADW-401',value:'adw_401'},{label:'H-9540',value:'h_9540'},{label:'FF-1040',value:'ff_1040'},{label:'FF-1020',value:'ff_1020'},{label:'AQ-1558',value:'aq_1558'}]
-}
-const COND_HEADERS = ['條件名稱','銅電式樣','製品式樣','流程','原銅厚度','鍍銅厚度','銅材種類','乾膜種類']
-const PARAM_ROWS = [
-  ['槽體','管理項目','規格上限','操作上限','中值','操作下限','規格下限','單位','參數下放','說明'],
-  ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['熱水洗1','溫度','','','','','','℃','Y',''],
-  ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
-  ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['剝膜1','作業溫度','','','','','','℃','Y','']
-]
-const LOCK_COLS = [0,1,7,8]
-
-/* ===== Extensions (compact) ===== */
+/* ===== TipTap extensions ===== */
 const Base = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
-const Hdr = TableHeader.extend({ addAttributes(){ return { ...(this.parent?.()||{}), cellType:{default:'text'}, contenteditable:{default:false} }}})
-const Row = TableRow.extend({
-  content: '(tableCell | tableHeader)*', // we can revert to the default
+const Hdr = TableHeader.extend({
   addAttributes() {
-    return { ...(this.parent?.() || {}), class: { default: null } }
-  },
+    return { ...(this.parent?.() || {}), cellType:{default:'text'}, contenteditable:{default:false} }
+  }
 })
-
+const Row = TableRow.extend({
+  content: '(tableCell | tableHeader)*',
+  addAttributes() { return { ...(this.parent?.() || {}), class: { default: null } } },
+})
 const Cell = TableCell.extend({
   name: 'customTableCell',
   group: 'tableCell',
@@ -114,7 +98,6 @@ const Cell = TableCell.extend({
       colIndex: { default: null },
     }
   },
-
   addNodeView() {
     return ({ node, getPos, editor }) => {
       const td = document.createElement('td')
@@ -134,13 +117,14 @@ const Cell = TableCell.extend({
         select.value = node.attrs.dropdownValue || ''
         select.addEventListener('change', () => {
           const pos = getPos()
-          if (typeof pos === 'number')
+          if (typeof pos === 'number') {
             editor.view.dispatch(
               editor.state.tr.setNodeMarkup(pos, null, {
                 ...node.attrs,
                 dropdownValue: select.value,
               })
             )
+          }
         })
 
         const box = document.createElement('div')
@@ -153,24 +137,16 @@ const Cell = TableCell.extend({
         box.appendChild(hidden)
 
         td.appendChild(box)
-        td.contentEditable = 'false' // dropdowns not editable
-
-        return {
-          dom: td,
-          contentDOM: hidden,
-          stopEvent: e =>
-            e.target === select && (e.type === 'change' || e.type === 'input'),
-        }
+        td.contentEditable = 'false'
+        return { dom: td, contentDOM: hidden, stopEvent: e => e.target === select }
       }
 
-      // text cell
       td.classList.add('text-cell-wrapper')
       if (locked) td.contentEditable = 'false'
       return { dom: td, contentDOM: td }
     }
   },
 })
-
 const TableOnlyDoc = Document.extend({ content:'table' })
 const TExt = [
   TableOnlyDoc, ...Base,
@@ -179,174 +155,167 @@ const TExt = [
 ]
 
 /* ===== Reactive state ===== */
-const blocks = ref([])                  // {id, code, data?}
-const condEditors = ref([])             // Tiptap Editor[]
-const paramEditors = ref([])            // Tiptap Editor[]
+const blocks = ref([])          // {id, code, data?}
+const condEditors = ref([])     // Editor[]
+const paramEditors = ref([])    // Editor[]
 const copyCode = ref('')
 let idSeq = 0
 
-/* ===== Utils ===== */
-const getOptByCol = (c)=>({1:OPTS.copperType,2:OPTS.productType,3:OPTS.process,4:OPTS.originalThickness,5:OPTS.platingThickness,6:OPTS.copperMaterial,7:OPTS.dryFilmType}[c]||[])
-const cellText = n => {
-  if (!n) return ''
-  const a = n.attrs||{}
-  if (a.cellType==='dropdown') return a.dropdownValue||''
-  const p = n.content?.childCount ? n.content.child(0) : null
-  return p?.type?.name==='paragraph' ? p.content?.content?.map(x=>x.text||'').join('').trim()||'' : ''
-}
-const newCondDoc = () => {
-  // Header row
-  const headerRow = {
-    type: 'tableRow',
-    content: COND_HEADERS.map((h) => ({
-      type: 'tableHeader',
-      attrs: { contenteditable: false },
-      content: [{ type: 'paragraph', content: [{ type: 'text', text: h }] }],
-    })),
-  }
+/* ===== Normalizers – accept flexible templates ===== */
 
-  // Data rows — for initial display, you can start with one empty row
+// Is this a TipTap doc?
+const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
+
+// Build condition table TipTap doc from lightweight template:
+// template: Array<{name:string, options:Array<{label,value}>}>
+function buildCondDocFromArray(templateArr) {
+  const headers = ['條件名稱', ...templateArr.map(x => x.name)]
+  const headerRow = {
+    type:'tableRow',
+    content: headers.map(h => ({
+      type:'tableHeader',
+      attrs:{ contenteditable:false },
+      content:[{ type:'paragraph', content:[{ type:'text', text:h }] }]
+    }))
+  }
   const dataRow = {
-    type: 'tableRow',
-    content: COND_HEADERS.map((_, colIdx) => {
+    type:'tableRow',
+    content: headers.map((_, colIdx) => {
       if (colIdx === 0) {
-        // first column: row index, non-editable text
         return {
-          type: 'customTableCell',
-          attrs: { cellType: 'text', contenteditable: false },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: '1' }] }],
-        }
-      } else {
-        // dropdown columns
-        const options = getOptByCol(colIdx)
-        return {
-          type: 'customTableCell',
-          attrs: {
-            cellType: 'dropdown',
-            dropdownValue: '',
-            dropdownOptions: options,
-            dropdownColor: '#000',
-            contenteditable: false,
-          },
-          content: [{ type: 'paragraph' }],
+          type:'customTableCell',
+          attrs:{ cellType:'text', contenteditable:false },
+          content:[{ type:'paragraph', content:[{ type:'text', text:'1' }] }]
         }
       }
-    }),
+      const opts = templateArr[colIdx - 1]?.options || []
+      return {
+        type:'customTableCell',
+        attrs:{ cellType:'dropdown', dropdownValue:'', dropdownOptions:opts, dropdownColor:'#000', contenteditable:false },
+        content:[{ type:'paragraph' }]
+      }
+    })
   }
-
-  return {
-    type: 'doc',
-    content: [{ type: 'table', content: [headerRow, dataRow] }],
-  }
+  return { type:'doc', content:[{ type:'table', content:[headerRow, dataRow] }] }
 }
 
-const newParamDoc = ()=>{
-  const rows = PARAM_ROWS.map((row,rIdx)=>({
+// Build parameter table TipTap doc from 2D array rows
+// rows: string[][]
+function buildParamDocFromRows(rows) {
+  const LOCK_COLS = [0,1,7,8]
+  const trows = rows.map((row, rIdx) => ({
     type:'tableRow',
-    content: row.map((txt,cIdx)=>({
-      type: rIdx===0?'tableHeader':'customTableCell',
-      attrs: { cellType:'text', contenteditable: (rIdx===0||LOCK_COLS.includes(cIdx))?false:true },
-      content:[{type:'paragraph',content: txt?[{type:'text',text:txt}]:[]}]
+    content: row.map((txt, cIdx) => ({
+      type: rIdx === 0 ? 'tableHeader' : 'customTableCell',
+      attrs:{ cellType:'text', contenteditable: (rIdx===0 || LOCK_COLS.includes(cIdx)) ? false : true },
+      content:[{ type:'paragraph', content: txt ? [{ type:'text', text: String(txt) }] : [] }]
     }))
   }))
-  return { type:'doc', content:[{ type:'table', content:rows }] }
+  return { type:'doc', content:[{ type:'table', content:trows }] }
+}
+
+// Public: normalize condition template → TipTap doc
+function normalizeCondTemplate() {
+  const t = props.condTemplate
+  if (!t) return null
+  if (isDoc(t)) return t
+  if (Array.isArray(t)) return buildCondDocFromArray(t)
+  // unknown → null
+  return null
+}
+
+// Public: normalize parameter template → TipTap doc
+function normalizeParamTemplate() {
+  const t = props.paramTemplate
+  if (!t) return null
+  if (isDoc(t)) return t
+  if (Array.isArray(t)) return buildParamDocFromRows(t)
+  return null
+}
+
+/* ===== Tiny helpers ===== */
+const cellText = n => {
+  if (!n) return ''
+  const a = n.attrs || {}
+  if (a.cellType === 'dropdown') return a.dropdownValue || ''
+  const p = n.content?.childCount ? n.content.child(0) : null
+  return p?.type?.name === 'paragraph'
+    ? (p.content?.content || []).map(x => x.text || '').join('').trim()
+    : ''
 }
 
 /* ===== Editor init ===== */
-function makeCondEditor(json,onUpdate){
+function makeCondEditor(json, onUpdate) {
+  const tmplDoc = normalizeCondTemplate()
   return new Editor({
-    content: json||newCondDoc(),
+    content: json || tmplDoc || buildCondDocFromArray([]), // last fallback: empty headers
     extensions: TExt,
-    editorProps:{ 
+    editorProps:{
       handleDOMEvents:{ drop:()=>true, dragstart:()=>true, mousedown:()=>false },
       handleKeyDown(view, event) {
-        if (event.key !== 'Backspace' && event.key !== 'Delete') return false
-
+        if (!['Backspace','Delete'].includes(event.key)) return false
         const sel = view.state.selection
         if (!(sel instanceof CellSelection)) return false
-
-        const { state } = view
-        let tr = state.tr
-        const cells = []
-
-        // collect only editable, non-header cells in the selection
-        sel.forEachCell((cell, pos) => {
+        const { state } = view; let tr = state.tr; const cells=[]
+        sel.forEachCell((cell,pos) => {
           const isHeader = cell.type.name === 'tableHeader'
           const editable = cell.attrs?.contenteditable !== false
           if (!isHeader && editable) cells.push({ cell, pos })
         })
-
-        // if nothing editable is selected, just swallow the key
-        if (cells.length === 0) {
-          event.preventDefault()
-          return true
-        }
-
-        // clear content of editable cells only (reverse order to avoid pos shifts)
+        if (!cells.length) { event.preventDefault(); return true }
         for (let i = cells.length - 1; i >= 0; i--) {
           const { cell, pos } = cells[i]
           const empty = state.schema.nodes.paragraph.create()
           const newCell = cell.type.create(cell.attrs, empty, cell.marks)
           tr = tr.replaceWith(pos, pos + cell.nodeSize, newCell)
         }
-
-        view.dispatch(tr)
-        event.preventDefault()
-        return true
+        view.dispatch(tr); event.preventDefault(); return true
       }
-
     },
-    onUpdate
+    onUpdate({ editor }) {
+      onUpdate?.({ editor })
+      // keep parent’s mcrBlocks in sync with live edits
+      syncToParent()
+    }
   })
 }
-function makeParamEditor(json,onUpdate){
+
+function makeParamEditor(json, onUpdate) {
+  const tmplDoc = normalizeParamTemplate()
   return new Editor({
-    content: json||newParamDoc(),
+    content: json || tmplDoc || buildParamDocFromRows([[]]),
     extensions: TExt,
-    editorProps:{ 
+    editorProps:{
       handleDOMEvents:{ drop:()=>true, dragstart:()=>true, mousedown:()=>false },
       handleKeyDown(view, event) {
-        if (event.key !== 'Backspace' && event.key !== 'Delete') return false
-
+        if (!['Backspace','Delete'].includes(event.key)) return false
         const sel = view.state.selection
         if (!(sel instanceof CellSelection)) return false
-
-        const { state } = view
-        let tr = state.tr
-        const cells = []
-
-        // collect only editable, non-header cells in the selection
-        sel.forEachCell((cell, pos) => {
+        const { state } = view; let tr = state.tr; const cells=[]
+        sel.forEachCell((cell,pos) => {
           const isHeader = cell.type.name === 'tableHeader'
           const editable = cell.attrs?.contenteditable !== false
           if (!isHeader && editable) cells.push({ cell, pos })
         })
-
-        // if nothing editable is selected, just swallow the key
-        if (cells.length === 0) {
-          event.preventDefault()
-          return true
-        }
-
-        // clear content of editable cells only (reverse order to avoid pos shifts)
+        if (!cells.length) { event.preventDefault(); return true }
         for (let i = cells.length - 1; i >= 0; i--) {
           const { cell, pos } = cells[i]
           const empty = state.schema.nodes.paragraph.create()
           const newCell = cell.type.create(cell.attrs, empty, cell.marks)
           tr = tr.replaceWith(pos, pos + cell.nodeSize, newCell)
         }
-
-        view.dispatch(tr)
-        event.preventDefault()
-        return true
+        view.dispatch(tr); event.preventDefault(); return true
       }
-
     },
-    onUpdate
+    onUpdate({ editor }) {
+      onUpdate?.({ editor })
+      // keep parent’s mcrBlocks in sync with live edits
+      syncToParent()
+    }
   })
 }
 
-/* ===== Public actions ===== */
+/* ===== Public actions (unchanged UI) ===== */
 function addBlock(){
   const id = idSeq++
   blocks.value.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, id, code:`XXXX${blocks.value.length + 1}`, data:{} })
@@ -358,7 +327,6 @@ function delBlock(i){
   condEditors.value[i]?.destroy(); paramEditors.value[i]?.destroy()
   blocks.value.splice(i,1); condEditors.value.splice(i,1); paramEditors.value.splice(i,1)
   blocks.value = blocks.value.map((b, i) => ({...b, code: `XXXX${i + 1}`}))
-  // re-validate after removal
   nextTick(runAllValidations)
 }
 function duplicateBlock(i){
@@ -380,76 +348,77 @@ function copyFromCode(targetIdx){
   runAllValidations(); alert('複製成功')
 }
 
-/* ===== Table 1 row ops ===== */
+/* ===== Condition table row ops (unchanged logic) ===== */
 function addCondRow(i){
   const ed = condEditors.value[i]; if (!ed) return
-
-  // 1) remember the current row index (relative to header)
   let selRowIdx = -1, curIdx = -1
   const { state } = ed
   state.doc.descendants((n,pos)=>{
     if(n.type.name==='tableRow'){
       if(curIdx === -1) curIdx = 0
       if(state.selection.$anchor.pos >= pos && state.selection.$anchor.pos < pos + n.nodeSize){
-        selRowIdx = curIdx   // header=0, first data row=1
+        selRowIdx = curIdx
       }
       curIdx++
     }
   })
   if (selRowIdx < 0){ alert('請選擇一個儲存格'); return }
-
-  // 2) add row after
   ed.chain().focus().addRowAfter().run()
 
-  // 3) AFTER doc updated, convert ONLY the new row's cells
   nextTick(()=>{
     const { state, view } = ed
     const tr = state.tr
     let rowIdx = 0, newRowNode=null, newRowPos=null
-
     state.doc.descendants((n,p)=>{
       if(n.type.name==='tableRow'){
-        if (rowIdx === selRowIdx + 1){ newRowNode = n; newRowPos = p } // this is the inserted row
+        if (rowIdx === selRowIdx + 1){ newRowNode = n; newRowPos = p }
         rowIdx++
       }
     })
     if(!newRowNode) return
 
-    // replace each cell in new row
-    let offset = 1
-    let ci = 0
-    newRowNode.forEach((cellNode, colIdx)=>{
+    // derive dropdown options from current header template
+    const tdoc = normalizeCondTemplate()
+    const header = tdoc?.content?.[0]?.content?.[0] // tableRow
+    const optionCols = []
+    if (header?.type === 'tableRow') {
+      // header: ['條件名稱', ...]
+      // use props.condTemplate (array form) if provided
+      if (Array.isArray(props.condTemplate)) {
+        optionCols.push(...props.condTemplate.map(x => x.options || []))
+      } else {
+        // fallback: empty options
+        const count = (header.content?.length || 1) - 1
+        optionCols.push(...Array.from({length: Math.max(0, count)}, ()=>[]))
+      }
+    }
+
+    let offset = 1, ci = 0
+    newRowNode.forEach((cellNode)=>{
       const cpos = newRowPos + offset
       const repl = (ci===0)
         ? state.schema.nodes.customTableCell.create(
             { cellType:'text', contenteditable:false },
-            state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx))) // new row index starts at selRowIdx (header=0)
+            state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx)))
           )
         : state.schema.nodes.customTableCell.create(
-            { cellType:'dropdown', dropdownValue:'', dropdownOptions:getOptByCol(ci), dropdownColor: '#000', contenteditable: false },
+            { cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-1] || [], dropdownColor: '#000', contenteditable: false },
             state.schema.nodes.paragraph.create()
           )
       tr.replaceWith(cpos, cpos + cellNode.nodeSize, repl)
-      offset += cellNode.nodeSize
-      ci++
+      offset += cellNode.nodeSize; ci++
     })
-
     if (tr.docChanged) view.dispatch(tr)
-
-    // 4) renumber all rows correctly (1..N) after the insertion
-    updateCondRowNumbers(ed)
-    runCondValidation()
+    updateCondRowNumbers(ed); runCondValidation()
   })
 }
-
 function delCondRow(i){
   const ed = condEditors.value[i]; if (!ed) return
-  // prevent deleting header
   const $a = ed.state.selection.$anchor
   for (let d=$a.depth; d>=0; d--){
     const n = $a.node(d)
     if(n.type.name==='tableRow'){
-      const inHeader = $a.before(d)===2 // header row is first
+      const inHeader = $a.before(d)===2
       if(inHeader) return alert('無法刪除表頭')
       ed.chain().focus().deleteRow().run()
       nextTick(()=>{ updateCondRowNumbers(ed); runCondValidation() })
@@ -463,24 +432,17 @@ function updateCondRowNumbers(ed){
   const tr = state.tr
   const table = state.doc.content.firstChild
   if (!table || table.type.name!=='table') return
-
-  // collect first-cell positions for ALL data rows (header skipped),
-  // then apply in reverse to avoid position shift issues
   const updates = []
   let rowIdx = 0
   state.doc.descendants((node,pos)=>{
     if(node.type.name==='tableRow'){
-      if(rowIdx>0){ // skip header
+      if(rowIdx>0){
         const firstCell = node.firstChild
-        if(firstCell){
-          const cellPos = pos + 1
-          updates.push({ cellPos, node:firstCell, number: rowIdx }) // rowIdx starts at 1 for first data row
-        }
+        if(firstCell){ const cellPos = pos + 1; updates.push({ cellPos, node:firstCell, number: rowIdx }) }
       }
       rowIdx++
     }
   })
-
   for (let k = updates.length - 1; k >= 0; k--){
     const u = updates[k]
     const newCell = state.schema.nodes.customTableCell.create(
@@ -489,11 +451,10 @@ function updateCondRowNumbers(ed){
     )
     tr.replaceWith(u.cellPos, u.cellPos + u.node.nodeSize, newCell)
   }
-
-  if (tr.docChanged) view.dispatch(tr)
+  if(tr.docChanged) view.dispatch(tr)
 }
 
-/* ===== Coloring (cells / marks) ===== */
+/* ===== Coloring ===== */
 function setCellColor(i,type,color){
   const ed = (type==='cond')?condEditors.value[i]:paramEditors.value[i]; if(!ed) return
   const { state, view } = ed; const { selection } = state; const tr = state.tr
@@ -513,12 +474,9 @@ function setCellColor(i,type,color){
   else ed.chain().focus().setColor(color).run()
 }
 
-/* ===== Validation – fixed & simplified ===== */
-
-/** 5.1 Row uniqueness across ALL blocks (full row key of dropdown values; ignore header & row number) */
+/* ===== Validation (unchanged) ===== */
 function runCondValidation(){
-  // build keys
-  const rows = [] // {bIdx, pos, key}
+  const rows = []
   condEditors.value.forEach((ed,bIdx)=>{
     if(!ed) return
     let r=0
@@ -526,7 +484,7 @@ function runCondValidation(){
       if(n.type.name==='tableRow'){
         if(r>0){
           const vals=[]; let ci=0
-          n.forEach(c=>{ if(ci>0) vals.push(cellText(c)); ci++ }) // skip row number col 0
+          n.forEach(c=>{ if(ci>0) vals.push(cellText(c)); ci++ })
           rows.push({ bIdx, pos:p, key:JSON.stringify(vals) })
         }
         r++
@@ -534,8 +492,7 @@ function runCondValidation(){
     })
   })
   const dupSet = new Set()
-  rows.forEach((x,i)=>{ for(let j=i+1;j<rows.length;j++) if(x.key && x.key===rows[j].key) dupSet.add(i),dupSet.add(j) })
-  // apply class to duplicate rows
+  rows.forEach((x,i)=>{ for(let j=i+1;j<rows.length;j++) if(x.key && x.key===rows[j].key){ dupSet.add(i); dupSet.add(j) }})
   condEditors.value.forEach((ed,bIdx)=>{
     if(!ed) return
     const { state, view } = ed; let r=0; const tr = state.tr
@@ -553,24 +510,19 @@ function runCondValidation(){
     if(tr.docChanged) view.dispatch(tr)
   })
 }
-
-/** Helper to get normalized numeric matrix (table 2) excluding Description col (index 9) */
 function getParamMatrix(ed){
   const mat=[]; let r=0
-  ed.state.doc.descendants((n)=>{ if(n.type.name==='tableRow'){ if(r>0){ // skip header
+  ed.state.doc.descendants((n)=>{ if(n.type.name==='tableRow'){ if(r>0){
     const row=[]; let ci=0
-    n.forEach(c=>{ if(ci>=2 && ci<=6) row.push(cellText(c) || '') ; ci++ }) // only 5 numeric cols
+    n.forEach(c=>{ if(ci>=2 && ci<=6) row.push(cellText(c) || '') ; ci++ })
     mat.push(row)
   } r++ }})
   return JSON.stringify(mat)
 }
-
-/** 6.3 Duplicate table check across blocks (compare 5 numeric columns across all rows; ignore Description) */
 function runParamDuplicateValidation(){
   const sigs = paramEditors.value.map((ed,i)=> ed?{i, sig:getParamMatrix(ed)}:null).filter(Boolean)
   const dupIdx = new Set()
   for(let a=0;a<sigs.length;a++) for(let b=a+1;b<sigs.length;b++) if(sigs[a].sig===sigs[b].sig){ dupIdx.add(sigs[a].i); dupIdx.add(sigs[b].i) }
-  // apply class to ALL data rows of dup blocks
   paramEditors.value.forEach((ed,bIdx)=>{
     if(!ed) return
     const dup = dupIdx.has(bIdx); const { state, view } = ed; const tr = state.tr; let r=0
@@ -586,102 +538,136 @@ function runParamDuplicateValidation(){
     if(tr.docChanged) view.dispatch(tr)
   })
 }
-
-/** 6.2 / 6.4 numeric cell validity (yellow empty, red non-number; also order check: upper≥opUpper≥mid≥opLower≥lower) */
 function runParamValueValidation(ed){
   const { state, view } = ed; const tr = state.tr
   const table = state.doc.content.firstChild; if(!table || table.type.name!=='table') return
-  for(let r=1;r<table.content.childCount;r++){ // skip header
-    const row = table.content.child(r); const cells=row.content; // positions
+  for(let r=1;r<table.content.childCount;r++){
+    const row = table.content.child(r); const cells=row.content
     let rowVals=[], rowStatus=[]
-    for(let c=2;c<=6;c++){ const txt = cellText(cells.child(c)); // five numeric cols
+    for(let c=2;c<=6;c++){
+      const txt = cellText(cells.child(c))
       if(txt===''){ rowVals.push(null); rowStatus.push('value-empty') }
       else if(isFinite(Number(txt))){ rowVals.push(Number(txt)); rowStatus.push('value-valid') }
       else { rowVals.push(null); rowStatus.push('value-invalid') }
     }
-    // order: 0≥1≥2≥3≥4
     for(let k=1;k<5;k++){
       const a=rowVals[k-1], b=rowVals[k]
       if(a!=null && b!=null && a<b){ rowStatus[k-1]='value-error'; rowStatus[k]='value-error' }
     }
-    // apply class
-    // compute absolute positions for each cell within row:
     let posRow = 1; for(let t=0;t<r;t++) posRow += table.content.child(t).nodeSize
     let acc=[posRow+1]; for(let t=0;t<cells.childCount-1;t++) acc.push(acc[t]+cells.child(t).nodeSize)
     rowStatus.forEach((st,idx)=>{ const cellIdx=2+idx; const at = acc[cellIdx]; tr.setNodeMarkup(at, null, { ...cells.child(cellIdx).attrs, class:st }) })
   }
   if(tr.docChanged) view.dispatch(tr)
 }
-
 function runAllValidations(){
   runCondValidation()
   paramEditors.value.forEach(ed=> ed && runParamValueValidation(ed))
   runParamDuplicateValidation()
 }
 
-/* ===== Block / editors init per index ===== */
+/* ===== init per index ===== */
 function initEditors(i) {
   const b = blocks.value[i]
   condEditors.value[i] = makeCondEditor(
-    b.data?.jsonConditionContent || newCondDoc(),
-    () => {runCondValidation()}
+    b.data?.jsonConditionContent || null,
+    () => { runCondValidation() }
   )
   paramEditors.value[i] = makeParamEditor(
-    b.data?.jsonParameterContent || newParamDoc(),
-    ({ editor }) => {
-      runParamValueValidation(editor)
-      runParamDuplicateValidation()
-    }
+    b.data?.jsonParameterContent || null,
+    ({ editor }) => { runParamValueValidation(editor); runParamDuplicateValidation() }
   )
-  nextTick(runAllValidations) // 7.1.2 pre-validation
+  nextTick(runAllValidations)
 }
 
-
-/* ===== Mount: 7.1.1 + 7.1.2 ===== */
+/* ===== Mount / Unmount ===== */
 onMounted(()=>{
-  console.log("props.dataBlocks: ", props.dataBlocks);
-  console.log("props.currentStep: ", props.currentStep);
   if (!props.dataBlocks.length){ addBlock() }
   else {
-    blocks.value = props.dataBlocks.map((blk,idx)=>({ id:idSeq++, code: blk.code || `XXXX${idx}`, data: blk.data || {} }))
+    blocks.value = props.dataBlocks.map((blk,idx)=>({
+      id:idSeq++,
+      code: blk.code || `XXXX${idx+1}`,
+      content_id: blk.content_id,
+      client_temp_id: blk.client_temp_id,
+      data: blk.data || {}
+    }))
     blocks.value.forEach((_,i)=> initEditors(i))
   }
   nextTick(syncToParent)
 })
 
-onBeforeUnmount(()=>{ 
-  const payload = exportData()
-  emit('save', payload)
-  // emit('update:dataBlocks', payload)
-  condEditors.value.forEach(e=>e?.destroy()); paramEditors.value.forEach(e=>e?.destroy()) 
+// If templates change later (e.g., user switches machine),
+// re-seed ONLY empty editors to avoid clobbering user edits.
+watch(() => props.condTemplate, () => {
+  condEditors.value.forEach((ed,i)=>{
+    const hasUserContent = !!blocks.value[i]?.data?.jsonConditionContent
+    if (!hasUserContent && ed) {
+      const doc = normalizeCondTemplate()
+      if (doc) ed.commands.setContent(doc, false)
+    }
+  })
+})
+watch(() => props.paramTemplate, () => {
+  paramEditors.value.forEach((ed,i)=>{
+    const hasUserContent = !!blocks.value[i]?.data?.jsonParameterContent
+    if (!hasUserContent && ed) {
+      const doc = normalizeParamTemplate()
+      if (doc) ed.commands.setContent(doc, false)
+    }
+  })
 })
 
-/* ===== Exports to parent (if needed) ===== */
+onBeforeUnmount(()=>{
+  const payload = exportData()
+  emit('save', payload)
+  condEditors.value.forEach(e=>e?.destroy())
+  paramEditors.value.forEach(e=>e?.destroy())
+})
+
+/* ===== Export to parent ===== */
+function extractTableArray(ed){
+  if(!ed) return []
+  const t = ed.state.doc.content.firstChild
+  if(!t || t.type.name!=='table') return []
+  const out=[]
+  t.content.forEach(row=>{
+    const r=[]
+    row.content.forEach(c=> r.push(cellText(c)))
+    out.push(r)
+  })
+  return out
+}
+
 function exportData(){
   return blocks.value.map((b,i)=>({
-    content_id: b.content_id, client_temp_id: b.client_temp_id, id:b.id, code:b.code, data:{
+    // keep code so backend can save parameter table textHeader
+    code: b.code,
+    content_id: b.content_id,
+    client_temp_id: b.client_temp_id,
+    id: b.id,
+    data:{
+      // condition
       jsonConditionContent: condEditors.value[i]?.getJSON(),
+      arrayConditionData:   extractTableArray(condEditors.value[i]),
+      // parameter
       jsonParameterContent: paramEditors.value[i]?.getJSON(),
-      arrayConditionData: extractTableArray(condEditors.value[i]),
-      arrayParameterData: extractTableArray(paramEditors.value[i])
+      arrayParameterData:   extractTableArray(paramEditors.value[i]),
+      // for parameter table “textHeader” requirement
+      paramHeaderText: b.code,
     }
   }))
 }
 
-function syncToParent(){
-  const payload = exportData()
-  emit('update:dataBlocks', payload)
+let emitTimer = null
+function syncToParent() {
+  clearTimeout(emitTimer)
+  emitTimer = setTimeout(() => emit('update:dataBlocks', exportData()), 150)
 }
 
-function extractTableArray(ed){
-  if(!ed) return []
-  const t = ed.state.doc.content.firstChild; if(!t||t.type.name!=='table') return []
-  const out=[]; t.content.forEach(row=>{ const r=[]; row.content.forEach(c=> r.push(cellText(c))); out.push(r) }); return out
-}
-
-/* expose methods optionally */
+/* ===== expose (optional) ===== */
 defineExpose({ exportData })
 </script>
+
 
 <style scoped>
 /* .blk-wrap{padding:12px} */

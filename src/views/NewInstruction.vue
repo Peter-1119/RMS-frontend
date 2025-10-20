@@ -98,11 +98,12 @@
       <div v-if="currentStep === 5" class="step-content">
         <h2>製造條件參數一覽表</h2>
         <ManufacturingConditionRuleBlocks
-          :dataBlocks="manufacturingBlocks"
-          :machineData="form.attribute.machines"
-          :currentStep="currentStep"
-          @save="updateManufacturingTableData"
-        ></ManufacturingConditionRuleBlocks>
+          :data-blocks="mcrBlocks"
+          :cond-template="OPTS"
+          :param-template="PARAM_ROWS"
+          :current-step="currentStep"
+          @update:dataBlocks="mcrBlocks = $event"
+          @save="mcrBlocks = $event"/>
       </div>
 
       <div v-if="currentStep === 6" class="step-content">
@@ -280,17 +281,12 @@ const updateManagementTableData = (payload) => {
   managementSpecific.value = payload
 }
 
-const managementBlocks = ref([
-  // one layer to begin with; first element’s data[0] is the "title + selector" row
-  { id: 0, step: 3, tier: 2, data: [
-      { content_id: null, client_temp_id: `tmp-0`, option: 0, jsonHeader: null, jsonContent: null, files: [] }
-  ] }
-])
+const managementBlocks = ref([])
 
 // const managementBlocks = ref([{ id: 0, step: 3, tier: 1, data: {} }])
 const addManagementLayer = () => {
   managementBlocks.value.push({
-    id: ++itemID, step: 3, tier: managementBlocks.value.length + 1,
+    id: ++itemID, step: 3, tier: managementBlocks.value.length + 2,
     data: [{ content_id: null, client_temp_id: `tmp-${itemID}`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
@@ -355,8 +351,96 @@ const serializeManagementStep = () => {
 }
 
 // ---------- 製造條件參數一覽表 (step 5) ----------
-const manufacturingBlocks = ref([])
-const updateManufacturingTableData = payload => { manufacturingBlocks.value = payload }
+const mcrBlocks = ref([])
+const paramTemplate = ref(null)   // tiptap JSON for parameter table
+const condTemplate  = ref(null)   // tiptap JSON for condition table
+
+const OPTS = [
+  {name: "銅電式樣", options: [{label:'全鍍',value:'full_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'局部銅電鍍',value:'partial_copper_plating'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'}]},
+  {name: "製品式樣", options: [{label:'雙面板',value:'double_sided'},{label:'多層板外層',value:'mlb_outer'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'多層板內外層局部銅電鍍品',value:'mlb_inner_outer_partial'},{label:'無鍍銅品',value:'no_plating'},{label:'多層板',value:'mlb'},{label:'多層板外層線路',value:'mlb_outer_circuit'},{label:'多層板外層局部銅電鍍品',value:'mlb_outer_partial'},{label:'全板銅電鍍品',value:'full_board_plating'},{label:'局部銅電鍍品',value:'partial_plating'},{label:'多層板內層',value:'mlb_inner'},{label:'單面板',value:'single_sided'},{label:'FP品目',value:'fp_item'},{label:'單面板雙面銅材無鍍銅',value:'single_sided_double_copper_no_plating'}]},
+  {name: "流程", options: [{label:'RTR',value:'rtr'},{label:'RTS',value:'rts'},{label:'SBS',value:'sbs'}]},
+  {name: "原銅厚度", options: [{label:'1',value:'1'},{label:'1/2',value:'1/2'},{label:'1/3',value:'1/3'},{label:'1/4',value:'1/4'}]},
+  {name: "鍍銅厚度", options: [{label:'8',value:'8'},{label:'10',value:'10'},{label:'12',value:'12'},{label:'14',value:'14'},{label:'15',value:'15'},{label:'18',value:'18'}]},
+  {name: "銅材種類", options: [{label:'ED銅',value:'ed_copper'},{label:'非HA銅',value:'non_ha_copper'},{label:'HA銅',value:'ha_copper'},{label:'LCP材',value:'lcp_material'},{label:'LCP',value:'lcp'}]},
+  {name: "乾膜種類", options: [{label:'ADC-301',value:'adc_301'},{label:'FF-1030',value:'ff_1030'},{label:'HS-930',value:'hs_930'},{label:'HW-630',value:'hw_630'},{label:'AQ-209A',value:'aq_209a'},{label:'HY-920',value:'hy_920'},{label:'ADW-401',value:'adw_401'},{label:'H-9540',value:'h_9540'},{label:'FF-1040',value:'ff_1040'},{label:'FF-1020',value:'ff_1020'},{label:'AQ-1558',value:'aq_1558'}]},
+]
+const PARAM_ROWS = [
+  ['槽體','管理項目','規格上限','操作上限','中值','操作下限','規格下限','單位','參數下放','說明'],
+  ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
+  ['熱水洗1','溫度','','','','','','℃','Y',''],
+  ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
+  ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
+  ['剝膜1','作業溫度','','','','','','℃','Y','']
+]
+
+const requestConditionParameterDataStructure = async() => {
+  if (form.attribute.machines.length == 0)
+    return;
+
+  try {
+    const { conditiondata } = await axios.get(`${API_BASE_URL}/get-condition-data`)
+    condTemplate.value = conditiondata.data
+    const { parameterdata } = await axios.get(`${API_BASE_URL}/get-parameter-data`)
+    paramTemplate.value = parameterdata.data
+  } catch (e) {
+    condTemplate.value = OPTS
+    paramTemplate.value = PARAM_ROWS
+    console.error('get condition data failed:', e)
+    alert('取得條件參數失敗')
+    return null
+  }
+}
+
+const loadMCR = async (t) => {
+  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/mcr`)
+  console.log("MCR data: ", data)
+  if (!data?.success) return
+  mcrBlocks.value = (data.blocks || []).map((b, i) => ({
+    id: i + 1,
+    code: b.code || `XXXX${i+1}`,
+    data: {
+      jsonParameterContent: b.data?.jsonParameterContent || null,
+      arrayParameterData:   b.data?.arrayParameterData   || [],
+      jsonConditionContent: b.data?.jsonConditionContent || null,
+      arrayConditionData:   b.data?.arrayConditionData   || [],
+    }
+  }))
+}
+
+const serializeMCRows = () => {
+  // mcrBlocks: [{ code, data:{ jsonParameterContent, arrayParameterData, jsonConditionContent, arrayConditionData } }]
+  const rows = []
+  mcrBlocks.value.forEach((blk, i) => {
+    const tier = i + 1
+    // sub_no 0 — parameter table (code in header_text)
+    rows.push({
+      step_type: 2,
+      tier_no: tier,
+      sub_no: 0,
+      content_type: 2,
+      header_text: blk.code || `XXXX${tier}`,
+      header_json: null,
+      content_json: blk.data?.jsonParameterContent || null,
+      array_content: blk.data?.arrayParameterData || [],   // -> backend writes to content_text
+      files: null,
+      metadata: { source: 'mcr-parameter' },
+    })
+    // sub_no 1 — condition table
+    rows.push({
+      step_type: 2,
+      tier_no: tier,
+      sub_no: 1,
+      content_type: 2,
+      header_text: null,               // no textHeader here
+      header_json: null,
+      content_json: blk.data?.jsonConditionContent || null,
+      array_content: blk.data?.arrayConditionData || [],   // -> backend writes to content_text
+      files: null,
+      metadata: { source: 'mcr-condition' },
+    })
+  })
+  return rows
+}
 
 // ---------- 異常處置 (step 6) ----------
 const exceptionBlocks = ref([])
@@ -453,6 +537,9 @@ const saveDraft = async () => {
       rows: mgmtRows,
     })
 
+    const mcrRows = serializeMCRows()
+    await axios.post(`${API_BASE_URL}/drafts/save-mcr`, { token: t, rows: mcrRows })
+
     alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
     console.error(e)
@@ -485,10 +572,7 @@ onMounted(async () => {
           id: 0,
           step: 3,
           tier: specific.tier_no || 1,
-          data: {
-            jsonContent: specific.content_json || null,
-            arrayData: specific.arrayData || []
-          }
+          data: {jsonContent: specific.content_json || null, arrayData: specific.arrayData || []}
         }
       }
 
@@ -506,6 +590,8 @@ onMounted(async () => {
           files: it.files || []
         }))
       }))
+
+      loadMCR(t)
     }
   } catch (e) {
     console.error(e)
