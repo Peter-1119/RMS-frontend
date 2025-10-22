@@ -230,7 +230,7 @@ const handleImageUpload = async (evt, idx) => {
   try {
     const fd = new FormData()
     fd.append('file', file)
-    const res = await fetch(`${API_BASE_URL}/api/upload/image`, { method: 'POST', body: fd })
+    const res = await fetch(`${API_BASE_URL}/uploads/image`, { method: 'POST', body: fd })
     const result = await res.json()
     if (!result.success) throw new Error(result.message || 'upload failed')
 

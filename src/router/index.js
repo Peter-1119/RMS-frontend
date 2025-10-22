@@ -7,7 +7,7 @@ import DraftDocuments from '@/views/DraftDocuments.vue';
 import SubmittedDocuments from '@/views/SubmittedDocuments.vue';
 import RejectedDocuments from '@/views/RejectedDocuments.vue';
 import SpecificationParamPage from '@/views/SpecificationParamPage.vue';
-// import NewSpecification from "@/views/NewSpecification.vue"
+import NewSpecification from "@/views/NewSpecification.vue"
 import ParametersSearch from '@/views/ParametersSearch.vue';
 
 const routes = [
@@ -16,7 +16,7 @@ const routes = [
   {path: '/home',               name: 'home-alias',         component: HomeView,                  meta: { requiresAuth: true }},
   {path: '/Specification',      name: 'Specification',      component: SpecificationParamPage,    meta: { requiresAuth: true }},
   {path: '/new-instruction',    name: 'new-instruction',    component: NewInstruction,            meta: { requiresAuth: true }},
-//   {path: "/new-specification",  name: "new-specification",  component: NewSpecification,          meta: { requiresAyth: true }},
+  {path: "/new-specification",  name: "new-specification",  component: NewSpecification,          meta: { requiresAyth: true }},
   {path: '/SearchPage',         name: 'SearchPage',         component: SearchPage,                meta: { requiresAuth: true }},
   {path: '/DraftDocuments',     name: 'DraftDocuments',     component: DraftDocuments,            meta: { requiresAuth: true }},
   {path: '/SubmittedDocuments', name: 'SubmittedDocuments', component: SubmittedDocuments,        meta: { requiresAuth: true }},
@@ -70,6 +70,10 @@ router.beforeEach((to, from, next) => {
   // leaving new-instruction → clear
   if (from?.name === 'new-instruction' && to?.name !== 'new-instruction') {
     localStorage.removeItem('rms:draft:new-instruction')
+  }
+
+  if (from?.name === 'new-specification' && to?.name !== 'new-specification') {
+    localStorage.removeItem('rms:draft:new-specification')
   }
 
   // entering new-instruction WITHOUT ?token

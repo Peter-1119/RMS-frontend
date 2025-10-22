@@ -168,19 +168,29 @@ async function handleFile(ev){
   uploading.value = true
   try{
     const ext = (f.name.split('.').pop()||'').toLowerCase()
-    const url = `${API_BASE_URL}/api/upload/image?token=${props.token}`
+
     if(ext==='drawio'){
-      const fd = new FormData(); fd.append('drawioFile', f)
-      const res = await axios.post(`${API_BASE_URL}/drawioToPng`, fd, { responseType:'arraybuffer', headers:{'Content-Type':'multipart/form-data'} })
-      const blob = new Blob([res.data], {type:'image/png'})
-      const png = new File([blob], `flow_${Date.now()}.png`, {type:'image/png'})
-      const up = new FormData(); up.append('file', png)
-      const r = await axios.post(url, up)
-      if(!r.data?.success) throw new Error(r.data?.message||'upload failed')
-      m.value.file = { asset_id: r.data.asset_id, url: r.data.url, path: r.data.path_to_save }
+      const fd = new FormData()
+      // our backend accepts either 'file' or 'drawioFile'
+      fd.append('file', f)  // or fd.append('drawioFile', f)
+      const r = await axios.post(
+        `${API_BASE_URL}/uploads/drawio?token=${props.token}`,
+        fd,
+        { headers:{'Content-Type':'multipart/form-data'} }
+      )
+      if(!r.data?.success) throw new Error(r.data?.message||'convert failed')
+      m.value.file = {
+        asset_id: r.data.asset_id || null,
+        url: r.data.url,
+        path: r.data.path_to_save
+      }
     }else{
       const up = new FormData(); up.append('file', f)
-      const r = await axios.post(url, up)
+      const r = await axios.post(
+        `${API_BASE_URL}/uploads/image?token=${props.token}`,
+        up,
+        { headers:{'Content-Type':'multipart/form-data'} }
+      )
       if(!r.data?.success) throw new Error(r.data?.message||'upload failed')
       m.value.file = { asset_id: r.data.asset_id, url: r.data.url, path: r.data.path_to_save }
     }

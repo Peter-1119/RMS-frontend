@@ -118,7 +118,7 @@ export default {
         async fetchSpecifications(keyword) {
             try{
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/MES-get-specifics", {params: {keyword, machine: this.machineKeyword}});
+                const response = await axios.get(API_BASE_URL + "/mes/specifics", {params: {keyword, machine: this.machineKeyword}});
                 this.specificationOptions = response.data.data.specifics;
                 console.log("specificaion options: ", this.specificationOptions);
 
@@ -145,7 +145,7 @@ export default {
 
             try{
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/MES-get-groups-machines", {params: {specific: specification}});
+                const response = await axios.get(API_BASE_URL + "/mes/groups-machines", {params: {specific: specification}});
                 this.allGroups = response.data.data.groups;
                 console.log("allGroups: ", this.allGroups);
             }
@@ -177,7 +177,7 @@ export default {
         async fetchConditionMachines(condition_id) {
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/get-condition-machines", {params: {condition_id}});
+                const response = await axios.get(API_BASE_URL + "/conditions/get-condition-machines", {params: {condition_id}});
                 this.groups = response.data.data.groups;
             }
 
@@ -388,7 +388,7 @@ export default {
                         formData.append('condition-parameters', JSON.stringify({parametersToAdd, parametersToDelete}));
                     }
                     const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                    const response = await axios.post(API_BASE_URL + "/update-condition-data", formData);
+                    const response = await axios.post(API_BASE_URL + "/conditions/update-condition-data", formData);
                     console.log("response: ", response.data.data.message);
                 }
                 catch (error) {

@@ -172,7 +172,7 @@ export default {
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
         const params = { project: this.project, keyword: this.keyword }
-        const { data } = await axios.get(`${API_BASE_URL}/MES-get-groups-machines`, { params })
+        const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, { params })
         const groupsPayload = (data && data.data && data.data.groups) || {}
 
         const gm = {}
