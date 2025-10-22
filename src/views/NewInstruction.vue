@@ -209,7 +209,6 @@ import {
   saveBlocks,   loadBlocks,
   saveParams,   loadParams,
   saveReferences, loadReferences,
-  saveProcessFlow,  loadProcessFlow 
 } from '@/api/docsApi'
 
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
@@ -340,8 +339,6 @@ const addManagementLayer = () => {
   })
 }
 const removeManagementLayer = id => {
-  console.log("management blocks: ", managementBlocks.value)
-  console.log("id: ", id)
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
 }
 const updateManagementBlockData = payload => {
@@ -548,48 +545,6 @@ const requestEIPAPI = () => {
 // ---------- saving ----------
 const isSaving = ref(false)
 
-// deep-clone to plain JSON and strip any reactive proxies
-const toPlain = v => JSON.parse(JSON.stringify(v))
-
-const serializeForSave = () => ({
-  form: toPlain(form),
-  managementBlocks: toPlain(managementBlocks.value),
-  manufacturingBlocks: toPlain(manufacturingBlocks.value),
-  exceptionBlocks: toPlain(exceptionBlocks.value),
-  relativeDocuments: toPlain(relativeDocuments.value),
-  usedForms: toPlain(usedForms.value),
-})
-
-// const loadReferences = async (t) => {
-//   const { data } = await axios.get(`${API_BASE_URL}/docs/${t}/references`)
-//   if (!data?.success) return
-
-//   // rebuild UI arrays with local incremental id
-//   let nextId = 1
-//   relativeDocuments.value = (data.documents || []).map(d => ({
-//     id: nextId++,
-//     docId: d.docId,
-//     docName: d.docName,
-//   }))
-//   usedForms.value = (data.forms || []).map(f => ({
-//     id: nextId++,
-//     formId: f.formId,
-//     formName: f.formName,
-//   }))
-// }
-
-const serializeReferences = () => ({
-  // map UI arrays to simple payloads
-  documents: (relativeDocuments.value || []).map(d => ({
-    docId: d.docId,
-    docName: d.docName,
-  })),
-  forms: (usedForms.value || []).map(f => ({
-    formId: f.formId,
-    formName: f.formName,
-  })),
-})
-
 const saveDraft = async () => {
   const t = await ensureDraftToken()
   if (!t) return
@@ -598,18 +553,6 @@ const saveDraft = async () => {
     const a = await saveAttributes(t, form)
     if (!a?.success) return alert(a?.message || '屬性儲存失敗')
 
-    // 2) process flow (save-only for now; add load if your backend exposes GET)
-    // await saveProcessFlow(t, {
-    //   tier_no: 1,
-    //   sub_no: 0,
-    //   processFlow: {
-    //     mode: processFlowData.value.mode,
-    //     cols: processFlowData.value.cols,
-    //     header_json: processFlowData.value.header_json,
-    //     items: processFlowData.value.items,
-    //     file: processFlowData.value.file,
-    //   }
-    // })
     const pfBlocks = serializeProcessFlowToBlocks(processFlowData.value)
     await saveBlocks(t, 0, pfBlocks)  // step_type = 0
 
@@ -648,8 +591,6 @@ onMounted(async () => {
     if (a?.success) Object.assign(form, a.form || {})
 
     // 2) process flow (only if you add GET in backend)
-    // const pf = await loadProcessFlow(t)
-    // if (pf?.success && pf.processFlow) processFlowData.value = pf.processFlow
     const pfResp = await loadBlocks(t, 0)
     if (pfResp?.success) processFlowData.value = loadProcessFlowFromBlocks(pfResp)
 
