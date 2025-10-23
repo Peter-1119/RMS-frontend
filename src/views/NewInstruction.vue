@@ -203,27 +203,26 @@ import ManufacturingConditionRuleBlocks from '@/components/ManufacturingConditio
 import DocSearchWindow from '@/components/DocSearchWindow.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
-
+import { initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
-
-const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
 // --- ensure we have a server-side token row ---
 const ensureDraftToken = async () => {
   if (draftToken.value) return draftToken.value
   try {
-    const { data } = await axios.post(`${API_BASE_URL}/drafts/init`)
-    if (data?.success && data.token) {
-      setToken(data.token)                  // keep in URL + localStorage
-      return data.token
+    const res = await initDoc(0)
+    if (res?.success && res.token) {
+      setToken(res.token)
+      return res.token
     }
-    throw new Error(data?.message || 'init failed')
+    throw new Error(res?.message || 'init failed')
   } catch (e) {
-    console.error('drafts/init failed:', e)
+    console.error('docs/init failed:', e)
     alert('建立草稿代碼失敗，請稍後再試')
     return null
   }
 }
+
 
 // ---------- nav / steps ----------
 const currentStep = ref(1)
@@ -273,6 +272,46 @@ const processFlowData = ref({
   file: null,                   // { asset_id, url, path }
 })
 
+// process-flow <-> blocks (step_type = 0)
+function serializeProcessFlowToBlocks(pf) {
+  if (pf.mode === 'table') {
+    return [{
+      tier: 1,
+      data: [{
+        option: 2,
+        jsonHeader: pf.header_json || null,
+        jsonContent: { cols: Number(pf.cols || 9), items: Array.isArray(pf.items) ? pf.items : [] },
+        files: []
+      }]
+    }]
+  }
+  return [{
+    tier: 1,
+    data: [{
+      option: 1,
+      jsonHeader: pf.header_json || null,
+      jsonContent: null,
+      files: pf.file ? [pf.file] : []
+    }]
+  }]
+}
+
+// from blocks (for load)
+function loadProcessFlowFromBlocks(resp) {
+  const firstTier = (resp?.blocks || [])[0]
+  const first = (firstTier?.data || [])[0]
+  if (!first) return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+
+  if (first.option === 2) {
+    const cj = first.jsonContent || {}
+    return { mode: 'table', cols: Number(cj.cols || 9), header_json: first.jsonHeader || null, items: Array.isArray(cj.items) ? cj.items : [], file: null }
+  }
+  if (first.option === 1) {
+    return { mode: 'image', cols: 9, header_json: first.jsonHeader || null, items: [], file: (first.files || [])[0] || null }
+  }
+  return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+}
+
 // ---------- 管理條件 (step 4) ----------
 const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
 
@@ -291,8 +330,6 @@ const addManagementLayer = () => {
   })
 }
 const removeManagementLayer = id => {
-  console.log("management blocks: ", managementBlocks.value)
-  console.log("id: ", id)
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
 }
 const updateManagementBlockData = payload => {
@@ -300,54 +337,71 @@ const updateManagementBlockData = payload => {
   if (idx !== -1) managementBlocks.value[idx] = payload
 }
 
-const serializeManagementStep = () => {
-  const rows = []
+const serializeManagementToBlocks = () => {
+  // shape expected by /docs/blocks/save:
+  // [{ tier, data:[ {option, jsonHeader, jsonContent, files} ] }, ...]
+  const out = []
 
-  // 3.1 管理基本條件 (table) -> sub_no = 1
+  // 3.1 specific — treat as tier 1 with a single table (option=2)
   if (managementSpecific.value?.data?.jsonContent) {
-    rows.push({
-      step_type: 1,                  // 管理條件
-      tier_no: managementSpecific.value.tier || 1,
-      sub_no: 1,                     // 固定 3.1
-      content_type: 2,               // table
-      header_json: null,             // 3.1 沒有標題編輯器就留 null
-      header_text: null,
-      content_json: managementSpecific.value.data.jsonContent,
-      content_text: null,            // 可不存純文字
-      files: [],                     // 3.1 沒有 files 欄位
-      metadata: { source: 'mgmt-3.1' }
+    out.push({
+      tier: managementSpecific.value.tier || 1,
+      data: [{
+        option: 2,
+        jsonHeader: null,
+        jsonContent: managementSpecific.value.data.jsonContent,
+        files: []
+      }]
     })
   }
 
-  // 3.2+ 其他管理條件 (DynamicEditorBlock)
-  // 每個 tier 一個 block，每個 block 的 data[] 是一組小節
+  // 3.2+ dynamic — each UI block is a tier
   managementBlocks.value.forEach(blk => {
-    const tier = blk.tier
-    blk.data.forEach((item, idx) => {
-      // map option → content_type
-      // 0: title only → 0 (we still store header_json)
-      // 1: text&picture → 1 (store header_json, content_text/json optional, files)
-      // 2: table → 2 (store header_json, content_json; table images are inside json)
-      const content_type =
-        item.option === 0 ? 0 :
-        item.option === 1 ? 1 : 2
-
-      rows.push({
-        step_type: 1,                      // 管理條件
-        tier_no: tier,
-        sub_no: idx + 2,                   // 從 3.2 開始
-        content_type,
-        header_json: item.jsonHeader || null,
-        header_text: null,                 // 你不需要搜尋就不存
-        content_json: content_type === 2 ? (item.jsonContent || null) : null,
-        content_text: content_type === 1 ? null : null, // 如需，這裡可放純文字摘要
-        files: Array.isArray(item.files) ? item.files : [],
-        metadata: { source: 'mgmt-dynamic' }
-      })
+    out.push({
+      tier: blk.tier,
+      data: (blk.data || []).map(it => ({
+        option: it.option ?? 0,            // 0 title / 1 text-img / 2 table
+        jsonHeader: it.jsonHeader || null,
+        jsonContent: it.jsonContent || null,
+        files: Array.isArray(it.files) ? it.files : []
+      }))
     })
   })
+  return out
+}
 
-  return rows
+const loadManagementFromBlocks = (payload) => {
+  // payload.blocks: [{ tier, data:[...] }]
+  // Rebuild your two UIs: first row as “specific” (if table), others as dynamic.
+  managementSpecific.value = { id: 0, step: 3, tier: 1, data: { jsonContent: null, arrayData: [] } }
+  managementBlocks.value = []
+
+  ;(payload.blocks || []).forEach((blk, i) => {
+    const first = (blk.data || [])[0]
+    // heuristic: if this tier has exactly one item and it's a table, use it as 3.1
+    if (i === 0 && first && first.option === 2) {
+      managementSpecific.value = {
+        id: 0,
+        step: 3,
+        tier: blk.tier,
+        data: { jsonContent: first.jsonContent || null, arrayData: [] }
+      }
+    } else {
+      managementBlocks.value.push({
+        id: i + 1,
+        step: 3,
+        tier: blk.tier,
+        data: (blk.data || []).map(it => ({
+          content_id: null,
+          client_temp_id: null,
+          option: it.option ?? 0,
+          jsonHeader: it.jsonHeader || null,
+          jsonContent: it.jsonContent || null,
+          files: it.files || []
+        }))
+      })
+    }
+  })
 }
 
 // ---------- 製造條件參數一覽表 (step 5) ----------
@@ -373,73 +427,31 @@ const PARAM_ROWS = [
   ['剝膜1','作業溫度','','','','','','℃','Y','']
 ]
 
-const requestConditionParameterDataStructure = async() => {
-  if (form.attribute.machines.length == 0)
-    return;
-
-  try {
-    const { conditiondata } = await axios.get(`${API_BASE_URL}/get-condition-data`)
-    condTemplate.value = conditiondata.data
-    const { parameterdata } = await axios.get(`${API_BASE_URL}/get-parameter-data`)
-    paramTemplate.value = parameterdata.data
-  } catch (e) {
-    condTemplate.value = OPTS
-    paramTemplate.value = PARAM_ROWS
-    console.error('get condition data failed:', e)
-    alert('取得條件參數失敗')
-    return null
-  }
-}
-
-const loadMCR = async (t) => {
-  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/mcr`)
-  console.log("MCR data: ", data)
-  if (!data?.success) return
-  mcrBlocks.value = (data.blocks || []).map((b, i) => ({
-    id: i + 1,
-    code: b.code || `XXXX${i+1}`,
-    data: {
-      jsonParameterContent: b.data?.jsonParameterContent || null,
-      arrayParameterData:   b.data?.arrayParameterData   || [],
-      jsonConditionContent: b.data?.jsonConditionContent || null,
-      arrayConditionData:   b.data?.arrayConditionData   || [],
-    }
+// NEW — send both parameter & condition for each tier
+const serializeMCRToParams = () => {
+  return (mcrBlocks.value || []).map((blk, i) => ({
+    tier_no: i + 1,
+    code: blk.code || `XXXX${i + 1}`,
+    jsonParameterContent: blk.data?.jsonParameterContent || null,
+    arrayParameterData:   blk.data?.arrayParameterData   || [],
+    jsonConditionContent: blk.data?.jsonConditionContent || null,
+    arrayConditionData:   blk.data?.arrayConditionData   || [],
   }))
 }
 
-const serializeMCRows = () => {
-  // mcrBlocks: [{ code, data:{ jsonParameterContent, arrayParameterData, jsonConditionContent, arrayConditionData } }]
-  const rows = []
-  mcrBlocks.value.forEach((blk, i) => {
-    const tier = i + 1
-    // sub_no 0 — parameter table (code in header_text)
-    rows.push({
-      step_type: 2,
-      tier_no: tier,
-      sub_no: 0,
-      content_type: 2,
-      header_text: blk.code || `XXXX${tier}`,
-      header_json: null,
-      content_json: blk.data?.jsonParameterContent || null,
-      array_content: blk.data?.arrayParameterData || [],   // -> backend writes to content_text
-      files: null,
-      metadata: { source: 'mcr-parameter' },
-    })
-    // sub_no 1 — condition table
-    rows.push({
-      step_type: 2,
-      tier_no: tier,
-      sub_no: 1,
-      content_type: 2,
-      header_text: null,               // no textHeader here
-      header_json: null,
-      content_json: blk.data?.jsonConditionContent || null,
-      array_content: blk.data?.arrayConditionData || [],   // -> backend writes to content_text
-      files: null,
-      metadata: { source: 'mcr-condition' },
-    })
-  })
-  return rows
+// NEW — rebuild the exact structure you render
+const loadMCRFromParams = (payload) => {
+  // payload.blocks: [{id, code, jsonParameterContent, arrayParameterData, jsonConditionContent, arrayConditionData}]
+  mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
+    id: i + 1,
+    code: b.code || `XXXX${i + 1}`,
+    data: {
+      jsonParameterContent: b.jsonParameterContent || null,
+      arrayParameterData:   b.arrayParameterData   || [],
+      jsonConditionContent: b.jsonConditionContent || null,
+      arrayConditionData:   b.arrayConditionData   || [],
+    },
+  }))
 }
 
 // ---------- 異常處置 (step 6) ----------
@@ -459,50 +471,31 @@ const updateExceptionBlockData = payload => {
   if (idx !== -1) exceptionBlocks.value[idx] = payload
 }
 
-const serializeExceptionRows = () => {
-  // exceptionBlocks: [{ id, step:5, tier, data:[{ option, jsonHeader, jsonContent, files:[] }, ...] }, ...]
-  const rows = []
-  exceptionBlocks.value
+const serializeExceptionsToBlocks = () => {
+  return (exceptionBlocks.value || [])
     .sort((a,b) => (a.tier||0) - (b.tier||0))
-    .forEach(blk => {
-      const tier = blk.tier
-      ;(blk.data || []).forEach((item, idx) => {
-        const ct =
-          item.option === 0 ? 0 :
-          item.option === 1 ? 1 : 2
-
-        rows.push({
-          step_type: 3,                  // <— EXCEPTIONS
-          tier_no: tier,
-          sub_no: idx + 1,               // 6.1, 6.2, ...
-          content_type: ct,
-          header_text: null,             // we keep title as TipTap JSON (header_json)
-          header_json: item.jsonHeader || null,
-          content_text: null,            // optional plain text; keep null for now
-          content_json: ct === 2 ? (item.jsonContent || null) : null,
-          files: Array.isArray(item.files) ? item.files : [],
-          metadata: { source: 'exceptions' },
-        })
-      })
-    })
-  return rows
+    .map(blk => ({
+      tier: blk.tier,
+      data: (blk.data || []).map(it => ({
+        option: it.option ?? 0,              // 0/1/2 map to content_type
+        jsonHeader: it.jsonHeader || null,
+        jsonContent: it.jsonContent || null,
+        files: Array.isArray(it.files) ? it.files : []
+      }))
+    }))
 }
 
-const loadExceptions = async (t) => {
-  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/exceptions`)
-  if (!data?.success) return
-
-  // Build the structure DynamicEditorBlock expects
-  exceptionBlocks.value = (data.blocks || []).map((blk, i) => ({
+const loadExceptionsFromBlocks = (payload) => {
+  exceptionBlocks.value = (payload.blocks || []).map((blk, i) => ({
     id: i + 1,
-    step: 5,                         // your UI step number (not stored in DB)
-    tier: blk.tier_no,
-    data: (blk.items || []).map(it => ({
-      content_id: it.content_id || null,
-      client_temp_id: it.client_temp_id || null,
-      option: it.content_type === 0 ? 0 : it.content_type === 1 ? 1 : 2,
-      jsonHeader: it.header_json || null,
-      jsonContent: it.content_json || null,
+    step: 5,
+    tier: blk.tier,
+    data: (blk.data || []).map(it => ({
+      content_id: null,
+      client_temp_id: null,
+      option: it.option ?? 0,
+      jsonHeader: it.jsonHeader || null,
+      jsonContent: it.jsonContent || null,
       files: it.files || []
     }))
   }))
@@ -543,87 +536,34 @@ const requestEIPAPI = () => {
 // ---------- saving ----------
 const isSaving = ref(false)
 
-// deep-clone to plain JSON and strip any reactive proxies
-const toPlain = v => JSON.parse(JSON.stringify(v))
-
-const serializeForSave = () => ({
-  form: toPlain(form),
-  managementBlocks: toPlain(managementBlocks.value),
-  manufacturingBlocks: toPlain(manufacturingBlocks.value),
-  exceptionBlocks: toPlain(exceptionBlocks.value),
-  relativeDocuments: toPlain(relativeDocuments.value),
-  usedForms: toPlain(usedForms.value),
-})
-
-const loadReferences = async (t) => {
-  const { data } = await axios.get(`${API_BASE_URL}/drafts/${t}/references`)
-  if (!data?.success) return
-
-  // rebuild UI arrays with local incremental id
-  let nextId = 1
-  relativeDocuments.value = (data.documents || []).map(d => ({
-    id: nextId++,
-    docId: d.docId,
-    docName: d.docName,
-  }))
-  usedForms.value = (data.forms || []).map(f => ({
-    id: nextId++,
-    formId: f.formId,
-    formName: f.formName,
-  }))
-}
-
-const serializeReferences = () => ({
-  // map UI arrays to simple payloads
-  documents: (relativeDocuments.value || []).map(d => ({
-    docId: d.docId,
-    docName: d.docName,
-  })),
-  forms: (usedForms.value || []).map(f => ({
-    formId: f.formId,
-    formName: f.formName,
-  })),
-})
-
 const saveDraft = async () => {
   const t = await ensureDraftToken()
   if (!t) return
-
   try {
     // 1) attributes
-    const { data: a } = await axios.post(`${API_BASE_URL}/drafts/save`, {
-      token: t,
-      form,
-    })
+    const a = await saveAttributes(t, form)
     if (!a?.success) return alert(a?.message || '屬性儲存失敗')
 
-    // 2) process flow (你已經有)
-    await axios.post(`${API_BASE_URL}/drafts/save-process-flow`, {
-      token: t,
-      processFlow: {
-        mode: processFlowData.value.mode,
-        cols: processFlowData.value.cols,
-        header_json: processFlowData.value.header_json,
-        items: processFlowData.value.items,
-        file: processFlowData.value.file,
-      }
+    const pfBlocks = serializeProcessFlowToBlocks(processFlowData.value)
+    await saveBlocks(t, 0, pfBlocks)  // step_type = 0
+
+    // 3) management → generic blocks (step_type = 1)
+    const mgmtBlocks = serializeManagementToBlocks()
+    await saveBlocks(t, 1, mgmtBlocks)
+
+    // 4) MCR parameters
+    const paramsPayload = serializeMCRToParams()
+    await saveParams(t, paramsPayload, 2) // step_type=2
+
+    // 5) exceptions → generic blocks (step_type = 3)
+    const excBlocks = serializeExceptionsToBlocks()
+    await saveBlocks(t, 3, excBlocks)
+
+    // 6) references
+    await saveReferences(t, {
+      documents: (relativeDocuments.value || []).map(d => ({ docId: d.docId, docName: d.docName })),
+      forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })),
     })
-
-    // 3) management step (NEW)
-    const mgmtRows = serializeManagementStep()
-    await axios.post(`${API_BASE_URL}/drafts/save-management`, {
-      token: t,
-      rows: mgmtRows,
-    })
-
-    const mcrRows = serializeMCRows()
-    await axios.post(`${API_BASE_URL}/drafts/save-mcr`, { token: t, rows: mcrRows })
-
-    const excRows = serializeExceptionRows()
-    await axios.post(`${API_BASE_URL}/drafts/save-exceptions`, { token: t, rows: excRows })
-
-    const { documents, forms } = serializeReferences()
-    await axios.post(`${API_BASE_URL}/drafts/save-references`, { token: t, documents, forms })
 
     alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
   } catch (e) {
@@ -632,63 +572,44 @@ const saveDraft = async () => {
   }
 }
 
-
+// ---------- Load on mount ----------
 onMounted(async () => {
   const t = await ensureDraftToken()
   if (!t) return
-
   try {
     // 1) attributes
-    const res = await axios.get(`${API_BASE_URL}/drafts/${t}`)
-    if (res.data?.success) Object.assign(form, res.data.form || {})
+    const a = await loadAttributes(t)
+    if (a?.success) Object.assign(form, a.form || {})
 
-    // 2) process flow
-    const pf = await axios.get(`${API_BASE_URL}/drafts/${t}/process-flow`)
-    if (pf.data?.success) processFlowData.value = pf.data.processFlow
+    // 2) process flow (only if you add GET in backend)
+    const pfResp = await loadBlocks(t, 0)
+    if (pfResp?.success) processFlowData.value = loadProcessFlowFromBlocks(pfResp)
 
-    // 3) management step (NEW → rebuild your two UIs)
-    const mg = await axios.get(`${API_BASE_URL}/drafts/${t}/management`)
-    if (mg.data?.success) {
-      const { specific, dynamics } = mg.data
+    // 3) management
+    const mg = await loadBlocks(t, 1) // step_type=1
+    if (mg?.success) loadManagementFromBlocks(mg)
 
-      // 3.1
-      if (specific) {
-        managementSpecific.value = {
-          id: 0,
-          step: 3,
-          tier: specific.tier_no || 1,
-          data: {jsonContent: specific.content_json || null, arrayData: specific.arrayData || []}
-        }
-      }
+    // 4) MCR
+    const mp = await loadParams(t, 2)
+    if (mp?.success) loadMCRFromParams(mp)
 
-      // 3.2+ dynamic
-      managementBlocks.value = (dynamics || []).map((blk, i) => ({
-        id: i + 1,
-        step: 3,
-        tier: blk.tier_no,
-        data: blk.items.map(it => ({
-          content_id: it.content_id || null,
-          client_temp_id: it.client_temp_id || null,
-          option: it.option,                // 0/1/2
-          jsonHeader: it.jsonHeader || null,
-          jsonContent: it.jsonContent || null,
-          files: it.files || []
-        }))
-      }))
+    // 5) exceptions
+    const ex = await loadBlocks(t, 3)
+    if (ex?.success) loadExceptionsFromBlocks(ex)
 
-      await loadMCR(t)
-      await loadExceptions(t)
-      await loadReferences(t)
+    // 6) references
+    const r = await loadReferences(t)
+    if (r?.success) {
+      let nextId = 1
+      relativeDocuments.value = (r.documents || []).map(d => ({ id: nextId++, docId: d.docId, docName: d.docName }))
+      usedForms.value = (r.forms || []).map(f => ({ id: nextId++, formId: f.formId, formName: f.formName }))
     }
   } catch (e) {
     console.error(e)
     alert('載入草稿失敗')
   }
 })
-
-
 </script>
-
 
 <style scoped>
 .new-instruction-container { width: 90%; margin: 30px auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }

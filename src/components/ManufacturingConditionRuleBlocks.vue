@@ -332,7 +332,7 @@ function delBlock(i){
 function duplicateBlock(i){
   const src = blocks.value[i]; const id = idSeq++
   blocks.value.push({
-    id, code:`${src.code}_copy`, data:{
+    id, code:`XXXX${blocks.value.length + 1}`, data:{
       jsonConditionContent: condEditors.value[i].getJSON(),
       jsonParameterContent: paramEditors.value[i].getJSON()
     }

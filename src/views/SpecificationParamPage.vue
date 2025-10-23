@@ -90,7 +90,6 @@ export default {
     },
     methods: {
         async selectConditionRow(condition_index) {
-            console.log("select condition row: ", condition_index);
             this.selectedIndex = condition_index;
 
             if (condition_index == null) {
@@ -99,7 +98,7 @@ export default {
 
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/get-condition-machines", {params: {condition_id: this.conditions[condition_index].id}});
+                const response = await axios.get(API_BASE_URL + "/conditions/get-condition-machines", {params: {condition_id: this.conditions[condition_index].id}});
                 this.groups = response.data.data.groups;
             }
 
@@ -110,17 +109,15 @@ export default {
         async fetchConditions(keyword) {
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/search-conditions-by-machines", {params: {keyword}});
+                const response = await axios.get(API_BASE_URL + "/conditions/search-conditions-by-machines", {params: {keyword}});
                 this.conditions = response.data.data.conditions;
 
-                console.log("before fetch condition row selected index: ", this.selectedIndex);
                 if (this.conditions.length > 0) {
                     this.selectedIndex = (this.selectedIndex < this.conditions.length) ? this.selectedIndex : null;
                 }
                 else {
                     this.selectedIndex = null;
                 }
-                console.log("after fetch condition row selected index: ", this.selectedIndex);
             }
             catch (error) {
                 this.conditions = [];
@@ -135,7 +132,7 @@ export default {
             
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/delete-condition-by-id", {params: {condition_id: this.conditions[condition_index].id}});
+                const response = await axios.get(API_BASE_URL + "/conditions/delete-condition-by-id", {params: {condition_id: this.conditions[condition_index].id}});
                 console.log("刪除狀態: ", response);
                 console.log("刪除狀態: ", response.data.data.message);
 
@@ -162,7 +159,7 @@ export default {
         //  Handle window event
         updateConditionData() {
             this.fetchConditions("");
-            if (this.selectedIndex) {
+            if (this.selectedIndex != null) {
                 this.selectConditionRow(this.selectedIndex);
             }
         },

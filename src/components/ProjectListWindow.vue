@@ -74,7 +74,7 @@ export default {
             this.projects = []
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/MES-get-projects", {params: {keyword}});
+                const response = await axios.get(API_BASE_URL + "/mes/projects", {params: {keyword}});
                 Object.entries(response.data.data.projects).forEach(([pn, pi]) => {this.projects.push({project: pn, code: pi.code})});
             } catch (error) {
                 console.error("Error fetching projects: ", error);
