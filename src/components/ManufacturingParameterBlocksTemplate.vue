@@ -16,20 +16,6 @@
         </div>
       </div>
 
-      <!-- Condition (Table 1) -->
-      <div v-if="condEditors[i]" class="menu">
-        <div class="l">
-          <button class="btn ghost" @click="addCondRow(i)">新增列</button>
-          <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
-        </div>
-        <div class="r">
-          <i class="dot red" @click="setCellColor(i,'cond','#ff0000')"></i>
-          <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
-          <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
-        </div>
-      </div>
-      <EditorContent v-if="condEditors[i]" :editor="condEditors[i]" class="ed ed-cond" />
-
       <!-- Parameter (Table 2) -->
       <div v-if="paramEditors[i]" class="menu right">
         <div class="r">
@@ -62,11 +48,6 @@ import { CellSelection } from 'prosemirror-tables'
 /* ===== Props ===== */
 const props = defineProps({
   dataBlocks: { type: Array, default: () => [] },     // saved blocks
-  // Templates can be:
-  // 1) TipTap JSON doc (object with type:'doc')
-  // 2) Condition: Array<{ name: string, options: {label,value}[] }>
-  // 3) Parameter: 2D array of strings (header + rows)
-  condTemplate:  { type: [Object, Array], default: null },
   paramTemplate: { type: [Object, Array], default: null },
   currentStep: { type: Number, default: 0 },
 })
@@ -156,7 +137,6 @@ const TExt = [
 
 /* ===== Reactive state ===== */
 const blocks = ref([])          // {id, code, data?}
-const condEditors = ref([])     // Editor[]
 const paramEditors = ref([])    // Editor[]
 const copyCode = ref('')
 let idSeq = 0
@@ -165,39 +145,6 @@ let idSeq = 0
 
 // Is this a TipTap doc?
 const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
-
-// Build condition table TipTap doc from lightweight template:
-// template: Array<{name:string, options:Array<{label,value}>}>
-function buildCondDocFromArray(templateArr) {
-  const headers = ['條件名稱', ...templateArr.map(x => x.name)]
-  const headerRow = {
-    type:'tableRow',
-    content: headers.map(h => ({
-      type:'tableHeader',
-      attrs:{ contenteditable:false },
-      content:[{ type:'paragraph', content:[{ type:'text', text:h }] }]
-    }))
-  }
-  const dataRow = {
-    type:'tableRow',
-    content: headers.map((_, colIdx) => {
-      if (colIdx === 0) {
-        return {
-          type:'customTableCell',
-          attrs:{ cellType:'text', contenteditable:false },
-          content:[{ type:'paragraph', content:[{ type:'text', text:'1' }] }]
-        }
-      }
-      const opts = templateArr[colIdx - 1]?.options || []
-      return {
-        type:'customTableCell',
-        attrs:{ cellType:'dropdown', dropdownValue:'', dropdownOptions:opts, dropdownColor:'#000', contenteditable:false },
-        content:[{ type:'paragraph' }]
-      }
-    })
-  }
-  return { type:'doc', content:[{ type:'table', content:[headerRow, dataRow] }] }
-}
 
 // Build parameter table TipTap doc from 2D array rows
 // rows: string[][]
@@ -212,16 +159,6 @@ function buildParamDocFromRows(rows) {
     }))
   }))
   return { type:'doc', content:[{ type:'table', content:trows }] }
-}
-
-// Public: normalize condition template → TipTap doc
-function normalizeCondTemplate() {
-  const t = props.condTemplate
-  if (!t) return null
-  if (isDoc(t)) return t
-  if (Array.isArray(t)) return buildCondDocFromArray(t)
-  // unknown → null
-  return null
 }
 
 // Public: normalize parameter template → TipTap doc
@@ -242,42 +179,6 @@ const cellText = n => {
   return p?.type?.name === 'paragraph'
     ? (p.content?.content || []).map(x => x.text || '').join('').trim()
     : ''
-}
-
-/* ===== Editor init ===== */
-function makeCondEditor(json, onUpdate) {
-  const tmplDoc = normalizeCondTemplate()
-  return new Editor({
-    content: json || tmplDoc || buildCondDocFromArray([]), // last fallback: empty headers
-    extensions: TExt,
-    editorProps:{
-      handleDOMEvents:{ drop:()=>true, dragstart:()=>true, mousedown:()=>false },
-      handleKeyDown(view, event) {
-        if (!['Backspace','Delete'].includes(event.key)) return false
-        const sel = view.state.selection
-        if (!(sel instanceof CellSelection)) return false
-        const { state } = view; let tr = state.tr; const cells=[]
-        sel.forEachCell((cell,pos) => {
-          const isHeader = cell.type.name === 'tableHeader'
-          const editable = cell.attrs?.contenteditable !== false
-          if (!isHeader && editable) cells.push({ cell, pos })
-        })
-        if (!cells.length) { event.preventDefault(); return true }
-        for (let i = cells.length - 1; i >= 0; i--) {
-          const { cell, pos } = cells[i]
-          const empty = state.schema.nodes.paragraph.create()
-          const newCell = cell.type.create(cell.attrs, empty, cell.marks)
-          tr = tr.replaceWith(pos, pos + cell.nodeSize, newCell)
-        }
-        view.dispatch(tr); event.preventDefault(); return true
-      }
-    },
-    onUpdate({ editor }) {
-      onUpdate?.({ editor })
-      // keep parent’s mcrBlocks in sync with live edits
-      syncToParent()
-    }
-  })
 }
 
 function makeParamEditor(json, onUpdate) {
@@ -318,22 +219,21 @@ function makeParamEditor(json, onUpdate) {
 /* ===== Public actions (unchanged UI) ===== */
 function addBlock(){
   const id = idSeq++
-  blocks.value.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, id, code:`XXXX${blocks.value.length + 1}`, data:{} })
+  blocks.value.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, id, code:`XXXY${blocks.value.length + 1}`, data:{} })
   nextTick(()=> initEditors(blocks.value.length-1))
 }
 function delBlock(i){
   if (blocks.value.length===1) return alert('至少需要保留一個組合')
   if (!confirm('確定要刪除此組合嗎？')) return
-  condEditors.value[i]?.destroy(); paramEditors.value[i]?.destroy()
-  blocks.value.splice(i,1); condEditors.value.splice(i,1); paramEditors.value.splice(i,1)
-  blocks.value = blocks.value.map((b, i) => ({...b, code: `XXXX${i + 1}`}))
+  paramEditors.value[i]?.destroy()
+  blocks.value.splice(i,1); paramEditors.value.splice(i,1)
+  blocks.value = blocks.value.map((b, i) => ({...b, code: `XXXY${i + 1}`}))
   nextTick(runAllValidations)
 }
 function duplicateBlock(i){
   const src = blocks.value[i]; const id = idSeq++
   blocks.value.push({
-    id, code:`XXXX${blocks.value.length + 1}`, data:{
-      jsonConditionContent: condEditors.value[i].getJSON(),
+    id, code:`${src.code}_copy`, data:{
       jsonParameterContent: paramEditors.value[i].getJSON()
     }
   })
@@ -343,120 +243,13 @@ function copyFromCode(targetIdx){
   if (!copyCode.value) return alert('請輸入要複製的代碼')
   const srcIdx = blocks.value.findIndex(b=>b.code===copyCode.value)
   if (srcIdx<0) return alert('找不到指定的代碼')
-  condEditors.value[targetIdx].commands.setContent(condEditors.value[srcIdx].getJSON())
   paramEditors.value[targetIdx].commands.setContent(paramEditors.value[srcIdx].getJSON())
   runAllValidations(); alert('複製成功')
 }
 
-/* ===== Condition table row ops (unchanged logic) ===== */
-function addCondRow(i){
-  const ed = condEditors.value[i]; if (!ed) return
-  let selRowIdx = -1, curIdx = -1
-  const { state } = ed
-  state.doc.descendants((n,pos)=>{
-    if(n.type.name==='tableRow'){
-      if(curIdx === -1) curIdx = 0
-      if(state.selection.$anchor.pos >= pos && state.selection.$anchor.pos < pos + n.nodeSize){
-        selRowIdx = curIdx
-      }
-      curIdx++
-    }
-  })
-  if (selRowIdx < 0){ alert('請選擇一個儲存格'); return }
-  ed.chain().focus().addRowAfter().run()
-
-  nextTick(()=>{
-    const { state, view } = ed
-    const tr = state.tr
-    let rowIdx = 0, newRowNode=null, newRowPos=null
-    state.doc.descendants((n,p)=>{
-      if(n.type.name==='tableRow'){
-        if (rowIdx === selRowIdx + 1){ newRowNode = n; newRowPos = p }
-        rowIdx++
-      }
-    })
-    if(!newRowNode) return
-
-    // derive dropdown options from current header template
-    const tdoc = normalizeCondTemplate()
-    const header = tdoc?.content?.[0]?.content?.[0] // tableRow
-    const optionCols = []
-    if (header?.type === 'tableRow') {
-      // header: ['條件名稱', ...]
-      // use props.condTemplate (array form) if provided
-      if (Array.isArray(props.condTemplate)) {
-        optionCols.push(...props.condTemplate.map(x => x.options || []))
-      } else {
-        // fallback: empty options
-        const count = (header.content?.length || 1) - 1
-        optionCols.push(...Array.from({length: Math.max(0, count)}, ()=>[]))
-      }
-    }
-
-    let offset = 1, ci = 0
-    newRowNode.forEach((cellNode)=>{
-      const cpos = newRowPos + offset
-      const repl = (ci===0)
-        ? state.schema.nodes.customTableCell.create(
-            { cellType:'text', contenteditable:false },
-            state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx)))
-          )
-        : state.schema.nodes.customTableCell.create(
-            { cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-1] || [], dropdownColor: '#000', contenteditable: false },
-            state.schema.nodes.paragraph.create()
-          )
-      tr.replaceWith(cpos, cpos + cellNode.nodeSize, repl)
-      offset += cellNode.nodeSize; ci++
-    })
-    if (tr.docChanged) view.dispatch(tr)
-    updateCondRowNumbers(ed); runCondValidation()
-  })
-}
-function delCondRow(i){
-  const ed = condEditors.value[i]; if (!ed) return
-  const $a = ed.state.selection.$anchor
-  for (let d=$a.depth; d>=0; d--){
-    const n = $a.node(d)
-    if(n.type.name==='tableRow'){
-      const inHeader = $a.before(d)===2
-      if(inHeader) return alert('無法刪除表頭')
-      ed.chain().focus().deleteRow().run()
-      nextTick(()=>{ updateCondRowNumbers(ed); runCondValidation() })
-      return
-    }
-  }
-  alert('請選擇要刪除的列')
-}
-function updateCondRowNumbers(ed){
-  const { state, view } = ed
-  const tr = state.tr
-  const table = state.doc.content.firstChild
-  if (!table || table.type.name!=='table') return
-  const updates = []
-  let rowIdx = 0
-  state.doc.descendants((node,pos)=>{
-    if(node.type.name==='tableRow'){
-      if(rowIdx>0){
-        const firstCell = node.firstChild
-        if(firstCell){ const cellPos = pos + 1; updates.push({ cellPos, node:firstCell, number: rowIdx }) }
-      }
-      rowIdx++
-    }
-  })
-  for (let k = updates.length - 1; k >= 0; k--){
-    const u = updates[k]
-    const newCell = state.schema.nodes.customTableCell.create(
-      { cellType:'text', contenteditable:false },
-      state.schema.nodes.paragraph.create(null, state.schema.text(String(u.number)))
-    )
-    tr.replaceWith(u.cellPos, u.cellPos + u.node.nodeSize, newCell)
-  }
-  if(tr.docChanged) view.dispatch(tr)
-}
-
 /* ===== Coloring ===== */
 function setCellColor(i,type,color){
-  const ed = (type==='cond')?condEditors.value[i]:paramEditors.value[i]; if(!ed) return
+  const ed = paramEditors.value[i]; if(!ed) return
   const { state, view } = ed; const { selection } = state; const tr = state.tr
   if (selection instanceof CellSelection){
     selection.forEachCell((cell,pos)=>{
@@ -474,42 +267,6 @@ function setCellColor(i,type,color){
   else ed.chain().focus().setColor(color).run()
 }
 
-/* ===== Validation (unchanged) ===== */
-function runCondValidation(){
-  const rows = []
-  condEditors.value.forEach((ed,bIdx)=>{
-    if(!ed) return
-    let r=0
-    ed.state.doc.descendants((n,p)=>{
-      if(n.type.name==='tableRow'){
-        if(r>0){
-          const vals=[]; let ci=0
-          n.forEach(c=>{ if(ci>0) vals.push(cellText(c)); ci++ })
-          rows.push({ bIdx, pos:p, key:JSON.stringify(vals) })
-        }
-        r++
-      }
-    })
-  })
-  const dupSet = new Set()
-  rows.forEach((x,i)=>{ for(let j=i+1;j<rows.length;j++) if(x.key && x.key===rows[j].key){ dupSet.add(i); dupSet.add(j) }})
-  condEditors.value.forEach((ed,bIdx)=>{
-    if(!ed) return
-    const { state, view } = ed; let r=0; const tr = state.tr
-    state.doc.descendants((n,p)=>{
-      if(n.type.name==='tableRow'){
-        if(r>0){
-          const idxInRows = rows.findIndex(it=>it.bIdx===bIdx && it.pos===p)
-          const isDup = idxInRows>=0 && dupSet.has(idxInRows)
-          const want = isDup ? 'dup-row' : ''
-          if ((n.attrs.class||'')!==want) tr.setNodeMarkup(p, undefined, { ...n.attrs, class:want })
-        }
-        r++
-      }
-    })
-    if(tr.docChanged) view.dispatch(tr)
-  })
-}
 function getParamMatrix(ed){
   const mat=[]; let r=0
   ed.state.doc.descendants((n)=>{ if(n.type.name==='tableRow'){ if(r>0){
@@ -561,7 +318,6 @@ function runParamValueValidation(ed){
   if(tr.docChanged) view.dispatch(tr)
 }
 function runAllValidations(){
-  runCondValidation()
   paramEditors.value.forEach(ed=> ed && runParamValueValidation(ed))
   runParamDuplicateValidation()
 }
@@ -569,10 +325,6 @@ function runAllValidations(){
 /* ===== init per index ===== */
 function initEditors(i) {
   const b = blocks.value[i]
-  condEditors.value[i] = makeCondEditor(
-    b.data?.jsonConditionContent || null,
-    () => { runCondValidation() }
-  )
   paramEditors.value[i] = makeParamEditor(
     b.data?.jsonParameterContent || null,
     ({ editor }) => { runParamValueValidation(editor); runParamDuplicateValidation() }
@@ -586,7 +338,7 @@ onMounted(()=>{
   else {
     blocks.value = props.dataBlocks.map((blk,idx)=>({
       id:idSeq++,
-      code: blk.code || `XXXX${idx+1}`,
+      code: blk.code || `XXXY${idx+1}`,
       content_id: blk.content_id,
       client_temp_id: blk.client_temp_id,
       data: blk.data || {}
@@ -598,15 +350,6 @@ onMounted(()=>{
 
 // If templates change later (e.g., user switches machine),
 // re-seed ONLY empty editors to avoid clobbering user edits.
-watch(() => props.condTemplate, () => {
-  condEditors.value.forEach((ed,i)=>{
-    const hasUserContent = !!blocks.value[i]?.data?.jsonConditionContent
-    if (!hasUserContent && ed) {
-      const doc = normalizeCondTemplate()
-      if (doc) ed.commands.setContent(doc, false)
-    }
-  })
-})
 watch(() => props.paramTemplate, () => {
   paramEditors.value.forEach((ed,i)=>{
     const hasUserContent = !!blocks.value[i]?.data?.jsonParameterContent
@@ -620,7 +363,6 @@ watch(() => props.paramTemplate, () => {
 onBeforeUnmount(()=>{
   const payload = exportData()
   emit('save', payload)
-  condEditors.value.forEach(e=>e?.destroy())
   paramEditors.value.forEach(e=>e?.destroy())
 })
 
@@ -646,9 +388,6 @@ function exportData(){
     client_temp_id: b.client_temp_id,
     id: b.id,
     data:{
-      // condition
-      jsonConditionContent: condEditors.value[i]?.getJSON(),
-      arrayConditionData:   extractTableArray(condEditors.value[i]),
       // parameter
       jsonParameterContent: paramEditors.value[i]?.getJSON(),
       arrayParameterData:   extractTableArray(paramEditors.value[i]),

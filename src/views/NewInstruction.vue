@@ -203,17 +203,8 @@ import ManufacturingConditionRuleBlocks from '@/components/ManufacturingConditio
 import DocSearchWindow from '@/components/DocSearchWindow.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
-import {
-  initDoc,
-  saveAttributes, loadAttributes,
-  saveBlocks,   loadBlocks,
-  saveParams,   loadParams,
-  saveReferences, loadReferences,
-} from '@/api/docsApi'
-
+import { initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
-
-const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
 // --- ensure we have a server-side token row ---
 const ensureDraftToken = async () => {
@@ -618,10 +609,7 @@ onMounted(async () => {
     alert('載入草稿失敗')
   }
 })
-
-
 </script>
-
 
 <style scoped>
 .new-instruction-container { width: 90%; margin: 30px auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }

@@ -148,28 +148,18 @@
       <!-- Step 4 製造參數一覽表（只有參數表；獨立元件） -->
       <div v-if="currentStep === 4" class="step-content">
         <h2>製造參數一覽表</h2>
-        <div class="Parameters">
+        <!-- <div class="Parameters">
           <button class="layer-action-btn add" @click="addParamLayer">新增組合</button>
-        </div>
+        </div> -->
+        <!-- <ManufacturingParameterBlocks
+          v-model="paramBlocks"/> -->
+
         <ManufacturingParameterBlocks
-          v-model="paramBlocks"
-          :machine-groups="machineGroups"
-          code-prefix="XXXY"
-        />
-        <!--
-        <ManufacturingParamTable
-          v-for="(blk, i) in paramBlocks"
-          :key="blk.id"
-          :index="i"
-          :code="blk.code"
-          :machineGroups="machineGroups"
-          :data="blk"
-          :is-duplicate="duplicateMap[i] || false"
-          @update="onParamBlockUpdate"
-          @copy="copyParamBlock(i)"
-          @delete="removeParamBlock(blk.id)"
-        />
-        -->
+          :data-blocks="mcrBlocks"
+          :specification="form.attribute.specific"
+          :current-step="currentStep"
+          @update:dataBlocks="mcrBlocks = $event"
+          @save="mcrBlocks = $event"/>
       </div>
 
       <!-- Step 5 適用品質與規格內容 → DynamicEditorBlock -->
@@ -249,40 +239,42 @@
 import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
 
-// Components
+// UI components
 import DynamicEditorBlock from '@/components/DynamicEditorBlock.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import SpecificListWindow from '@/components/SpecificListWindow.vue'
 import ItemListWindow from '@/components/ItemListWindow.vue'
 import ManufacturingParameterBlocks from '@/components/ManufacturingParameterBlocks.vue'
 
-// Token bootstrap (same pattern as NewInstruction.vue)
+// token & unified docs API (same as NewInstruction.vue)
 import { useDraftToken } from '@/composables/useDraftToken'
+import {
+  initDoc, saveAttributes, loadAttributes,
+  saveBlocks, loadBlocks,
+  saveParams, loadParams,
+  saveReferences, loadReferences
+} from '@/api/docsApi'
 
-// -------------------------------
-// Constants / wiring
-// -------------------------------
-const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
 const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specification')
 
-// steps
+// ---------- steps ----------
 const steps = [
-  { label: '基本屬性' },
-  { label: '目的' },
-  { label: '製作條件規範' },       // step 3 → specBlocks (step code 2)
-  { label: '條件參數一覽表' },     // step 4 → paramBlocks (parameters only)
-  { label: '適用品質與規格內容' }, // step 5 → qualityBlocks (step code 4)
-  { label: '使用表單' },           // step 6 → usedForms
-  { label: '其他' },               // step 7 → otherBlocks (step code 6)
-  { label: '文件匯出' },           // step 8 → (ignored for now)
+  { label: '基本屬性' },                  // 1
+  { label: '目的' },                      // 2
+  { label: '製作條件規範' },              // 3 -> step_type 4
+  { label: '條件參數一覽表' },            // 4 -> step_type 5
+  { label: '適用品質與規格內容' },        // 5 -> step_type 6
+  { label: '使用表單' },                  // 6 -> references (forms)
+  { label: '其他' },                      // 7 -> step_type 7
+  { label: '文件匯出' },                  // 8 (暫不實作)
 ]
 const currentStep = ref(1)
+const goToStep = s => { currentStep.value = s }
 
-// -------------------------------
-// Base form (basic attributes)
-// -------------------------------
+// ---------- basic attributes ----------
 const form = reactive({
-  documentType: 1, // specification
+  documentType: 1,          // 1 = Specification
   documentID: '',
   documentName: '',
   documentVersion: 1.0,
@@ -293,6 +285,7 @@ const form = reactive({
     styleVersion: '',
   },
   department: sessionStorage.getItem('loggedInUserdeptName') || '',
+  author_id: sessionStorage.getItem('loggedInUserNo') || '',
   author: sessionStorage.getItem('loggedInUserName') || '',
   approver: '',
   confirmer: '',
@@ -303,19 +296,9 @@ const form = reactive({
   documentPurpose: '',
 })
 
-// -------------------------------
-// Pickers / windows
-// -------------------------------
+// ---------- pickers ----------
 const specificsListVisible = ref(false)
-const itemsListVisible = ref(false)
-
-function requestItemFromAPI() {
-  return [
-    { factoryCode: '1011', itemCode: 'YD12345' },
-    { factoryCode: '1011', itemCode: 'YD18379' },
-    { factoryCode: '1011', itemCode: 'YD98765' },
-  ]
-}
+const itemsListVisible     = ref(false)
 
 function onSelectItemType(payload) {
   form.attribute.itemType = payload?.itemCode || ''
@@ -328,11 +311,9 @@ async function fetchMachineGroups(specific) {
   machineGroups.value = []
   if (!specific) return
   try {
-    const { data } = await axios.get(`${API_BASE_URL}/MES-get-groups-machines`, { params: { specific } })
+    const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, { params: { specific } })
     machineGroups.value = data?.data?.groups || []
-  } catch (e) {
-    console.error('fetchMachineGroups failed:', e)
-  }
+  } catch (e) { console.error('fetchMachineGroups failed:', e) }
 }
 
 async function onSelectSpecific(name) {
@@ -342,272 +323,198 @@ async function onSelectSpecific(name) {
   await fetchMachineGroups(form.attribute.specific)
 }
 
-// -------------------------------
-// Dynamic blocks (3, 5, 7)
-// -------------------------------
+// ---------- dynamic blocks (spec/quality/other) ----------
 let uid = 1
+const specBlocks    = ref([])  // step_type = 4
+const qualityBlocks = ref([])  // step_type = 6
+const otherBlocks   = ref([])  // step_type = 7
 
-const specBlocks = ref([])     // step 3 → backend step_type 2
-const qualityBlocks = ref([])  // step 5 → backend step_type 4
-const otherBlocks = ref([])    // step 7 → backend step_type 6
-
-const makeBlock = (stepCode, tier) => ({
+const makeBlock = (stepType, tier) => ({
   id: uid++,
-  step: stepCode,         // 2 / 4 / 6
+  step: stepType,          // only for UI; backend uses step_type passed to saveBlocks
   tier,
-  data: [
-    {
-      option: 0,          // 0:title, 1:text/img, 2:table
-      jsonHeader: null,
-      jsonContent: null,
-      files: [],
-    },
-  ],
+  data: [{
+    option: 0,             // 0:title only, 1:title+text+files, 2:title+table(+files)
+    jsonHeader: null,
+    jsonContent: null,
+    files: [],
+  }],
 })
 
-// step 3
-function addSpecLayer() { 
-    specBlocks.value.push(makeBlock(2, specBlocks.value.length + 1)) 
-    console.log("spec blocks: ", specBlocks)
-}
-function removeSpecLayer(id) {
-  specBlocks.value = specBlocks.value.filter(b => b.id !== id).map((b, i) => ({ ...b, tier: i + 1 }))
-}
-function updateSpecLayer(payload) {
-  const i = specBlocks.value.findIndex(b => b.id === payload.id)
-  if (i !== -1) specBlocks.value[i] = payload
+function addSpecLayer()          { specBlocks.value.push   (makeBlock(4, specBlocks.value.length    + 1)) }
+function addQualityLayer()       { qualityBlocks.value.push(makeBlock(6, qualityBlocks.value.length + 1)) }
+function addOtherLayer()         { otherBlocks.value.push  (makeBlock(7, otherBlocks.value.length   + 1)) }
+
+function removeSpecLayer(id)     { specBlocks.value    = specBlocks.value   .filter(b => b.id !== id).map((b,i)=>({...b,tier:i+1})) }
+function removeQualityLayer(id)  { qualityBlocks.value = qualityBlocks.value.filter(b => b.id !== id).map((b,i)=>({...b,tier:i+1})) }
+function removeOtherLayer(id)    { otherBlocks.value   = otherBlocks.value  .filter(b => b.id !== id).map((b,i)=>({...b,tier:i+1})) }
+
+function updateSpecLayer(payload)    { const i = specBlocks.value   .findIndex(b=>b.id===payload.id);    if(i!==-1) specBlocks.value[i]    = payload }
+function updateQualityLayer(payload) { const i = qualityBlocks.value.findIndex(b=>b.id===payload.id);    if(i!==-1) qualityBlocks.value[i] = payload }
+function updateOtherLayer(payload)   { const i = otherBlocks.value  .findIndex(b=>b.id===payload.id);    if(i!==-1) otherBlocks.value[i]   = payload }
+
+// Helpers to convert DynamicEditor UI blocks → backend “generic blocks”
+const toGenericBlocks = (arr=[]) =>
+  (arr || [])
+    .sort((a,b)=>(a.tier||0)-(b.tier||0))
+    .map(blk => ({
+      tier: blk.tier,
+      data: (blk.data || []).map(it => ({
+        option: it.option ?? 0,
+        jsonHeader: it.jsonHeader || null,
+        jsonContent: it.jsonContent || null,
+        files: Array.isArray(it.files) ? it.files : []
+      }))
+    }))
+
+const fromGenericBlocks = (payload, stepType) =>
+  (payload.blocks || []).map((blk, i) => ({
+    id: i + 1,
+    step: stepType,
+    tier: blk.tier,
+    data: (blk.data || []).map(it => ({
+      content_id: null,
+      client_temp_id: null,
+      option: it.option ?? 0,
+      jsonHeader: it.jsonHeader || null,
+      jsonContent: it.jsonContent || null,
+      files: it.files || []
+    }))
+  }))
+
+// ---------- step 4 — parameters (SPEC_PARAM = 5) ----------
+const mcrBlocks = ref([]) // <-- the one you already bind to the component
+
+// serialize params → backend shape for /docs/params/save (step_type = 5)
+function serializeParamsFromMCR() {
+  return (mcrBlocks.value || []).map((blk, i) => ({
+    tier_no: i + 1,
+    code: blk.code || `XXXX${i + 1}`,
+    jsonParameterContent: blk.data?.jsonParameterContent || null,
+    arrayParameterData:   blk.data?.arrayParameterData   || [],
+    metadata: blk.data?.metadata || null,
+  }))
 }
 
-// step 5
-function addQualityLayer() { qualityBlocks.value.push(makeBlock(4, qualityBlocks.value.length + 1)) }
-function removeQualityLayer(id) {
-  qualityBlocks.value = qualityBlocks.value.filter(b => b.id !== id).map((b, i) => ({ ...b, tier: i + 1 }))
-}
-function updateQualityLayer(payload) {
-  const i = qualityBlocks.value.findIndex(b => b.id === payload.id)
-  if (i !== -1) qualityBlocks.value[i] = payload
-}
-
-// step 7
-function addOtherLayer() { otherBlocks.value.push(makeBlock(6, otherBlocks.value.length + 1)) }
-function removeOtherLayer(id) {
-  otherBlocks.value = otherBlocks.value.filter(b => b.id !== id).map((b, i) => ({ ...b, tier: i + 1 }))
-}
-function updateOtherLayer(payload) {
-  const i = otherBlocks.value.findIndex(b => b.id === payload.id)
-  if (i !== -1) otherBlocks.value[i] = payload
+// load backend → fill mcrBlocks that the child understands
+function loadParamsIntoMCR(payload) {
+  mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
+    id: i + 1,
+    code: b.code || `XXXX${i + 1}`,
+    data: {
+      jsonParameterContent: b.jsonParameterContent || null,
+      arrayParameterData:   b.arrayParameterData   || [],
+      metadata: b.metadata || null,
+    },
+  }))
 }
 
-// -------------------------------
-// Step 4 — parameters only (placeholder data model)
-// -------------------------------
-const paramBlocks = ref([])
-/**
- * Shape per block:
- * {
- *   id: number,
- *   code: string,                 // e.g. RE233A01
- *   machineGroup: string,
- *   machine: string,
- *   table: string[][]             // Header + rows
- * }
- */
-let paramUid = 1
-function nextCode(prefix, idx) { return `${prefix}${String(idx).padStart(2, '0')}` }
-
-function addParamLayer() {
-  paramBlocks.value.push({
-    id: paramUid++,
-    code: nextCode('RE233A', paramBlocks.value.length + 1),
-    machineGroup: '',
-    machine: '',
-    table: [],
-  })
-  recomputeDuplicates()
-}
-
-function removeParamBlock(id) {
-  paramBlocks.value = paramBlocks.value.filter(b => b.id !== id)
-  paramBlocks.value.forEach((b, i) => (b.code = nextCode('RE233A', i + 1)))
-  recomputeDuplicates()
-}
-
-function updateParamBlock({ id, data }) {
-  const i = paramBlocks.value.findIndex(b => b.id === id)
-  if (i !== -1) {
-    paramBlocks.value[i] = { ...paramBlocks.value[i], ...data }
-    recomputeDuplicates()
-  }
-}
-
-// Duplicate detection
-const duplicateMap = ref({})
-function serializeTable(table) {
-  if (!Array.isArray(table) || table.length <= 1) return null
-  const payload = table.slice(1).map(row => (row || []).slice(0, 8).join('|')).join('|')
-  return payload.includes('||') ? null : JSON.stringify(table.slice(1))
-}
-function recomputeDuplicates() {
-  const seen = new Map()
-  const dup = {}
-  paramBlocks.value.forEach((_, idx) => { dup[idx] = false })
-  paramBlocks.value.forEach((b, idx) => {
-    const sig = serializeTable(b.table)
-    if (!sig) return
-    if (!seen.has(sig)) seen.set(sig, [])
-    seen.get(sig).push(idx)
-  })
-  for (const indices of seen.values()) {
-    if (indices.length > 1) indices.forEach(i => (dup[i] = true))
-  }
-  duplicateMap.value = { ...dup }
-}
-
-// -------------------------------
-// Step 6 — used forms
-// -------------------------------
+// ---------- references (forms) ----------
 const formWindowVisible = ref(false)
-const usedForms = ref([]) // [{ id, formId, formName }]
+const usedForms = ref([])   // [{ id, formId, formName }]
 let usedFormUid = 1
+const addUsedForm = ({ formId, formName }) => { usedForms.value.push({ id: usedFormUid++, formId, formName }); formWindowVisible.value = false }
+const removeUsedForm = (id) => { usedForms.value = usedForms.value.filter(x => x.id !== id) }
 
-function addUsedForm({ formId, formName }) {
-  usedForms.value.push({ id: usedFormUid++, formId, formName })
-  formWindowVisible.value = false
-}
-function removeUsedForm(id) {
-  usedForms.value = usedForms.value.filter(x => x.id !== id)
-}
-
-// -------------------------------
-// Navigation
-// -------------------------------
-function goToStep(n) { currentStep.value = n }
-
-// -------------------------------
-// Draft token init (document_type = 1)
-// -------------------------------
+// ---------- token bootstrap (document_type = 1) ----------
 const ensureDraftToken = async () => {
   if (draftToken.value) return draftToken.value
   try {
-    const { data } = await axios.post(`${API_BASE_URL}/drafts/init`, { document_type: 1 })
-    if (data?.success && data.token) {
-      setToken(data.token)
-      return data.token
-    }
-    throw new Error(data?.message || 'init failed')
+    const res = await initDoc(1)   // specification doc
+    if (res?.success && res.token) { setToken(res.token); return res.token }
+    throw new Error(res?.message || 'init failed')
   } catch (e) {
-    console.error('drafts/init failed:', e)
+    console.error('docs/init failed:', e)
     alert('建立草稿代碼失敗，請稍後再試')
     return null
   }
 }
 
-// -------------------------------
-// Save / Load (skeletons)
-// -------------------------------
-function snapshot() {
-  return {
-    form: JSON.parse(JSON.stringify(form)),
-    specBlocks: JSON.parse(JSON.stringify(specBlocks.value)),
-    paramBlocks: JSON.parse(JSON.stringify(paramBlocks.value)),
-    qualityBlocks: JSON.parse(JSON.stringify(qualityBlocks.value)),
-    otherBlocks: JSON.parse(JSON.stringify(otherBlocks.value)),
-    usedForms: JSON.parse(JSON.stringify(usedForms.value)),
+// ---------- save ----------
+const isSaving = ref(false)
+const saveDraft = async () => {
+  const t = await ensureDraftToken()
+  if (!t) return
+  try {
+    isSaving.value = true
+
+    // 1) attributes
+    const a = await saveAttributes(t, form)
+    if (!a?.success) { isSaving.value = false; return alert(a?.message || '屬性儲存失敗') }
+
+    // 2) step 3: 規範（條文/說明/表格） → generic blocks (step_type = 4)
+    await saveBlocks(t, 4, toGenericBlocks(specBlocks.value))
+
+    // 3) step 4: 參數一覽表 → params (step_type = 5)
+    await saveParams(t, serializeParamsFromMCR(), 5)  // SPEC_PARAM = 5
+    // await saveParams(t, serializeParams(), 5)
+
+    // 4) step 5: 品質與規格內容 → generic blocks (step_type = 6)
+    await saveBlocks(t, 6, toGenericBlocks(qualityBlocks.value))
+
+    // 5) step 7: 其他 → generic blocks (step_type = 7)
+    await saveBlocks(t, 7, toGenericBlocks(otherBlocks.value))
+
+    // 6) step 6: 使用表單 → references
+    await saveReferences(t, {
+      documents: [], // 規範頁這裡只存表單
+      forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })),
+    })
+
+    alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
+  } catch (e) {
+    console.error('saveDraft failed:', e)
+    alert('儲存草稿失敗')
+  } finally {
+    isSaving.value = false
   }
 }
 
-async function saveDraft() {
+// ---------- load ----------
+onMounted(async () => {
   const t = await ensureDraftToken()
   if (!t) return
   try {
     // 1) attributes
-    await axios.post(`${API_BASE_URL}/spec/save-attributes`, { token: t, form: snapshot().form })
+    const a = await loadAttributes(t)
+    if (a?.success) Object.assign(form, a.form || {})
 
-    // 2) step 3 (spec → dynamic editors)
-    await axios.post(`${API_BASE_URL}/spec/save-blocks`, {
-      token: t,
-      step_type: 2,
-      blocks: specBlocks.value,
-    })
+    // 2) 規範 blocks (step_type = 4)
+    const sp = await loadBlocks(t, 4)
+    if (sp?.success) specBlocks.value = fromGenericBlocks(sp, 4)
 
-    // 3) step 4 (parameters-only)
-    await axios.post(`${API_BASE_URL}/spec/save-params`, {
-      token: t,
-      blocks: paramBlocks.value.map((b, i) => ({
-        tier_no: i + 1,
-        code: b.code,
-        machineGroup: b.machineGroup || '',
-        machine: b.machine || '',
-        table: b.table || [],
-      })),
-    })
+    // 3) 參數 (step_type = 5)
+    const pm = await loadParams(t, 5)
+    if (pm?.success) loadParamsIntoMCR(pm)
 
-    // 4) step 5 (quality → dynamic editors)
-    await axios.post(`${API_BASE_URL}/spec/save-blocks`, {
-      token: t,
-      step_type: 4,
-      blocks: qualityBlocks.value,
-    })
+    // 4) 品質與規格 blocks (step_type = 6)
+    const ql = await loadBlocks(t, 6)
+    if (ql?.success) qualityBlocks.value = fromGenericBlocks(ql, 6)
 
-    // 5) step 7 (other → dynamic editors)
-    await axios.post(`${API_BASE_URL}/spec/save-blocks`, {
-      token: t,
-      step_type: 6,
-      blocks: otherBlocks.value,
-    })
+    // 5) 其他 blocks (step_type = 7)
+    const ot = await loadBlocks(t, 7)
+    if (ot?.success) otherBlocks.value = fromGenericBlocks(ot, 7)
 
-    // 6) step 6 (references / forms)
-    await axios.post(`${API_BASE_URL}/spec/save-references`, {
-      token: t,
-      refs: usedForms.value.map(f => ({
-        refer_type: 1,                // 1 = form
-        refer_document: f.formId,
-        refer_document_name: f.formName,
-      })),
-    })
+    // 6) 使用表單
+    const rf = await loadReferences(t)
+    if (rf?.success) {
+      let i = 1
+      usedForms.value = (rf.forms || []).map(f => ({ id: i++, formId: f.formId, formName: f.formName }))
+    }
 
-    alert('草稿已儲存')
-  } catch (e) {
-    console.error('saveDraft failed:', e)
-    alert('儲存草稿失敗')
-  }
-}
-
-async function loadDraft() {
-  const t = await ensureDraftToken()
-  if (!t) return
-  try {
-    // Option A: single endpoint that returns everything
-    const { data } = await axios.get(`${API_BASE_URL}/spec/${t}`)
-    if (data?.form) Object.assign(form, data.form)
-
-    console.log("Before loading spec blocks: ", specBlocks.value)
-
-    specBlocks.value = data?.specBlocks || []
-    paramBlocks.value = data?.paramBlocks || []
-    qualityBlocks.value = data?.qualityBlocks || []
-    otherBlocks.value = data?.otherBlocks || []
-    usedForms.value = data?.usedForms || []
-    console.log("After loading spec blocks: ", specBlocks.value)
-
+    // dependent lists
     await fetchMachineGroups(form.attribute.specific)
-    recomputeDuplicates()
+    // recomputeDuplicates()
   } catch (e) {
-    console.error('loadDraft failed:', e)
+    console.error('load draft failed:', e)
+    alert('載入草稿失敗')
   }
-}
-
-// -------------------------------
-// Bootstrap
-// -------------------------------
-onMounted(loadDraft)
-
-// Expose (optional, for devtools)
-defineExpose({
-  saveDraft,
-  loadDraft,
 })
+
+// optional devtools
+defineExpose({ saveDraft })
 </script>
+
 
 <style scoped>
 .new-specification-container {

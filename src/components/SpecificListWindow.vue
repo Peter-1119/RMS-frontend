@@ -87,7 +87,7 @@ export default {
             this.console = "";
             try {
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/MES-get-specifics", {params: {keyword, machine: this.machineKeyword}});
+                const response = await axios.get(API_BASE_URL + "/mes/specifics", {params: {keyword, machine: this.machineKeyword}});
                 Object.entries(response.data.data.specifics).forEach(([sn, si]) => {this.specifics.push({specific: sn, code: si.code})});
             }
             catch (error) {
