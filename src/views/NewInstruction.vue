@@ -241,12 +241,11 @@ const form = reactive({
   documentName: 'KF_RTR腔體銑削制程課-01_製造條件指示書',
   documentVersion: 1.0,
   attribute: { applyProject: '', machines: [] },
-  department: sessionStorage.getItem('loggedInUserdeptName'),
-  author_id: sessionStorage.getItem('loggedInUserNo'),
-  author: sessionStorage.getItem('loggedInUserName'),
+  department: '',
+  author_id: '',
+  author: '',
   approver: '',
   confirmer: '',
-  issueDate: '2025/5/20',
   reviseReason: '',
   revisePoint: '',
   documentStyle: 'FM-R-MF-AZ-052 Rev9.0',
@@ -580,6 +579,9 @@ onMounted(async () => {
     // 1) attributes
     const a = await loadAttributes(t)
     if (a?.success) Object.assign(form, a.form || {})
+    form.department = sessionStorage.getItem('loggedInUserdeptName')
+    form.author_id = sessionStorage.getItem('loggedInUserNo')
+    form.author = sessionStorage.getItem('loggedInUserName')
 
     // 2) process flow (only if you add GET in backend)
     const pfResp = await loadBlocks(t, 0)

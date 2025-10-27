@@ -284,12 +284,11 @@ const form = reactive({
     styleNo: '',
     styleVersion: '',
   },
-  department: sessionStorage.getItem('loggedInUserdeptName') || '',
-  author_id: sessionStorage.getItem('loggedInUserNo') || '',
-  author: sessionStorage.getItem('loggedInUserName') || '',
+  department: '',
+  author_id: '',
+  author: '',
   approver: '',
   confirmer: '',
-  issueDate: '',
   reviseReason: '',
   revisePoint: '',
   documentStyle: '',
@@ -478,6 +477,9 @@ onMounted(async () => {
     // 1) attributes
     const a = await loadAttributes(t)
     if (a?.success) Object.assign(form, a.form || {})
+    form.department = sessionStorage.getItem('loggedInUserdeptName')
+    form.author_id = sessionStorage.getItem('loggedInUserNo')
+    form.author = sessionStorage.getItem('loggedInUserName')
 
     // 2) 規範 blocks (step_type = 4)
     const sp = await loadBlocks(t, 4)

@@ -327,11 +327,13 @@ onMounted(async ()=>{
     // for any block that has an invalid meta after fetching groups, auto-fix
     blocks.value.forEach(b => {
       if (!b.meta.group || !groupsMap.value[b.meta.group]) {
-        b.meta.group = groupKeys.value[0] || ''
+        // b.meta.group = groupKeys.value[0] || ''
+        b.meta.group = ''
       }
       const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
       if (!b.meta.machine || !mk.includes(b.meta.machine)) {
-        b.meta.machine = mk[0] || ''
+        // b.meta.machine = mk[0] || ''
+        b.meta.machine = ''
       }
     })
 
@@ -409,7 +411,8 @@ function onGroupChange(i) {
   const g = blocks.value[i]?.meta?.group || ''
   const mk = Object.keys(groupsMap.value[g]?.machines || {})
   if (!mk.includes(blocks.value[i].meta.machine)) {
-    blocks.value[i].meta.machine = mk[0] || ''
+    // blocks.value[i].meta.machine = mk[0] || ''
+    blocks.value[i].meta.machine = ''
   }
   syncToParent()
 }
