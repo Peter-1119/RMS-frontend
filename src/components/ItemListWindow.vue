@@ -52,6 +52,7 @@ export default {
     },
     data() {
         return {
+            filterItems: [],
             keyword: "",
             items: {},
             pageRows: 8,
@@ -125,6 +126,11 @@ export default {
 
 .content { padding: 12px; }
 .content input { padding: 4px; font-size: 15px; border-radius: 4px; }
+
+.search-block { display: flex; align-items: center; justify-content: center; }
+.search-block p { margin: 0; }
+.search-block input { width: 50%; margin-right: 10px; }
+.search-block button { padding: 4px 8px; font-size: 14px; }
 
 .item_table { width: 100%; margin: 12px 0; border-collapse: collapse; table-layout: auto; }
 .item_table th, .item_table td { border: 1px solid #ddd; padding: 8px; word-wrap: break-word; text-align: center; }

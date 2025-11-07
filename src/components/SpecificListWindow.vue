@@ -50,63 +50,68 @@
 import axios from 'axios';
 
 export default {
-    name: "SpecificListWindow",
-    props: {
-        machineKeyword: {default: ""}
-    },
-    data() {
-        return {
-            specifics: [],
-            keyword: "",
-            pageRows: 8,
-            currentPage: 1,
-            selectedSpecific: null,
-            console: "",
-        }
-    },
-    computed: {
-        totalPage() {
-            if (!this.specifics.length)
-                return 1;
-            return Math.ceil(this.specifics.length / this.pageRows);
-        },
-        paginatedSpecificInfos() {
-            const start = (this.currentPage - 1) * this.pageRows;
-            const end = start + this.pageRows;
-            return this.specifics.slice(start, end);
-        },
-    },
-    methods: {
-        async requestSpecificFromAPI(keyword){
-            if (keyword.length == 0) {
-                this.console = "請輸入關鍵字";
-                return;
-            }
-            
-            this.Specifics = [];
-            this.console = "";
-            try {
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/mes/specifics", {params: {keyword, machine: this.machineKeyword}});
-                Object.entries(response.data.data.specifics).forEach(([sn, si]) => {this.specifics.push({specific: sn, code: si.code})});
-            }
-            catch (error) {
-                console.error("Error fetching specifics: ", error);
-                this.console = "資料獲取異常"
-            }
-        },
-
-        select() {
-            this.$emit("selectSpecific", this.selectedSpecific);
-            this.$emit("cancel");
-        },
-        closeWindow() {
-            this.$emit("cancel");
-        },
+  name: "SpecificListWindow",
+  props: {
+    machineKeyword: { default: "" }
+  },
+  data() {
+    return {
+      specifics: [],
+      keyword: "",
+      pageRows: 8,
+      currentPage: 1,
+      selectedSpecific: null,
+      console: "",
     }
-}
+  },
+  computed: {
+    totalPage() {
+      if (!this.specifics.length) return 1;
+      return Math.ceil(this.specifics.length / this.pageRows);
+    },
+    paginatedSpecificInfos() {
+      const start = (this.currentPage - 1) * this.pageRows;
+      const end = start + this.pageRows;
+      return this.specifics.slice(start, end);
+    },
+  },
+  mounted() {
+    // Load ALL specs initially (no keyword)
+    this.requestSpecificFromAPI('');
+  },
+  methods: {
+    async requestSpecificFromAPI(keyword) {
+      // allow empty keyword to fetch ALL
+      this.specifics = [];
+      this.console = "";
+      this.currentPage = 1;
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+        const { data } = await axios.get(`${API_BASE_URL}/mes/specifics`, {
+          params: { keyword, machine: this.machineKeyword }
+        });
+        const specMap = (data && data.data && data.data.specifics) || {};
+        Object.entries(specMap).forEach(([sn, si]) => {
+          this.specifics.push({ specific: sn, code: si.code });
+        });
+        if (!this.specifics.length) this.console = "沒有符合條件的製程";
+      } catch (error) {
+        console.error("Error fetching specifics: ", error);
+        this.console = "資料獲取異常";
+      }
+    },
 
+    select() {
+      this.$emit("selectSpecific", this.selectedSpecific);
+      this.$emit("cancel");
+    },
+    closeWindow() {
+      this.$emit("cancel");
+    },
+  }
+}
 </script>
+
 
 <style scoped>
 

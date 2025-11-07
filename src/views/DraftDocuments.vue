@@ -15,17 +15,18 @@
         </thead>
         <tbody>
           <tr v-for="(item, index) in searchData" :key="index">
-            <td>{{ item?.documentName }}</td>
+            <td v-if="item?.documentName && item?.documentName.length > 0">{{ item?.documentName }}</td>
+            <td v-else>{{ item?.documentToken }}</td>
             <td>{{ item?.documentVersion }}</td>
             <td>{{ item?.author }}</td>
             <td>{{ item?.issueDate }}</td>
             <td>
-              <button class="btn edit" @click="performSearch">
+              <button class="btn edit" @click="performSearch(item)">
                 <img src="@/assets/edit-icon.png" alt="變更" class="icon edit">
               </button>
             </td>
             <td>
-              <button @click="performSearch" style="border: none; background: none; cursor: pointer;">
+              <button @click="deleteDraft(item)" style="border: none; background: none; cursor: pointer;">
                 <img src="@/assets/delete-icon.png" alt="刪除" class="btn delete">
               </button>
             </td>
@@ -36,35 +37,137 @@
             </td>
           </tr>
         </tbody>
-      </table>      
+      </table>   
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+        <button :disabled="page===1" @click="changePage(page-1)">上一頁</button>
+        <span>{{ page }} / {{ totalPages }}</span>
+        <button :disabled="page===totalPages" @click="changePage(page+1)">下一頁</button>
+      </div>   
     </div>
   </div>
 </template>
 
 <script>
+import axios from 'axios'
+
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
 
 export default {
-    name: "DraftDocuments",
-    data() {
-        return {
-            searchData: [
-                {documentType: 0, documentID: 'WMD051', documentName: 'K#_RTR線路蝕刻剝膜線-01_製造條件指示書', documentVersion: '1.0', author: '許小予', issueDate: '2025.06.30'},
-                {documentType: 0, documentID: 'WMD052', documentName: 'K#_新產品開發流程_作業指導書', documentVersion: '2.0', author: '陳大明', issueDate: '2025.07.15'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-                {documentType: 0, documentID: 'QAS003', documentName: '品質檢測標準_V2.0', documentVersion: '2.0', author: '李小美', issueDate: '2025.07.01'},
-            ]
-        }
+  name: "DraftDocuments",
+  props: {
+    userId: { type: String, default: '' },
+  },
+  data() {
+    return {
+      searchData: [],
+      loading: false,
+      errorMsg: '',
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      keyword: '',
+      sort: 'issue_date',
+      order: 'desc',
+    }
+  },
+  computed: {
+    totalPages() {
+      return Math.max(1, Math.ceil(this.total / this.pageSize))
     },
-}
+    effectiveUserId() {
+      return this.userId || sessionStorage.getItem('loggedInUserNo') || ''
+    }
+  },
+  methods: {
+    async loadDrafts() {
+      if (!this.effectiveUserId) {
+        this.errorMsg = '缺少 user_id，請先登入或從 props 傳入 userId'
+        this.searchData = []
+        this.total = 0
+        return
+      }
+      this.loading = true
+      this.errorMsg = ''
+      try {
+        // console.log("API_BASE_URL: ", API_BASE_URL)
+        // console.log("API_BASE_URL: ", API_BASE_URL)
+        const res = await axios.get(`${API_BASE_URL}/docs/drafts`, {
+          params: {
+            user_id: this.effectiveUserId,
+            status: 0,
+            page: this.page,
+            page_size: this.pageSize,
+            keyword: this.keyword || undefined,
+            sort: this.sort,
+            order: this.order,
+          },
+        })
+        const { success, items, total } = res.data || {}
+        if (!success) throw new Error(res.data?.error || 'drafts api failed')
 
+        this.searchData = (items || []).map(x => ({
+          ...x,
+          issueDate: this.formatDate(x.issueDate),
+        }))
+        this.total = total || 0
+      } catch (e) {
+        console.error(e)
+        this.errorMsg = e?.message || '讀取草稿失敗'
+        this.searchData = []
+        this.total = 0
+      } finally {
+        this.loading = false
+      }
+    },
+
+    formatDate(iso) {
+      if (!iso) return ''
+      try {
+        const d = new Date(iso)
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${y}.${m}.${day}`
+      } catch {
+        return iso
+      }
+    },
+
+    // called by the Edit (變更) button
+    performSearch(item) {
+      if (!item || !item.documentToken) return
+      // Decide destination by documentType
+      const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
+      // Push with token in query (your pages read via useDraftToken)
+      this.$router.push({ name: routeName, query: { token: item.documentToken } })
+    },
+
+    // optional: delete handler
+    async deleteDraft(item) {
+      if (!item?.documentToken) return
+      if (!confirm(`確定刪除「${item.documentName}」草稿？`)) return
+      try {
+        await axios.delete(`${API_BASE_URL}/docs/${encodeURIComponent(item.documentToken)}`)
+        // reload current page
+        this.loadDrafts()
+      } catch (e) {
+        alert(e?.response?.data?.error || e.message || '刪除失敗')
+      }
+    },
+
+    // Pagination helpers (add buttons in template if desired)
+    changePage(p) {
+      if (p < 1 || p > this.totalPages) return
+      this.page = p
+      this.loadDrafts()
+    },
+  },
+  mounted() {
+    this.loadDrafts()
+  },
+}
 </script>
+
 
 <style scoped>
 .new-instruction-container {

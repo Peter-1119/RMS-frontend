@@ -7,7 +7,8 @@
         <!-- Search -->
         <div class="search-block">
           <p>關鍵字：</p>
-          <input type="text" class="search-keyword-input" v-model="keyword" placeholder="請輸入關鍵字" @keyup.enter="search"/>
+          <input v-if="mode=='checkbox'" type="text" class="search-keyword-input" v-model="keyword" placeholder="請輸入關鍵字" @keyup.enter="searchMachinesByProject"/>
+          <input v-else-if="mode=='radio'" type="text" class="search-keyword-input" v-model="keyword" placeholder="請輸入關鍵字" @keyup.enter="searchMachinesBySpecification"/>
         <button class="btn-search" @click="search">搜尋</button>
         </div>
 
@@ -23,25 +24,26 @@
             <table class="group-table">
               <thead>
                 <tr>
-                  <th class="chk-col"></th>
-                  <th>群組名稱</th>
+                  <th v-if="mode=='checkbox'" class="chk-col"></th>
+                  <th class="group-col">群組名稱</th>
                   <th class="count-col">數量</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="g in paginatedGroups" :key="g" :class="{ active: g === activeGroup }" @click="onClickGroup(g)">
-                  <td class="chk-col" @click.stop>
+                  <td v-if="mode=='checkbox'" class="chk-col" @click.stop>
                     <input type="checkbox" :checked="isGroupChecked(g)" :indeterminate.prop="isGroupIndeterminate(g)" @change="onToggleGroup(g, $event.target.checked)"/>
                   </td>
                   <td>{{ g }}</td>
-                  <td class="count-col">{{ (groupMachines[g] || []).length }}</td>
+                  <!-- <td class="count-col">{{ (groupMachines[g] || []).length }}</td> -->
+                  <td class="count-col">{{ groupCountOf[g] ?? (groupMachines[g] || []).length }}</td>
                 </tr>
 
                 <tr v-if="searched && !groups.length">
-                  <td colspan="3" class="empty">沒有符合的群組</td>
+                  <td colspan="100%" class="empty">沒有符合的群組</td>
                 </tr>
                 <tr v-if="!searched">
-                  <td colspan="3" class="empty">請輸入關鍵字後搜尋</td>
+                  <td colspan="100%" class="empty">請輸入關鍵字後搜尋</td>
                 </tr>
               </tbody>
             </table>
@@ -72,12 +74,12 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="m in paginatedMachines" :key="`${activeGroup}::${m.machine}`">
+                <tr v-for="m in paginatedMachines" :key="`${activeGroup}::${m.code}`">
                   <td class="chk-col">
-                    <input type="checkbox" :value="m.machine" v-model="selectedMachines" @change.stop/>
+                    <input :type="mode" :value="m.code" v-model="selectedCodes" @change.stop />
                   </td>
                   <td>{{ m.code }}</td>
-                  <td>{{ m.machine }}</td>
+                  <td>({{ m.code }}){{ m.machine }}</td>
                 </tr>
 
                 <tr v-if="activeGroup && !machinesOfActiveGroup.length">
@@ -116,18 +118,25 @@ import axios from 'axios'
 export default {
   name: 'MachinesListWindowCheckbox',
   props: {
-    project: { type: String, default: '' }, // 只接受 project
+    project: { type: String, default: '' },        // 只接受 project
+    specification: { type: String, default: '' },
+    mode: { type: String, default: 'checkbox' }    // 'checkbox' | 'radio'
   },
   data() {
     return {
       keyword: '',
       searched: false,
 
-      groups: [],            // ['groupA','groupB',...]
-      groupMachines: {},     // group -> [{ machine, code }]
+      groups: [],                // ['groupA','groupB',...]
+      groupMachines: {},         // groupName -> [{ machine, code }]
+      groupCodeOf: {},           // groupName -> group_code  (for groups-only flow)
+      groupCountOf: {},          // groupName -> count       (for groups-only flow)
+      groupsOnlyMode: false,     // radio && no project && no specification
+
       activeGroup: '',
 
-      selectedMachines: [],  // flat selected list
+      // CODE-BASED selection
+      selectedCodes: [],         // checkbox: array, radio: string
 
       // pagination
       groupPageRows: 8,
@@ -159,16 +168,87 @@ export default {
       const start = (this.currentMachinePage - 1) * this.machinePageRows
       return this.machinesOfActiveGroup.slice(start, start + this.machinePageRows)
     },
+
+    // code -> name (for confirm payload)
+    codeToName() {
+      const map = {}
+      Object.values(this.groupMachines).forEach(arr => {
+        arr.forEach(m => { map[m.code] = m.machine })
+      })
+      return map
+    }
+  },
+  mounted() {
+    // Decide the mode once
+    this.groupsOnlyMode = (this.mode === 'radio' && (!this.project || this.project.length == 0) && (!this.specification || this.specification.length == 0))
+    console.log("(!this.project || this.project.length == 0): ", (!this.project || this.project.length == 0))
+    console.log("(!this.specification || this.specification.length == 0): ", (!this.specification || this.specification.length == 0))
+    console.log("this.groupsOnlyMode: ", this.groupsOnlyMode)
+    if (this.groupsOnlyMode) {
+      // radio + no project/spec → groups-only fast search
+      this.searchGroupsOnly()
+    } else if (this.project) {
+      this.searchMachinesByProject()
+    } else {
+      this.searchMachinesBySpecification()
+    }
   },
   methods: {
-    async search() {
+    // ============ FAST GROUPS-ONLY FLOW (radio + no project/spec) ============
+    async searchGroupsOnly() {
+      this.resetAfterSearch()
+      this.searched = true
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+        const params = {}
+        if (this.keyword) params.keyword = this.keyword
+        console.log(`${API_BASE_URL}/mes/machine-groups`, params)
+        const { data } = await axios.get(`${API_BASE_URL}/mes/machine-groups`, { params })
+        const groups = (data && data.data && data.data.groups) || []
+        console.log("groups: ", groups)
+
+        // pack to local state
+        this.groups = groups.map(g => g.group_name)
+        this.groupCodeOf = Object.fromEntries(groups.map(g => [g.group_name, g.group_code]))
+        this.groupCountOf = Object.fromEntries(groups.map(g => [g.group_name, g.count]))
+
+        if (this.groups.length) {
+          this.activeGroup = this.groups[0]
+          this.currentGroupPage = 1
+          this.currentMachinePage = 1
+          // lazily fetch machines for the first group so the right pane isn't empty
+          await this.ensureMachinesLoaded(this.activeGroup)
+        }
+      } catch (e) {
+        console.error('Error fetching machine-groups (groups-only):', e)
+      }
+    },
+
+    async ensureMachinesLoaded(groupName) {
+      if (this.groupMachines[groupName]?.length) return
+      const group_code = this.groupCodeOf[groupName]
+      if (!group_code) return
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+        const params = { group_code }
+        // no project/spec in groups-only flow
+        const { data } = await axios.get(`${API_BASE_URL}/mes/machines-by-group`, { params })
+        const list = (data && data.data && data.data.machines) || []
+        // normalize to {machine, code}
+        this.groupMachines[groupName] = list.map(x => ({ machine: x.machine_name, code: x.machine_code }))
+      } catch (e) {
+        console.error('Error fetching machines-by-group:', e)
+      }
+    },
+
+    // ======================= ORIGINAL BEHAVIOR (kept) ========================
+    async searchMachinesByProject(){
       this.resetAfterSearch()
       this.searched = true
       if (!this.project) {
         console.warn('No project provided; cannot fetch groups/machines.')
         return
       }
-
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
         const params = { project: this.project, keyword: this.keyword }
@@ -198,53 +278,109 @@ export default {
           this.currentMachinePage = 1
         }
       } catch (e) {
-        console.error('Error fetching MES-get-groups-machines:', e)
+        console.error('Error fetching MES-get-groups-machines (project):', e)
       }
     },
 
-    // group interactions
-    onClickGroup(name) {
+    async searchMachinesBySpecification() {
+      this.resetAfterSearch()
+      this.searched = true
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+        const params = { specific: (this.specification.length > 0) ? this.specification : null, keyword: this.keyword }
+        const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, { params })
+        const groupsPayload = (data && data.data && data.data.groups) || {}
+
+        const gm = {}
+        const names = []
+        Object.entries(groupsPayload).forEach(([gname, ginfo]) => {
+          const arr = []
+          const ms = ginfo?.machines || {}
+          Object.entries(ms).forEach(([mn, mi]) => {
+            arr.push({ machine: mn, code: mi.code })
+          })
+          if (arr.length) {
+            gm[gname] = arr
+            names.push(gname)
+          }
+        })
+
+        this.groupMachines = gm
+        this.groups = names
+
+        if (this.groups.length) {
+          this.activeGroup = this.groups[0]
+          this.currentGroupPage = 1
+          this.currentMachinePage = 1
+        }
+      } catch (e) {
+        console.error('Error fetching MES-get-groups-machines (specific):', e)
+      }
+    },
+
+    // unified search button
+    search() {
+      if (this.groupsOnlyMode) return this.searchGroupsOnly()
+      if (this.mode === 'radio') return this.searchMachinesBySpecification()
+      return this.searchMachinesByProject()
+    },
+
+    // ======================== interactions & selection =======================
+    async onClickGroup(name) {
       if (this.activeGroup === name) return
       this.activeGroup = name
       this.currentMachinePage = 1
-    },
-    onToggleGroup(name, checked) {
-      const machines = (this.groupMachines[name] || []).map(m => m.machine)
-      if (!machines.length) return
-
-      // if (checked) {
-      //   const set = new Set(this.selectedMachines)
-      //   machines.forEach(x => set.add(x))
-      //   this.selectedMachines = Array.from(set)
-      // } else {
-      //   const removeSet = new Set(machines)
-      //   this.selectedMachines = this.selectedMachines.filter(x => !removeSet.has(x))
-      // }
-      const set = new Set(this.selectedMachines)
-      if (checked) {
-        machines.forEach(x => set.add(x))
-      } else {
-        machines.forEach(x => set.delete(x))
+      if (this.groupsOnlyMode) {
+        await this.ensureMachinesLoaded(name)  // lazy load on click
       }
-      this.selectedMachines = Array.from(set)
+    },
+
+    onToggleGroup(name, checked) {
+      // checkbox mode only
+      if (this.mode === 'radio') return
+      const codes = (this.groupMachines[name] || []).map(m => m.code)
+      if (!codes.length) return
+
+      const set = new Set(this.selectedCodes)
+      if (checked) codes.forEach(c => set.add(c))
+      else codes.forEach(c => set.delete(c))
+      this.selectedCodes = Array.from(set)
     },
     isGroupChecked(name) {
-      const ms = (this.groupMachines[name] || []).map(m => m.machine)
-      if (!ms.length) return false
-      const set = new Set(this.selectedMachines)
-      return ms.every(x => set.has(x))
+      if (this.mode === 'radio') return false
+      const codes = (this.groupMachines[name] || []).map(m => m.code)
+      if (!codes.length) return false
+      const set = new Set(this.selectedCodes)
+      return codes.every(c => set.has(c))
     },
     isGroupIndeterminate(name) {
-      const ms = (this.groupMachines[name] || []).map(m => m.machine)
-      if (!ms.length) return false
-      const set = new Set(this.selectedMachines)
-      const picked = ms.filter(x => set.has(x)).length
-      return picked > 0 && picked < ms.length
+      if (this.mode === 'radio') return false
+      const codes = (this.groupMachines[name] || []).map(m => m.code)
+      if (!codes.length) return false
+      const set = new Set(this.selectedCodes)
+      const picked = codes.filter(c => set.has(c)).length
+      return picked > 0 && picked < codes.length
     },
 
     // confirm / close
     confirmSelection() {
-      this.$emit('select-machine', this.selectedMachines.slice())
+      // Build array of { "<machine_name>": "<machine_code>" }
+      const payload = []
+      if (this.mode === 'radio') {
+        const code = this.selectedCodes || ''
+        if (code) {
+          const name = this.codeToName[code] || ''
+          payload.push({ [name]: code })
+        }
+      } else {
+        const set = new Set(this.selectedCodes)
+        set.forEach(code => {
+          const name = this.codeToName[code] || ''
+          if (name) payload.push({ [name]: code })
+        })
+      }
+
+      this.$emit('select-machine', payload)
       this.$emit('cancel')
     },
     closeWindow() {
@@ -255,10 +391,12 @@ export default {
     resetAfterSearch() {
       this.groups = []
       this.groupMachines = {}
+      this.groupCodeOf = {}
+      this.groupCountOf = {}
       this.activeGroup = ''
       this.currentGroupPage = 1
       this.currentMachinePage = 1
-      // this.selectedMachines = []
+      this.selectedCodes = (this.mode === 'radio') ? '' : []
     },
   },
 }
@@ -290,6 +428,7 @@ export default {
 .group-table th, .group-table td, .machine-table th, .machine-table td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; word-wrap: break-word; }
 .group-table thead tr, .machine-table thead tr { background: #f6f7fb; }
 .chk-col { width: 44px; text-align: center; }
+.group-col { width: 250px; text-align: center; }
 .count-col { width: 72px; text-align: right; }
 
 .group-table tbody tr { cursor: pointer; }

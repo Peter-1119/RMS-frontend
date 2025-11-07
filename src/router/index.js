@@ -9,19 +9,21 @@ import RejectedDocuments from '@/views/RejectedDocuments.vue';
 import SpecificationParamPage from '@/views/SpecificationParamPage.vue';
 import NewSpecification from "@/views/NewSpecification.vue"
 import ParametersSearch from '@/views/ParametersSearch.vue';
+import SpecificationViewPage from '@/views/SpecificationViewPage.vue';
 
 const routes = [
-  {path: '/',                   redirect: '/login',},
-  {path: '/login',              name: 'Login',              component: LoginPage},
-  {path: '/home',               name: 'home-alias',         component: HomeView,                  meta: { requiresAuth: true }},
-  {path: '/Specification',      name: 'Specification',      component: SpecificationParamPage,    meta: { requiresAuth: true }},
-  {path: '/new-instruction',    name: 'new-instruction',    component: NewInstruction,            meta: { requiresAuth: true }},
-  {path: "/new-specification",  name: "new-specification",  component: NewSpecification,          meta: { requiresAyth: true }},
-  {path: '/SearchPage',         name: 'SearchPage',         component: SearchPage,                meta: { requiresAuth: true }},
-  {path: '/DraftDocuments',     name: 'DraftDocuments',     component: DraftDocuments,            meta: { requiresAuth: true }},
-  {path: '/SubmittedDocuments', name: 'SubmittedDocuments', component: SubmittedDocuments,        meta: { requiresAuth: true }},
-  {path: '/RejectedDocuments',  name: 'RejectedDocuments',  component: RejectedDocuments,         meta: { requiresAuth: true }},
-  {path: '/ParametersSearch',   name: 'ParametersSearch',  component: ParametersSearch,           meta: { requiresAuth: true }},
+  {path: '/',                       redirect: '/login',},
+  {path: '/login',                  name: 'Login',                  component: LoginPage},
+  {path: '/home',                   name: 'home-alias',             component: HomeView,                    meta: { requiresAuth: true }},
+  {path: '/Specification',          name: 'Specification',          component: SpecificationParamPage,      meta: { requiresAuth: true }},
+  {path: '/new-instruction',        name: 'new-instruction',        component: NewInstruction,              meta: { requiresAuth: true }},
+  {path: "/new-specification",      name: "new-specification",      component: NewSpecification,            meta: { requiresAyth: true }},
+  {path: '/SearchPage',             name: 'SearchPage',             component: SearchPage,                  meta: { requiresAuth: true }},
+  {path: '/DraftDocuments',         name: 'DraftDocuments',         component: DraftDocuments,              meta: { requiresAuth: true }},
+  {path: '/SubmittedDocuments',     name: 'SubmittedDocuments',     component: SubmittedDocuments,          meta: { requiresAuth: true }},
+  {path: '/RejectedDocuments',      name: 'RejectedDocuments',      component: RejectedDocuments,           meta: { requiresAuth: true }},
+  {path: '/ParametersSearch',       name: 'ParametersSearch',       component: ParametersSearch,            meta: { requiresAuth: true }},
+  {path: '/project-specification',  name: 'SpecificationViewPage',  component: SpecificationViewPage,       meta: { requiresAuth: true }}
 ];
 
 // ---- add this small helper at the top (file scope) ----

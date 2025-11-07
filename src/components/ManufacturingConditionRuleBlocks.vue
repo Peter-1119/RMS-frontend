@@ -23,7 +23,7 @@
           <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
         </div>
         <div class="r">
-          <i class="dot red" @click="setCellColor(i,'cond','#ff0000')"></i>
+          <!-- <i class="dot red" @click="setCellColor(i,'cond','#ff0000')"></i> -->
           <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
           <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
         </div>
@@ -33,7 +33,7 @@
       <!-- Parameter (Table 2) -->
       <div v-if="paramEditors[i]" class="menu right">
         <div class="r">
-          <i class="dot red" @click="setCellColor(i,'param','#ff0000')"></i>
+          <!-- <i class="dot red" @click="setCellColor(i,'param','#ff0000')"></i> -->
           <i class="dot blue" @click="setCellColor(i,'param','#0000ff')"></i>
           <i class="dot black" @click="setCellColor(i,'param','#000000')"></i>
         </div>
@@ -94,7 +94,7 @@ const Cell = TableCell.extend({
       class: { default: null },
       dropdownValue: { default: '' },
       dropdownOptions: { default: [] },
-      dropdownColor: { default: '#000' },
+      dropdownColor: { default: '#000000' },
       colIndex: { default: null },
     }
   },
@@ -112,7 +112,7 @@ const Cell = TableCell.extend({
         select.innerHTML =
           `<option value="">-- 選擇 --</option>` +
           (node.attrs.dropdownOptions || [])
-            .map(o => `<option value="${o.value}">${o.label}</option>`)
+            .map(o => `<option value="${o.label}">${o.label}</option>`)
             .join('')
         select.value = node.attrs.dropdownValue || ''
         select.addEventListener('change', () => {
@@ -552,7 +552,7 @@ function runParamValueValidation(ed){
     }
     for(let k=1;k<5;k++){
       const a=rowVals[k-1], b=rowVals[k]
-      if(a!=null && b!=null && a<b){ rowStatus[k-1]='value-error'; rowStatus[k]='value-error' }
+      if(a!=null && b!=null && a>b){ rowStatus[k-1]='value-error'; rowStatus[k]='value-error' }
     }
     let posRow = 1; for(let t=0;t<r;t++) posRow += table.content.child(t).nodeSize
     let acc=[posRow+1]; for(let t=0;t<cells.childCount-1;t++) acc.push(acc[t]+cells.child(t).nodeSize)

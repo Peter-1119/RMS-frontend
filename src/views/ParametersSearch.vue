@@ -55,8 +55,8 @@
 
     <MachinesListWindow 
         v-if="machineWindowVisable"
-        :selectMethod="'radio'"
-        :specific="specificKeyword"
+        :mode="'radio'"
+        :specification="specificKeyword"
         @selectMachine="getMachine"
         @cancel="machineWindowVisable=false"
     ></MachinesListWindow>
@@ -64,7 +64,7 @@
     <ItemListWindow
         v-if="itemWindowVisable"
         @selectItem="getItemType"
-        @cancel="itemsListVisible=false"
+        @cancel="itemWindowVisable=false"
     ></ItemListWindow>
 
 </template>
@@ -113,6 +113,7 @@ export default {
             if (payload) {
                 this.form.specific = payload;
                 this.specificKeyword = payload;
+                console.log("specificKeyword: ", this.specificKeyword);
             }
             else {
                 this.form.specific = "";
@@ -121,8 +122,10 @@ export default {
         },
         getMachine(payload) {
             if (payload) {
-                this.form.machine = payload;
-                this.machineKeyword = payload;
+                const entries = Object.entries(payload[0]);
+                const [mn, mc] = entries[0];
+                this.form.machine = mn;
+                this.machineKeyword = mn;
             }
             else {
                 this.form.machine = "";

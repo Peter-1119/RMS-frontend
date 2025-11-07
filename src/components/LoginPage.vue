@@ -36,7 +36,7 @@ export default {
             const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
             try{
                 const response = await axios.post(API_BASE_URL + "/api/loginTest", {empNo: this.username, empPw: this.password});
-                // const response = await axios.post(API_BASE_URL + "api/login", {empNo: this.username, empPw: this.password});
+                // const response = await axios.post(API_BASE_URL + "/api/login", {empNo: this.username, empPw: this.password});
 
                 if (response.data.success) {
                     this.errorMessage = "";
@@ -54,7 +54,7 @@ export default {
                     sessionStorage.setItem('loggedInUserdeptDesc', userDeptDescFromBackend);
                     sessionStorage.setItem('userToken', userToken);
                 }
-                else if(response.status == 401){
+                else if (response.status == 401){
                     alert(`${response.data}`);
                 }
             }

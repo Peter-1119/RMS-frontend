@@ -28,11 +28,15 @@
             <div class="form-group"><label for="doc-version">文件版本：</label><input type="text" id="doc-version" v-model="form.documentVersion" readonly/></div>
             <div class="form-group">
               <label for="apply-project">適用工程：</label>
-              <input class="input-machine" type="text" id="apply-project" v-model="form.attribute.applyProject" @click="projectsListVisible=!projectsListVisible" readonly/>
+              <!-- <input class="input-machine" type="text" id="apply-project" v-model="form.attribute.applyProject" @click="projectsListVisible=!projectsListVisible" readonly/> -->
+              <select v-model="form.attribute.applyProject">
+                <option value="">-- 請選擇適用工程 --</option>
+                <option v-for="p in projectList" :key="p.id" :value="p.projectName">{{ p.projectName }}</option>
+              </select>
             </div>
             <div class="form-group">
               <label for="machines">適用機台：</label>
-              <input class="input-machine" type="text" id="machines" v-model="form.attribute.machines" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
+              <input class="input-machine" type="text" id="machines" v-model="inputMachines" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
             </div>
             <div class="form-group"><label for="department">制訂單位：</label><input type="text" id="department" v-model="form.department" readonly/></div>
             <div class="form-group"><label for="author">制訂者：</label><input type="text" id="author" v-model="form.author" readonly/></div>
@@ -172,10 +176,18 @@
       </div>
 
       <div v-if="currentStep === 9" class="step-content">
-        <div style="display: flex; justify-content: space-between;">
+        <div style="display: flex; justify-content: space-between; align-items:center;">
           <h2>文件產出</h2>
-          <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button>
+          <div style="display:flex; gap:.5rem;">
+            <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">
+              {{ loading ? '產生中…' : '預覽（PDF）' }}
+            </button>
+            <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button>
+          </div>
         </div>
+
+        <p v-if="errorMsg" style="color:#c00; margin:.5rem 0;">{{ errorMsg }}</p>
+
         <div v-if="pdfSrc" class="pdf-viewer">
           <iframe :src="pdfSrc" width="100%" height="600px" frameborder="0"></iframe>
         </div>
@@ -206,6 +218,8 @@ import { useDraftToken } from '@/composables/useDraftToken'
 import { initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+
 // --- ensure we have a server-side token row ---
 const ensureDraftToken = async () => {
   if (draftToken.value) return draftToken.value
@@ -235,6 +249,8 @@ const prevStep = () => { if (currentStep.value > 1) currentStep.value-- }
 
 // ---------- basic form ----------
 let itemID = 0
+const projectList = ref([]);
+let inputMachines = ref([]);
 const form = reactive({
   documentType: 0,
   documentID: '',
@@ -256,8 +272,14 @@ const form = reactive({
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
 const getProject = val => { if (val) form.attribute.applyProject = val }
-const getMachines = val => { 
+const getMachines = val => {
+  // form.attribute.machines = Object.keys(val)
   form.attribute.machines = val
+  inputMachines = val.map(m => {
+    const entries = Object.entries(m);
+    const [mn, mc] = entries[0];
+    return `(${mc})${mn}`
+  })
   console.log("machines: ", form.attribute.machines)
   // form.attribute.machines = val ? val.join(', ') : ''
 }
@@ -275,6 +297,7 @@ const processFlowData = ref({
 function serializeProcessFlowToBlocks(pf) {
   if (pf.mode === 'table') {
     return [{
+      step_type: 0,
       tier: 1,
       data: [{
         option: 2,
@@ -285,6 +308,7 @@ function serializeProcessFlowToBlocks(pf) {
     }]
   }
   return [{
+    step_type: 0,
     tier: 1,
     data: [{
       option: 1,
@@ -344,6 +368,7 @@ const serializeManagementToBlocks = () => {
   // 3.1 specific — treat as tier 1 with a single table (option=2)
   if (managementSpecific.value?.data?.jsonContent) {
     out.push({
+      step_type: 1,
       tier: managementSpecific.value.tier || 1,
       data: [{
         option: 2,
@@ -357,6 +382,7 @@ const serializeManagementToBlocks = () => {
   // 3.2+ dynamic — each UI block is a tier
   managementBlocks.value.forEach(blk => {
     out.push({
+      step_type: 1,
       tier: blk.tier,
       data: (blk.data || []).map(it => ({
         option: it.option ?? 0,            // 0 title / 1 text-img / 2 table
@@ -418,7 +444,7 @@ const OPTS = [
   {name: "乾膜種類", options: [{label:'ADC-301',value:'adc_301'},{label:'FF-1030',value:'ff_1030'},{label:'HS-930',value:'hs_930'},{label:'HW-630',value:'hw_630'},{label:'AQ-209A',value:'aq_209a'},{label:'HY-920',value:'hy_920'},{label:'ADW-401',value:'adw_401'},{label:'H-9540',value:'h_9540'},{label:'FF-1040',value:'ff_1040'},{label:'FF-1020',value:'ff_1020'},{label:'AQ-1558',value:'aq_1558'}]},
 ]
 const PARAM_ROWS = [
-  ['槽體','管理項目','規格上限','操作上限','中值','操作下限','規格下限','單位','參數下放','說明'],
+  ['槽體','管理項目','規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)','單位','參數下放','說明'],
   ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
   ['熱水洗1','溫度','','','','','','℃','Y',''],
   ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
@@ -429,6 +455,7 @@ const PARAM_ROWS = [
 // NEW — send both parameter & condition for each tier
 const serializeMCRToParams = () => {
   return (mcrBlocks.value || []).map((blk, i) => ({
+    step_type: 2,
     tier_no: i + 1,
     code: blk.code || `XXXX${i + 1}`,
     jsonParameterContent: blk.data?.jsonParameterContent || null,
@@ -474,6 +501,7 @@ const serializeExceptionsToBlocks = () => {
   return (exceptionBlocks.value || [])
     .sort((a,b) => (a.tier||0) - (b.tier||0))
     .map(blk => ({
+      step_type: 3,
       tier: blk.tier,
       data: (blk.data || []).map(it => ({
         option: it.option ?? 0,              // 0/1/2 map to content_type
@@ -523,14 +551,109 @@ const formRemove = id => {
 }
 
 // ---------- 文件產出 (step 9) — skipped per your request ----------
-const pdfSrc = ref(null)
-// keep a stub so template calls don’t break
-const generateAndDisplayPdf = () => {
-  console.warn('generateAndDisplayPdf skipped (data structure WIP).')
+const loading  = ref(false)
+const errorMsg = ref('')
+const captureId = ref('')
+
+async function generateAndDisplayPdf() {
+  loading.value = true
+  errorMsg.value = ''
+  captureId.value = ''
+  try {
+    const payload = {
+      attribute: [{...form}],
+      content: [...serializeProcessFlowToBlocks(processFlowData.value), ...serializeManagementToBlocks(), ...serializeMCRToParams(), ...serializeExceptionsToBlocks()],
+      reference: [
+        ...(relativeDocuments.value || []).map(d => ({referenceType: 0, referenceDocumentID: d.docId, referenceDocumentName: d.docName})),
+        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      ],
+    }
+
+    const res = await axios.post(`${API_BASE_URL}/capture/capture-request`, payload)
+    if (!res?.data?.ok) throw new Error(res?.data?.error || 'capture failed')
+    captureId.value = res.data.payload_id
+    alert(`Captured OK. payload_id = ${captureId.value}`)
+
+    res = await axios.post(`${API_BASE_URL}/docs/generate/word`, payload)
+    console.log("docx: ", res)
+  } catch (e) {
+    console.error(e)
+    errorMsg.value = e?.message || 'capture error'
+  } finally {
+    loading.value = false
+  }
 }
-const requestEIPAPI = () => {
-  console.warn('requestEIPAPI skipped.')
+
+function extractFilenameFromDisposition(disposition, fallback = 'document.docx') {
+  if (!disposition) return fallback
+  // RFC 5987: filename*=UTF-8''...
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)
+  if (star?.[1]) return decodeURIComponent(star[1])
+  // Plain filename="..."
+  const plain = /filename\s*=\s*"?([^\";]+)"?/i.exec(disposition)
+  if (plain?.[1]) return plain[1]
+  return fallback
 }
+
+async function generateAndDownloadDocx() {
+  loading.value = true
+  errorMsg.value = ''
+  try {
+    const payload = {
+      attribute: [{...form}],
+      content: [...serializeProcessFlowToBlocks(processFlowData.value), ...serializeManagementToBlocks(), ...serializeMCRToParams(), ...serializeExceptionsToBlocks()],
+      reference: [
+        ...(relativeDocuments.value || []).map(d => ({referenceType: 0, referenceDocumentID: d.docId, referenceDocumentName: d.docName})),
+        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      ],
+    }
+    const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
+
+    const res = await axios.post(url, payload, {
+      responseType: 'blob',
+    })
+
+    const contentType =
+      res.headers['content-type'] ||
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const dispo = res.headers['content-disposition']
+    const filename = extractFilenameFromDisposition(dispo, 'document.docx')
+
+    const blob = new Blob([res.data], { type: contentType })
+
+    // IE/old Edge
+    // @ts-ignore
+    if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+      // @ts-ignore
+      window.navigator.msSaveOrOpenBlob(blob, filename)
+      return
+    }
+
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+  } catch (e) {
+    console.error(e)
+    if (e?.response?.data instanceof Blob) {
+      try {
+        const t = await e.response.data.text()
+        errorMsg.value = t || e.message || 'download error'
+      } catch {
+        errorMsg.value = e?.message || 'download error'
+      }
+    } else {
+      errorMsg.value = e?.message || 'download error'
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
 
 // ---------- saving ----------
 const isSaving = ref(false)
@@ -573,6 +696,14 @@ const saveDraft = async () => {
 
 // ---------- Load on mount ----------
 onMounted(async () => {
+  try {
+    const url = `${API_BASE_URL}/mes/engineering`
+    const projects = await axios.get(`${API_BASE_URL}/mes/engineering`, {params: { pageSize: 40 }})
+    projectList.value = projects.data.data.items || []
+  }
+  catch (e) {
+    alert('載入適用工程失敗')
+  }
   const t = await ensureDraftToken()
   if (!t) return
   try {

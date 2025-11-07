@@ -223,6 +223,23 @@
 
       <!-- Step 8 文件產出（PDF 先略） -->
       <div v-if="currentStep === 8" class="step-content">
+        <div style="display: flex; justify-content: space-between; align-items:center;">
+          <h2>文件產出</h2>
+          <div style="display:flex; gap:.5rem;">
+            <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">
+              {{ loading ? '產生中…' : '預覽（PDF）' }}
+            </button>
+            <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button>
+          </div>
+        </div>
+
+        <p v-if="errorMsg" style="color:#c00; margin:.5rem 0;">{{ errorMsg }}</p>
+
+        <div v-if="pdfSrc" class="pdf-viewer">
+          <iframe :src="pdfSrc" width="100%" height="600px" frameborder="0"></iframe>
+        </div>
+      </div>
+      <!-- <div v-if="currentStep === 8" class="step-content">
         <div style="display:flex;justify-content:space-between;">
           <h2>文件產出</h2>
           <button class="layer-action-btn add" disabled>拋轉EIP（稍後改 Word ）</button>
@@ -230,7 +247,7 @@
         <div class="pdf-viewer muted">
           （產出改版中，稍後接 Word 範本）
         </div>
-      </div>
+      </div> -->
     </div>
   </div>
 </template>
@@ -305,6 +322,10 @@ function onSelectItemType(payload) {
   itemsListVisible.value = false
 }
 
+async function requestItemFromAPI() {
+    
+}
+
 const machineGroups = ref([])
 async function fetchMachineGroups(specific) {
   machineGroups.value = []
@@ -340,9 +361,9 @@ const makeBlock = (stepType, tier) => ({
   }],
 })
 
-function addSpecLayer()          { specBlocks.value.push   (makeBlock(4, specBlocks.value.length    + 1)) }
-function addQualityLayer()       { qualityBlocks.value.push(makeBlock(6, qualityBlocks.value.length + 1)) }
-function addOtherLayer()         { otherBlocks.value.push  (makeBlock(7, otherBlocks.value.length   + 1)) }
+function addSpecLayer()          { specBlocks.value.push   (makeBlock(2, specBlocks.value.length    + 1)) }
+function addQualityLayer()       { qualityBlocks.value.push(makeBlock(4, qualityBlocks.value.length + 1)) }
+function addOtherLayer()         { otherBlocks.value.push  (makeBlock(6, otherBlocks.value.length   + 1)) }
 
 function removeSpecLayer(id)     { specBlocks.value    = specBlocks.value   .filter(b => b.id !== id).map((b,i)=>({...b,tier:i+1})) }
 function removeQualityLayer(id)  { qualityBlocks.value = qualityBlocks.value.filter(b => b.id !== id).map((b,i)=>({...b,tier:i+1})) }
@@ -353,10 +374,11 @@ function updateQualityLayer(payload) { const i = qualityBlocks.value.findIndex(b
 function updateOtherLayer(payload)   { const i = otherBlocks.value  .findIndex(b=>b.id===payload.id);    if(i!==-1) otherBlocks.value[i]   = payload }
 
 // Helpers to convert DynamicEditor UI blocks → backend “generic blocks”
-const toGenericBlocks = (arr=[]) =>
+const toGenericBlocks = (arr=[], step_type) =>
   (arr || [])
     .sort((a,b)=>(a.tier||0)-(b.tier||0))
     .map(blk => ({
+      step_type,
       tier: blk.tier,
       data: (blk.data || []).map(it => ({
         option: it.option ?? 0,
@@ -387,6 +409,7 @@ const mcrBlocks = ref([]) // <-- the one you already bind to the component
 // serialize params → backend shape for /docs/params/save (step_type = 5)
 function serializeParamsFromMCR() {
   return (mcrBlocks.value || []).map((blk, i) => ({
+    step_type: 5,
     tier_no: i + 1,
     code: blk.code || `XXXX${i + 1}`,
     jsonParameterContent: blk.data?.jsonParameterContent || null,
@@ -429,6 +452,101 @@ const ensureDraftToken = async () => {
   }
 }
 
+// ---------- 文件產出 (step 8) — skipped per your request ----------
+const loading  = ref(false)
+const errorMsg = ref('')
+const captureId = ref('')
+
+async function generateAndDisplayPdf() {
+  loading.value = true
+  errorMsg.value = ''
+  captureId.value = ''
+  try {
+    const payload = {
+      attribute: [{...form}],
+      content: [...toGenericBlocks(specBlocks.value, 4), ...serializeParamsFromMCR(), ...toGenericBlocks(qualityBlocks.value, 6), ...toGenericBlocks(otherBlocks.value, 7)],
+      reference: [
+        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      ],
+    }
+
+    const res = await axios.post(`${API_BASE_URL}/capture/capture-request`, payload)
+    if (!res?.data?.ok) throw new Error(res?.data?.error || 'capture failed')
+    captureId.value = res.data.payload_id
+    alert(`Captured OK. payload_id = ${captureId.value}`)
+  } catch (e) {
+    console.error(e)
+    errorMsg.value = e?.message || 'capture error'
+  } finally {
+    loading.value = false
+  }
+}
+
+function extractFilenameFromDisposition(disposition, fallback = 'document.docx') {
+  if (!disposition) return fallback
+  // RFC 5987: filename*=UTF-8''...
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)
+  if (star?.[1]) return decodeURIComponent(star[1])
+  // Plain filename="..."
+  const plain = /filename\s*=\s*"?([^\";]+)"?/i.exec(disposition)
+  if (plain?.[1]) return plain[1]
+  return fallback
+}
+
+async function generateAndDownloadDocx() {
+  loading.value = true
+  errorMsg.value = ''
+  try {
+    const payload = {
+      attribute: [{...form}],
+      content: [...toGenericBlocks(specBlocks.value, 4), ...serializeParamsFromMCR(), ...toGenericBlocks(qualityBlocks.value, 6), ...toGenericBlocks(otherBlocks.value, 7)],
+      reference: [
+        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      ],
+    }
+    const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
+
+    const res = await axios.post(url, payload, {responseType: 'blob'})
+
+    const contentType = res.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const dispo = res.headers['content-disposition']
+    const filename = extractFilenameFromDisposition(dispo, 'document.docx')
+
+    const blob = new Blob([res.data], { type: contentType })
+
+    // IE/old Edge
+    // @ts-ignore
+    if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+      // @ts-ignore
+      window.navigator.msSaveOrOpenBlob(blob, filename)
+      return
+    }
+
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+  } catch (e) {
+    console.error(e)
+    if (e?.response?.data instanceof Blob) {
+      try {
+        const t = await e.response.data.text()
+        errorMsg.value = t || e.message || 'download error'
+      } catch {
+        errorMsg.value = e?.message || 'download error'
+      }
+    } else {
+      errorMsg.value = e?.message || 'download error'
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
 // ---------- save ----------
 const isSaving = ref(false)
 const saveDraft = async () => {
@@ -442,17 +560,17 @@ const saveDraft = async () => {
     if (!a?.success) { isSaving.value = false; return alert(a?.message || '屬性儲存失敗') }
 
     // 2) step 3: 規範（條文/說明/表格） → generic blocks (step_type = 4)
-    await saveBlocks(t, 4, toGenericBlocks(specBlocks.value))
+    await saveBlocks(t, 4, toGenericBlocks(specBlocks.value, 4))
 
     // 3) step 4: 參數一覽表 → params (step_type = 5)
     await saveParams(t, serializeParamsFromMCR(), 5)  // SPEC_PARAM = 5
     // await saveParams(t, serializeParams(), 5)
 
     // 4) step 5: 品質與規格內容 → generic blocks (step_type = 6)
-    await saveBlocks(t, 6, toGenericBlocks(qualityBlocks.value))
+    await saveBlocks(t, 6, toGenericBlocks(qualityBlocks.value, 6))
 
     // 5) step 7: 其他 → generic blocks (step_type = 7)
-    await saveBlocks(t, 7, toGenericBlocks(otherBlocks.value))
+    await saveBlocks(t, 7, toGenericBlocks(otherBlocks.value, 7))
 
     // 6) step 6: 使用表單 → references
     await saveReferences(t, {
@@ -483,7 +601,7 @@ onMounted(async () => {
 
     // 2) 規範 blocks (step_type = 4)
     const sp = await loadBlocks(t, 4)
-    if (sp?.success) specBlocks.value = fromGenericBlocks(sp, 4)
+    if (sp?.success) specBlocks.value = fromGenericBlocks(sp, 2)
 
     // 3) 參數 (step_type = 5)
     const pm = await loadParams(t, 5)
@@ -491,11 +609,11 @@ onMounted(async () => {
 
     // 4) 品質與規格 blocks (step_type = 6)
     const ql = await loadBlocks(t, 6)
-    if (ql?.success) qualityBlocks.value = fromGenericBlocks(ql, 6)
+    if (ql?.success) qualityBlocks.value = fromGenericBlocks(ql, 4)
 
     // 5) 其他 blocks (step_type = 7)
     const ot = await loadBlocks(t, 7)
-    if (ot?.success) otherBlocks.value = fromGenericBlocks(ot, 7)
+    if (ot?.success) otherBlocks.value = fromGenericBlocks(ot, 6)
 
     // 6) 使用表單
     const rf = await loadReferences(t)

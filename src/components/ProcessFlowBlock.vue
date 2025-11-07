@@ -215,7 +215,7 @@ const setMode = (mode)=> { m.value.mode = mode }
       <span v-else-if="m.file" class="hint">已選檔</span>
 
       <div class="menu color">
-        <div class="font-color red"   @click="applyColor('red')"></div>
+        <!-- <div class="font-color red"   @click="applyColor('red')"></div> -->
         <div class="font-color blue"  @click="applyColor('blue')"></div>
         <div class="font-color black" @click="applyColor(null)"></div>
       </div>

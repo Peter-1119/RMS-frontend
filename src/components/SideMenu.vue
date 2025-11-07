@@ -29,8 +29,9 @@ export default {
                     {id: 21, title: '文件新建立', link: '/new-specification'},
                     {id: 22, title: '文件變版', link: '#'}
                 ]},
-                {id: 3, title: '條件規則設定', children: [
-                    {id: 31, title: "規則一覽表", link: "/Specification"}
+                {id: 3, title: '資料設定', children: [
+                    {id: 31, title: "規則一覽表", link: "/Specification"},
+                    {id: 32, title: "適用工程一覽表", link: "/project-specification"}
                 ]},
                 {id: 4, title: '檢索', children: [
                     {id: 41, title: "文件檢索", link: '/SearchPage'},
@@ -72,7 +73,7 @@ export default {
     display: flex;
     flex-direction: column;
     width: 250px;
-    height: 100vh;
+    flex-grow: 1;
     background-color: #fff;
     border-right: 1px solid #e0e0e0;
     box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);

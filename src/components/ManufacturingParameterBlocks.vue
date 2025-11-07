@@ -110,7 +110,7 @@ async function fetchGroups() {
 /* ===== Parameter table template ===== */
 const LOCK_COLS = [0,1,7,8]
 const DEFAULT_ROWS = [
-  ['槽體','管理項目','規格上限','操作上限','中值','操作下限','規格下限','單位','參數下放','說明'],
+  ['槽體','管理項目','規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)','單位','參數下放','說明'],
   ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
   ['熱水洗1','溫度','','','','','','℃','Y',''],
   ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
@@ -280,7 +280,7 @@ function runParamValueValidation(ed){
     }
     for(let k=1;k<values.length;k++){
       const a=values[k-1], b=values[k]
-      if(a!=null && b!=null && a<b){ status[k-1]='value-error'; status[k]='value-error' }
+      if(a!=null && b!=null && a>b){ status[k-1]='value-error'; status[k]='value-error' }
     }
     let posRow = 1; for(let t=0;t<r;t++) posRow += table.content.child(t).nodeSize
     let acc=[posRow+1]; for(let t=0;t<cells.childCount-1;t++) acc.push(acc[t]+cells.child(t).nodeSize)

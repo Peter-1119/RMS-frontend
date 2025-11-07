@@ -6,7 +6,7 @@
             <div class="management-operation-block">
                 
                 <div class="menu color">
-                    <div class="font-color red" @click="editor?.chain().focus().setColor('red').run()"></div>
+                    <!-- <div class="font-color red" @click="editor?.chain().focus().setColor('red').run()"></div> -->
                     <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
                     <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
                     <!-- <button class="menu-btn" @click="outputFocusRow()">輸出列</button> -->
@@ -48,7 +48,7 @@ const tableEditorExtensions = [
 
 const lockCols = [0, 1, 2, 8, 9];
 const initialTableData = [
-    ["項次", "槽體", "管理項目", "規格上限", "操作上限", "中值", "操作下限", "規格下限", "單位", "參數下放", "檢查頻率", "檢查方式", "檢驗人員", "記錄", "備註/參考指示書"],
+    ["項次", "槽體", "管理項目", '規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)', "單位", "參數下放", "檢查頻率", "檢查方式", "檢驗人員", "記錄", "備註/參考指示書"],
     ["", "熱水洗1", "噴壓", "", "", "", "", "", "kgf/cm2", "Y", "", "", "", "", ""],
     ["", "熱水洗1", "溫度", "", "", "", "", "", "℃", "Y", "", "", "", "", ""],
     ["", "剝膜1", "氫氧化鈉NaOH", "", "", "", "", "", "%", "Y", "", "", "", "", ""],
@@ -163,7 +163,7 @@ export default {
 
                 const statusCheck = (status) => { return (status == "valid" || status == "error") }
                 for (let index = 1; index < 5; index++) {
-                    if (statusCheck(valueStatus[index - 1]) && statusCheck(valueStatus[index]) && (values[index - 1] < values[index])) {
+                    if (statusCheck(valueStatus[index - 1]) && statusCheck(valueStatus[index]) && (values[index - 1] > values[index])) {
                         valueStatus[index - 1] = "error"
                         valueStatus[index] = "error"
                     }

@@ -1,18 +1,19 @@
 <template>
     <div class="block-container">
-        <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockIndex" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
+        <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem.client_temp_id" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
             <div class="block-header">
                 <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
                 
-                <template v-if="blockIndex === 0">
+                <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
+                <!-- <template v-if="blockIndex === 0">
                     <EditorContent :editor="titleEditor" class="title-editor-content" />
                 </template>
                 <template v-else>
                     <input type="text" placeholder="輸入標題" v-model="blockItem.jsonHeader" class="process-title-input">
-                </template>
+                </template> -->
 
                 <div class="menu color">
-                    <div class="font-color red" @click="setGenericColor('red')"></div>
+                    <!-- <div class="font-color red" @click="setGenericColor('red')"></div> -->
                     <div class="font-color blue" @click="setGenericColor('blue')"></div>
                     <div class="font-color black" @click="setGenericColor(null)"></div>
                 </div>
@@ -91,7 +92,7 @@ const step = ref(props.blockEditors.step)
 const tier = ref(props.blockEditors.tier)
 const localBlockContents = reactive({ ...props.blockEditors }) // shallow copy is enough since we replace fields
 
-const titleEditor = ref(null)
+const titleEditor = reactive({})
 const editors = reactive({})         // { [idx]: Editor }
 const activeEditor = ref(null)
 const fileInputRefs = ref([])        // array-style refs per block index
@@ -132,14 +133,38 @@ const canMergeOrSplit = idx => {
 }
 
 // ---------- editor init / lifecycle ----------
-const initTitleEditor = () => {
-  titleEditor.value = new Editor({
-    content: localBlockContents.data[0].jsonHeader || initialDoc(),
+const initTitleEditor = (idx) => {
+  titleEditor[idx]?.destroy()
+  delete titleEditor[idx]
+
+  // 處理舊格式的字串標題，轉換為 Tiptap JSON 格式
+  let content = null
+  if (localBlockContents.data[idx] == undefined) {
+    content = initialDoc()
+  }
+  else {
+    content = localBlockContents.data[idx].jsonHeader
+    if (typeof content === 'string' && content) {
+      content = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }] }
+    }
+  }
+  console.log(content)
+
+  const ed = new Editor({
+    content: deepClone(content),
     extensions: titleExt,
     editorProps: { attributes: { class: 'title-editor-content' } },
-    onFocus: ({ editor }) => setActiveEditor(editor),
-    onUpdate: ({ editor }) => { localBlockContents.data[0].jsonHeader = editor.getJSON() },
+    onFocus: ({ editor }) => setActiveEditor(editor), 
+    onUpdate: ({ editor }) => { 
+      // 綁定 JSON 內容回資料模型
+      localBlockContents.data[idx].jsonHeader = editor.getJSON() 
+    },
   })
+
+  titleEditor[idx] = ed
+  if (!localBlockContents.data[idx].jsonHeader) {
+    localBlockContents.data[idx].jsonHeader = ed.getJSON()
+  }
 }
 
 const initBlockEditor = (idx, option) => {
@@ -169,9 +194,13 @@ const initBlockEditor = (idx, option) => {
 }
 
 onMounted(() => {
-  initTitleEditor()
+  localBlockContents.data.forEach(bd => {
+    bd.client_temp_id = `temp-${uuidv1()}`
+  })
+  console.log("localBlockContents: ", localBlockContents)
   // lazy init only for active options
   nextTick(() => {
+    localBlockContents.data.forEach((blk, i) => { initTitleEditor(i) })
     localBlockContents.data.forEach((blk, i) => blk.option !== 0 && initBlockEditor(i, blk.option))
   })
 })
@@ -191,10 +220,13 @@ watch(() => props.blockEditors.tier, t => {
 // ---------- UI handlers ----------
 const addSmallBlock = () => {
   localBlockContents.data.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, option: 0, jsonHeader: null, jsonContent: null, files: [] })
+  initTitleEditor(localBlockContents.data.length - 1)
 }
 const removeSmallBlock = (idx) => {
   if (!confirm('確定要刪除此子區塊?')) return
+  titleEditor[idx]?.destroy()
   editors[idx]?.destroy()
+  delete titleEditor[idx]
   delete editors[idx]
   localBlockContents.data.splice(idx, 1)
 }
@@ -220,9 +252,7 @@ const triggerFileInput = idx => {
   const el = fileInputRefs.value[idx]
   if (Array.isArray(el) ? el[0] : el) (Array.isArray(el) ? el[0] : el).click()
 }
-
 const removeFile = (idx, picIdx) => localBlockContents.data[idx].files.splice(picIdx, 1)
-
 const handleImageUpload = async (evt, idx) => {
   const file = evt.target.files?.[0]
   const ed = editors[idx]
