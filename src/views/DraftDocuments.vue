@@ -145,16 +145,15 @@ export default {
     // optional: delete handler
     async deleteDraft(item) {
       if (!item?.documentToken) return
-      if (!confirm(`確定刪除「${item.documentName}」草稿？`)) return
+      if (!confirm(`確定刪除「${item.documentName || item.documentToken}」草稿？`)) return
       try {
         await axios.delete(`${API_BASE_URL}/docs/${encodeURIComponent(item.documentToken)}`)
-        // reload current page
-        this.loadDrafts()
+        await this.loadDrafts()
       } catch (e) {
-        alert(e?.response?.data?.error || e.message || '刪除失敗')
+        const msg = e?.response?.data?.error || e.message || '刪除失敗'
+        alert(msg)
       }
     },
-
     // Pagination helpers (add buttons in template if desired)
     changePage(p) {
       if (p < 1 || p > this.totalPages) return

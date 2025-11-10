@@ -160,13 +160,45 @@ export default {
     machinesOfActiveGroup() {
       return this.groupMachines[this.activeGroup] || []
     },
+    // Fast reverse index: code -> { machine, code }
+    codeToMachine() {
+      const map = {}
+      Object.values(this.groupMachines).forEach(arr => {
+        arr.forEach(m => { map[m.code] = m })
+      })
+      return map
+    },
+    // Set for quick membership
+    selectedCodeSet() {
+      return new Set(this.selectedCodes || [])
+    },
+    // Only in checkbox mode: show active group's machines + any selected from other groups
+    displayedMachines() {
+      if (this.mode !== 'checkbox') return this.machinesOfActiveGroup
+      const base = this.machinesOfActiveGroup
+      if (!base.length) return Array.from(this.selectedCodeSet)
+        .map(c => this.codeToMachine[c])
+        .filter(Boolean)
+      const inActive = new Set(base.map(m => m.code))
+      const extras = Array.from(this.selectedCodeSet)
+        .filter(c => !inActive.has(c))
+        .map(c => this.codeToMachine[c])
+        .filter(Boolean)
+      // concat: keep original ordering for the active group, then selected extras
+      return base.concat(extras)
+    },
+    // Paginate the *currently displayed* list
+    currentMachineList() {
+      // checkbox mode: use displayedMachines; radio: keep original
+      return this.mode === 'checkbox' ? this.displayedMachines : this.machinesOfActiveGroup
+    },
     totalMachinePages() {
-      if (!this.machinesOfActiveGroup.length) return 1
-      return Math.ceil(this.machinesOfActiveGroup.length / this.machinePageRows)
+      if (!this.currentMachineList.length) return 1
+      return Math.ceil(this.currentMachineList.length / this.machinePageRows)
     },
     paginatedMachines() {
       const start = (this.currentMachinePage - 1) * this.machinePageRows
-      return this.machinesOfActiveGroup.slice(start, start + this.machinePageRows)
+      return this.currentMachineList.slice(start, start + this.machinePageRows)
     },
 
     // code -> name (for confirm payload)
