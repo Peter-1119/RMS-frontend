@@ -1,6 +1,9 @@
 <template>
   <div class="blk-wrap">
-    <button class="btn add" @click="addBlock">新增下一層</button>
+    <!-- 沒有任何 PMS + 條件 → 禁用按鈕 -->
+    <button class="btn add" @click="addBlock" :disabled="noAnyParams">
+      新增下一層
+    </button>
 
     <div v-for="(b,i) in blocks" :key="b.id" class="blk">
       <div class="blk-hd">
@@ -16,35 +19,57 @@
         </div>
       </div>
 
-      <!-- Condition (Table 1) -->
-      <div v-if="condEditors[i]" class="menu">
-        <div class="l">
-          <button class="btn ghost" @click="addCondRow(i)">新增列</button>
-          <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
-        </div>
-        <div class="r">
-          <!-- <i class="dot red" @click="setCellColor(i,'cond','#ff0000')"></i> -->
-          <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
-          <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
-        </div>
+      <!-- ★ 兩邊都沒有資料：只顯示這句 -->
+      <div v-if="noAnyParams" class="hint empty">
+        選擇的機台無任何參數
       </div>
-      <EditorContent v-if="condEditors[i]" :editor="condEditors[i]" class="ed ed-cond" />
 
-      <!-- Parameter (Table 2) -->
-      <div v-if="paramEditors[i]" class="menu right">
-        <div class="r">
-          <!-- <i class="dot red" @click="setCellColor(i,'param','#ff0000')"></i> -->
-          <i class="dot blue" @click="setCellColor(i,'param','#0000ff')"></i>
-          <i class="dot black" @click="setCellColor(i,'param','#000000')"></i>
+      <!-- ★ 只要有任一種，就照各自情況顯示 -->
+      <template v-else>
+        <!-- ===== 條件表 (Condition) ===== -->
+        <div v-if="hasConditions">
+          <div v-if="condEditors[i]" class="menu">
+            <div class="l">
+              <button class="btn ghost" @click="addCondRow(i)">新增列</button>
+              <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
+            </div>
+            <div class="r">
+              <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
+              <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
+            </div>
+          </div>
+          <EditorContent
+            v-if="condEditors[i]"
+            :editor="condEditors[i]"
+            class="ed ed-cond"
+          />
         </div>
-      </div>
-      <EditorContent v-if="paramEditors[i]" :editor="paramEditors[i]" class="ed ed-param" />
+        <!-- 沒有條件參數 -->
+        <p v-else class="hint empty">此機台無條件參數</p>
+
+        <!-- ===== PMS 參數表 (Parameter) ===== -->
+        <div v-if="hasPms">
+          <div v-if="paramEditors[i]" class="menu right">
+            <div class="r">
+              <i class="dot blue" @click="setCellColor(i,'param','#0000ff')"></i>
+              <i class="dot black" @click="setCellColor(i,'param','#000000')"></i>
+            </div>
+          </div>
+          <EditorContent
+            v-if="paramEditors[i]"
+            :editor="paramEditors[i]"
+            class="ed ed-param"
+          />
+        </div>
+        <!-- 沒有 PMS -->
+        <p v-else class="hint empty">此機台無PMS資料</p>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount, watch, computed } from 'vue'
 import { v1 as uuidv1 } from 'uuid'
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import Document from '@tiptap/extension-document'
@@ -61,15 +86,16 @@ import { CellSelection } from 'prosemirror-tables'
 
 /* ===== Props ===== */
 const props = defineProps({
-  dataBlocks: { type: Array, default: () => [] },     // saved blocks
-  // Templates can be:
-  // 1) TipTap JSON doc (object with type:'doc')
-  // 2) Condition: Array<{ name: string, options: {label,value}[] }>
-  // 3) Parameter: 2D array of strings (header + rows)
+  dataBlocks: { type: Array, default: () => [] },
   condTemplate:  { type: [Object, Array], default: null },
   paramTemplate: { type: [Object, Array], default: null },
   currentStep: { type: Number, default: 0 },
+
+  // 新增：這台機台在「製造條件參數一覽表」中是否有 PMS / 條件參數
+  hasPms:        { type: Boolean, default: true },
+  hasConditions: { type: Boolean, default: true },
 })
+
 const emit = defineEmits(['update:dataBlocks','save'])
 
 /* ===== TipTap extensions ===== */
@@ -165,6 +191,7 @@ let idSeq = 0
 
 // Is this a TipTap doc?
 const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
+const noAnyParams = computed(() => !props.hasPms && !props.hasConditions)
 
 // Build condition table TipTap doc from lightweight template:
 // template: Array<{name:string, options:Array<{label,value}>}>
@@ -569,20 +596,26 @@ function runAllValidations(){
 /* ===== init per index ===== */
 function initEditors(i) {
   const b = blocks.value[i]
-  condEditors.value[i] = makeCondEditor(
-    b.data?.jsonConditionContent || null,
-    () => { runCondValidation() }
-  )
-  paramEditors.value[i] = makeParamEditor(
-    b.data?.jsonParameterContent || null,
-    ({ editor }) => { runParamValueValidation(editor); runParamDuplicateValidation() }
-  )
+  if (props.hasConditions) {
+    condEditors.value[i] = makeCondEditor(
+      b.data?.jsonConditionContent || null,
+      () => { runCondValidation() }
+    )
+  }
+  if (props.hasPms){
+    paramEditors.value[i] = makeParamEditor(
+      b.data?.jsonParameterContent || null,
+      ({ editor }) => { runParamValueValidation(editor); runParamDuplicateValidation() }
+    )
+  }
   nextTick(runAllValidations)
 }
 
 /* ===== Mount / Unmount ===== */
 onMounted(()=>{
-  if (!props.dataBlocks.length){ addBlock() }
+  if (!props.dataBlocks.length){ 
+    addBlock() 
+  }
   else {
     blocks.value = props.dataBlocks.map((blk,idx)=>({
       id:idSeq++,
@@ -619,6 +652,7 @@ watch(() => props.paramTemplate, () => {
 
 onBeforeUnmount(()=>{
   const payload = exportData()
+  console.log("manufacturing Condition Rule Blocks: ", payload)
   emit('save', payload)
   condEditors.value.forEach(e=>e?.destroy())
   paramEditors.value.forEach(e=>e?.destroy())
@@ -670,10 +704,8 @@ defineExpose({ exportData })
 
 
 <style scoped>
-/* .blk-wrap{padding:12px} */
 .btn{padding:6px 12px;border:none;border-radius:6px;color:#fff;background:#007bff;cursor:pointer}
 .btn:hover{opacity:.9}
-/* .btn.add{background:#28a745;margin-bottom:12px} */
 .btn.add { margin: 10px; background-color: #1666C0; padding: 8px 12px; border-radius: 5px; font-size: 14px; cursor: pointer;}
 .btn.info{background:#17a2b8}
 .btn.danger{background:#dc3545}
@@ -691,7 +723,7 @@ defineExpose({ exportData })
 .ed :deep(.ProseMirror){padding:8px;min-height:80px;outline:none}
 .ed :deep(table){border-collapse:collapse;width:100%;table-layout:fixed}
 .ed :deep(th),.ed :deep(td){border:1px solid #ddd;padding:8px;text-align:center;vertical-align:middle;min-width:72px;position:relative}
-.ed :deep(th){background:#f8f9fa;font-weight:700}
+.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:100px;z-index:5;}
 .ed :deep(.selectedCell){background:#e3f2fd!important;outline:2px solid #2196f3;outline-offset:-2px}
 .ed :deep([contenteditable="false"]){background:#f5f5f5;color:#666;cursor:not-allowed}
 .ed :deep(tr.dup-row td){background:#ffe6e6!important}      /* 5.1 duplicate row: red-ish */
@@ -701,4 +733,8 @@ defineExpose({ exportData })
 .ed :deep(.dropdown-cell){width:100%;padding:4px}
 .ed :deep(.cell-dropdown){width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;background:#fff}
 .ed :deep(.cell-dropdown:focus){outline:2px solid #2196f3;border-color:#2196f3}
+
+.hint { margin: 6px 0; color: #555; }
+.hint.empty { margin: 8px 0; color: #c62828; font-weight: 600; }
+
 </style>

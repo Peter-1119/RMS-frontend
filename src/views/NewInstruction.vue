@@ -72,7 +72,13 @@
 
       <div v-if="currentStep === 3" class="step-content">
         <h2>製造流程</h2>
-        <ProcessFlowBlock v-model="processFlowData" :cols="9" :token="draftToken"/>
+        <ProcessFlowBlock
+          :key="firstMachineCode + '-' + draftToken"
+          v-model="processFlowData"
+          :cols="9"
+          :token="draftToken"
+          :machineCode="firstMachineCode"
+        />
       </div>
 
       <div v-if="currentStep === 4" class="step-content">
@@ -85,8 +91,9 @@
           <ManagementSpecificBlock
             :machines="form.attribute.machines"
             :managementBlock="managementSpecific"
-            @update-table-data="updateManagementTableData">
-          </ManagementSpecificBlock>
+            :has-pms="hasPmsForStep3"
+            @update-table-data="updateManagementTableData"
+          />
         </div>
         <div v-if="managementBlocks.length > 0" class="management-content-bloc">
           <DynamicEditorBlock
@@ -101,11 +108,16 @@
 
       <div v-if="currentStep === 5" class="step-content">
         <h2>製造條件參數一覽表</h2>
+
         <ManufacturingConditionRuleBlocks
           :data-blocks="mcrBlocks"
-          :cond-template="OPTS"
-          :param-template="PARAM_ROWS"
+          :cond-template="condTemplate"
+          :param-template="paramTemplate"
           :current-step="currentStep"
+
+          :has-pms="hasPmsForMcr"
+          :has-conditions="hasCondForMcr"
+
           @update:dataBlocks="mcrBlocks = $event"
           @save="mcrBlocks = $event"/>
       </div>
@@ -203,7 +215,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import axios from 'axios'
 
 import ProjectListWindow from '@/components/ProjectListWindow.vue'
@@ -272,17 +284,51 @@ const form = reactive({
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
 const getProject = val => { if (val) form.attribute.applyProject = val }
-const getMachines = val => {
-  // form.attribute.machines = Object.keys(val)
-  form.attribute.machines = val
-  inputMachines = val.map(m => {
-    const entries = Object.entries(m);
-    const [mn, mc] = entries[0];
-    return `(${mc})${mn}`
-  })
-  console.log("machines: ", form.attribute.machines)
-  // form.attribute.machines = val ? val.join(', ') : ''
+const getMachines = async (val) => {
+  form.attribute.machines = val || []
+
+  // 顯示在 input 內的機台名稱
+  inputMachines.value = (val || []).map(machine => machine.name).join(', ')
+
+  // 取得「新的第一台機台代碼」
+  let newFirstCode = ''
+  if (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0) {
+    const m0 = form.attribute.machines[0]
+    newFirstCode = m0.machineCode || m0.MACHINE_CODE || m0.code || ''
+  }
+
+  // ⚠️ 這裡是關鍵：
+  // 若「機台真的有變」（包括從空 -> 有機台），重置 Step3 的流程資料
+  if (newFirstCode !== lastMachineCodeForProcessFlow.value) {
+    console.log('[Step3] machine changed for process flow:', lastMachineCodeForProcessFlow.value, '→', newFirstCode)
+
+    // 重置流程資料成「完全空」，讓 ProcessFlowBlock 重新掛載時判定為「新狀態」→ 自動用 PMS 帶入
+    processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null,}
+
+    // 記住目前流程綁的這台機台
+    lastMachineCodeForProcessFlow.value = newFirstCode
+  } else {
+    console.log('[Step3] machine unchanged, keep existing processFlowData')
+  }
+
+  // ---------- 以下維持你原本 Step4 / Step5 的 PMS / MCR ----------
+  if (Array.isArray(val) && val.length > 0) {
+    const [name, code] = Object.entries(val[0])[0]
+
+    await loadPmsTemplate(code)
+
+    mcrBlocks.value = []
+    await loadMcrTemplates(code)
+  } else {
+    managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } }
+    paramTemplate.value = null
+    condTemplate.value = null
+    mcrBlocks.value = []
+  }
 }
+
+
+
 
 // ---------- process (step 3) ----------
 const processFlowData = ref({
@@ -293,8 +339,23 @@ const processFlowData = ref({
   file: null,                   // { asset_id, url, path }
 })
 
+const lastMachineCodeForProcessFlow = ref('')
+const firstMachineCode = computed(() => {
+  const machines = form.attribute?.machines || []
+  if (!Array.isArray(machines) || !machines.length) return ''
+  const m0 = machines[0]
+
+  console.log("first machine code: ", m0.machineCode || m0.MACHINE_CODE || m0.code || '')
+
+  // 根據你實際的欄位調整，這裡做比較保險的寫法
+  return m0.machineCode || m0.MACHINE_CODE || m0.code || ''
+})
+
+
 // process-flow <-> blocks (step_type = 0)
 function serializeProcessFlowToBlocks(pf) {
+  console.log("pf: ", pf)
+  console.log("pf items: ", pf.items)
   if (pf.mode === 'table') {
     return [{
       step_type: 0,
@@ -302,7 +363,8 @@ function serializeProcessFlowToBlocks(pf) {
       data: [{
         option: 2,
         jsonHeader: pf.header_json || null,
-        jsonContent: { cols: Number(pf.cols || 9), items: Array.isArray(pf.items) ? pf.items : [] },
+        // jsonContent: { cols: Number(pf.cols || 9), items: pf.items },
+        jsonContent: pf.items,
         files: []
       }]
     }]
@@ -323,20 +385,95 @@ function serializeProcessFlowToBlocks(pf) {
 function loadProcessFlowFromBlocks(resp) {
   const firstTier = (resp?.blocks || [])[0]
   const first = (firstTier?.data || [])[0]
-  if (!first) return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+  if (!first) {
+    return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+  }
 
   if (first.option === 2) {
-    const cj = first.jsonContent || {}
-    return { mode: 'table', cols: Number(cj.cols || 9), header_json: first.jsonHeader || null, items: Array.isArray(cj.items) ? cj.items : [], file: null }
+    const jc = first.jsonContent
+
+    // 1️⃣ 舊格式：{ cols: 9, items: [...] }
+    if (jc && typeof jc === 'object' && Array.isArray(jc.items)) {
+      return {
+        mode: 'table',
+        cols: Number(jc.cols || 9),
+        header_json: first.jsonHeader || null,
+        items: jc.items,   // 這裡是舊版 steps array，ProcessFlowBlock 會自動升級成 doc JSON
+        file: null,
+      }
+    }
+
+    // 2️⃣ 新格式：TipTap doc JSON：{ type:'doc', content:[...] }
+    if (jc && typeof jc === 'object' && jc.type === 'doc') {
+      return {
+        mode: 'table',
+        cols: 9, // 你現在固定用 9 欄，真的要動態 cols 之後再加欄位
+        header_json: first.jsonHeader || null,
+        items: jc,   // 直接給 doc JSON，ProcessFlowBlock initialTableDoc 會直接使用
+        file: null,
+      }
+    }
+
+    // 3️⃣ 其他怪格式 → 給一個空的 table
+    return {
+      mode: 'table',
+      cols: 9,
+      header_json: first.jsonHeader || null,
+      items: [],
+      file: null,
+    }
   }
+
   if (first.option === 1) {
-    return { mode: 'image', cols: 9, header_json: first.jsonHeader || null, items: [], file: (first.files || [])[0] || null }
+    return {
+      mode: 'image',
+      cols: 9,
+      header_json: first.jsonHeader || null,
+      items: [],
+      file: (first.files || [])[0] || null,
+    }
   }
+
   return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
 }
 
+
 // ---------- 管理條件 (step 4) ----------
 const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
+const hasPmsForStep3  = ref(false)   // Step 3 生產基本條件 PMS
+
+// 載入第一台機台的 PMS 模板
+const loadPmsTemplate = async (machineCode) => {
+  if (!machineCode) {
+    managementSpecific.value = {
+      ...managementSpecific.value,
+      data: { jsonContent: null, arrayData: [] },
+    }
+    return
+  }
+
+  try {
+    const API = import.meta.env.VITE_APP_API_BASE_URL
+    const { data } = await axios.get(`${API}/mes/pms/machine-parameters`, {
+      params: { machine_id: machineCode },
+    })
+    
+    hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false
+    
+    const tableRows = data?.data?.table_rows || []
+
+    managementSpecific.value = {
+      ...managementSpecific.value,
+      data: {
+        ...managementSpecific.value.data,
+        arrayData: tableRows,     // 2D 陣列丟給子元件
+        jsonContent: null,        // 讓子元件用 arrayData 產生 TipTap 內容
+      },
+    }
+  } catch (e) {
+    console.error('loadPmsTemplate error:', e)
+  }
+}
 
 // handler for ManagementSpecificBlock
 const updateManagementTableData = (payload) => {
@@ -434,6 +571,9 @@ const mcrBlocks = ref([])
 const paramTemplate = ref(null)   // tiptap JSON for parameter table
 const condTemplate  = ref(null)   // tiptap JSON for condition table
 
+const hasPmsForMcr   = ref(false)   // 此機台 PMS（製造條件一覽表用）是否有資料
+const hasCondForMcr  = ref(false)   // 此機台 條件參數 是否有資料
+
 const OPTS = [
   {name: "銅電式樣", options: [{label:'全鍍',value:'full_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'局部銅電鍍',value:'partial_copper_plating'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'}]},
   {name: "製品式樣", options: [{label:'雙面板',value:'double_sided'},{label:'多層板外層',value:'mlb_outer'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'多層板內外層局部銅電鍍品',value:'mlb_inner_outer_partial'},{label:'無鍍銅品',value:'no_plating'},{label:'多層板',value:'mlb'},{label:'多層板外層線路',value:'mlb_outer_circuit'},{label:'多層板外層局部銅電鍍品',value:'mlb_outer_partial'},{label:'全板銅電鍍品',value:'full_board_plating'},{label:'局部銅電鍍品',value:'partial_plating'},{label:'多層板內層',value:'mlb_inner'},{label:'單面板',value:'single_sided'},{label:'FP品目',value:'fp_item'},{label:'單面板雙面銅材無鍍銅',value:'single_sided_double_copper_no_plating'}]},
@@ -451,6 +591,55 @@ const PARAM_ROWS = [
   ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
   ['剝膜1','作業溫度','','','','','','℃','Y','']
 ]
+
+const loadMcrTemplates = async (machineCode) => {
+  if (!machineCode) {
+    paramTemplate.value = null
+    condTemplate.value = null
+    return
+  }
+
+  try {
+    const API = import.meta.env.VITE_APP_API_BASE_URL
+
+    const [pmsRes, condRes] = await Promise.all([
+      axios.get(`${API}/mes/pms/machine-parameters-set-attribute`, {
+        params: { machine_id: machineCode },
+      }),
+      axios.get(`${API}/conditions/search-conditions-by-machines`, {
+        params: { keyword: machineCode },   // 用機台代碼當 keyword
+      }),
+    ])
+
+    hasPmsForMcr.value = (pmsRes.data.data.table_rows.length > 0) ? true : false
+    hasCondForMcr.value = (condRes.data.data.conditions.length > 0) ? true : false
+
+    // 1) PMS → parameter table template
+    const tableRows = pmsRes?.data?.data?.table_rows || []
+    paramTemplate.value = tableRows.length ? tableRows : null
+
+    // 2) 條件組 → condition template
+    const condList = condRes?.data?.data?.conditions || []
+    // condList 裡每一個長這樣：
+    // { id, name, parameters: ['全鍍', '多層板內外層', ...] }
+    const condTemplateArr = condList.map(c => ({
+      name: c.name,   // or c.condition_name，看你實際回傳欄位
+      options: (c.parameters || []).map(p => ({
+        label: p,
+        value: p,     // 這邊我用同一個字，之後如果有 code 再換
+      })),
+    }))
+
+    condTemplate.value = condTemplateArr.length ? condTemplateArr : null
+
+  } catch (e) {
+    console.error('loadMcrTemplates error:', e)
+    // 出錯就回到預設模板
+    paramTemplate.value = null
+    condTemplate.value = null
+  }
+}
+
 
 // NEW — send both parameter & condition for each tier
 const serializeMCRToParams = () => {
@@ -609,6 +798,7 @@ async function generateAndDownloadDocx() {
     }
     const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
 
+    console.log("payload: ", payload)
     const res = await axios.post(url, payload, {
       responseType: 'blob',
     })
@@ -687,7 +877,7 @@ const saveDraft = async () => {
       forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })),
     })
 
-    alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
+    alert(`草稿已儲存(時間：${a.issueTime || ''})`)
   } catch (e) {
     console.error(e)
     alert('儲存草稿失敗')
@@ -713,6 +903,22 @@ onMounted(async () => {
     form.department = sessionStorage.getItem('loggedInUserdeptName')
     form.author_id = sessionStorage.getItem('loggedInUserNo')
     form.author = sessionStorage.getItem('loggedInUserName')
+    // 顯示在 input 內的機台名稱
+    if (form.attribute.machines){
+        inputMachines.value = form.attribute.machines.map(machine => machine.name).join(", ")
+        hasCondForMcr.value = true
+        hasPmsForMcr.value = true
+        hasPmsForStep3.value = true
+    }
+
+    // 🚩 在這裡初始化「流程目前綁的機台」
+    const machines = form.attribute?.machines || []
+    if (Array.isArray(machines) && machines.length > 0) {
+      const m0 = machines[0]
+      lastMachineCodeForProcessFlow.value = m0.machineCode || m0.MACHINE_CODE || m0.code || ''
+    } else {
+      lastMachineCodeForProcessFlow.value = ''
+    }
 
     // 2) process flow (only if you add GET in backend)
     const pfResp = await loadBlocks(t, 0)

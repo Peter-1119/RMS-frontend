@@ -12,17 +12,19 @@
     </div>
 
     <!-- Steps -->
-    <div class="step-navigation">
-      <div
-        v-for="(step, idx) in steps"
-        :key="idx"
-        :class="['step-item', { active: currentStep === idx + 1, completed: currentStep > idx + 1 }]"
-        @click="goToStep(idx + 1)"
-      >
-        <div class="step-circle">{{ idx }}</div>
-        <div class="step-label">{{ step.label }}</div>
+    <!-- <section class="page" :style="{'--sticky-top-offset': stickyTop + 'px'}"> -->
+      <div ref="stepNavRef" class="step-navigation">
+        <div
+          v-for="(step, idx) in steps"
+          :key="idx"
+          :class="['step-item', { active: currentStep === idx + 1, completed: currentStep > idx + 1 }]"
+          @click="goToStep(idx + 1)"
+        >
+          <div class="step-circle">{{ idx }}</div>
+          <div class="step-label">{{ step.label }}</div>
+        </div>
       </div>
-    </div>
+    <!-- </section> -->
 
     <!-- Content -->
     <div class="form-section">
@@ -46,26 +48,16 @@
 
             <div class="form-group">
               <label for="item-type">品目：</label>
-              <input
-                id="item-type"
-                class="window-select"
-                type="text"
-                v-model="form.attribute.itemType"
-                @click="itemsListVisible = !itemsListVisible"
-                readonly
-              />
+              <input id="item-type" class="window-select" type="text" v-model="form.attribute.itemType" @click="itemsListVisible = !itemsListVisible" readonly/>
             </div>
 
             <div class="form-group">
               <label for="apply-project">適用工程：</label>
-              <input
-                id="apply-project"
-                class="window-select"
-                type="text"
-                v-model="form.attribute.specific"
-                @click="specificsListVisible = true"
-                readonly
-              />
+              <select id="apply-project" class="window-select" v-model="specification" @change="onSelectSpecific(specification)">
+                <option value="">-- 請選擇適用工程 --</option>
+                <option v-for="s in specificationOptions" :key="s.code" :value="s">{{ s.name }}</option>
+              </select>
+              <!-- <input id="apply-project" class="window-select" type="text" v-model="specification" @click="specificsListVisible = true" readonly/> -->
             </div>
 
             <div class="form-group">
@@ -109,17 +101,23 @@
       </div>
 
       <!-- Pickers -->
-      <SpecificListWindow
+      <!-- <SpecificListWindow
         v-if="specificsListVisible"
         @selectSpecific="onSelectSpecific"
         @cancel="specificsListVisible = false"
-      />
+      /> -->
       <ItemListWindow
+        v-if="itemsListVisible"
+        @selectItem="onSelectItemType"
+        @cancel="itemsListVisible = false"
+      />
+
+      <!-- <ItemListWindow
         v-if="itemsListVisible"
         :items="requestItemFromAPI()"
         @selectItem="onSelectItemType"
         @cancel="itemsListVisible = false"
-      />
+      /> -->
 
       <!-- Step 2 目的 -->
       <div v-if="currentStep === 2" class="step-content">
@@ -156,7 +154,7 @@
 
         <ManufacturingParameterBlocks
           :data-blocks="mcrBlocks"
-          :specification="form.attribute.specific"
+          :specification="{specific: form.attribute.specific_name, code: form.attribute.specific_code}"
           :current-step="currentStep"
           @update:dataBlocks="mcrBlocks = $event"
           @save="mcrBlocks = $event"/>
@@ -289,6 +287,16 @@ const steps = [
 const currentStep = ref(1)
 const goToStep = s => { currentStep.value = s }
 
+// const stepNavRef = ref(null)
+// const stickyTop = ref(0)
+
+// let ro
+// function measure() {
+//   // distance we want the child headers to start sticking below
+//   stickyTop.value = stepNavRef.value?.offsetHeight || 0
+// }
+
+
 // ---------- basic attributes ----------
 const form = reactive({
   documentType: 1,          // 1 = Specification
@@ -297,7 +305,8 @@ const form = reactive({
   documentVersion: 1.0,
   attribute: {
     itemType: '',
-    specific: '',
+    specific_name: '',
+    specific_code: '',
     styleNo: '',
     styleVersion: '',
   },
@@ -315,32 +324,57 @@ const form = reactive({
 // ---------- pickers ----------
 const specificsListVisible = ref(false)
 const itemsListVisible     = ref(false)
+let specificationOptions = ref([])
+const specification        = ref('')
 
 function onSelectItemType(payload) {
-  form.attribute.itemType = payload?.itemCode || ''
+  specificationOptions.value = payload.specifications
+  form.attribute.itemType = payload?.matnr || ''
   form.documentName = `${form.attribute.itemType}_${form.attribute.specific}_製造式樣書`
   itemsListVisible.value = false
-}
-
-async function requestItemFromAPI() {
-    
+  console.log("form.attribute: ", form.attribute)
 }
 
 const machineGroups = ref([])
-async function fetchMachineGroups(specific) {
+async function fetchMachineGroups(specific_code) {
+  console.log("specific_code: ", specific_code)
   machineGroups.value = []
-  if (!specific) return
+  if (!specific_code) return
   try {
-    const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, { params: { specific } })
+    const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, { params: { specific: specific_code } })
     machineGroups.value = data?.data?.groups || []
   } catch (e) { console.error('fetchMachineGroups failed:', e) }
 }
 
-async function onSelectSpecific(name) {
-  form.attribute.specific = name || ''
-  form.documentName = `${form.attribute.itemType}_${form.attribute.specific}_製造式樣書`
-  specificsListVisible.value = false
-  await fetchMachineGroups(form.attribute.specific)
+async function onSelectSpecific(s) {
+  if (s){
+    form.attribute.specific_code = (s.code) ? s.code : s.specific_code
+    form.attribute.specific_name = (s.name) ? s.name : s.specific_name
+    form.attribute.styleNo = (s.sfhnr) ? s.sfhnr : s.styleNo
+    form.attribute.styleVersion = (s.version) ? s.version : s.styleVersion
+
+    form.documentName = `${form.attribute.itemType}_${form.attribute.specific_name.split(')').slice(-1)}_製造式樣書`
+
+    specification.value = {code: form.attribute.specific_code, name: form.attribute.specific_name, sfhnr: form.attribute.styleNo, version: form.attribute.styleVersion}
+    console.log("form.attribute: ", form.attribute)
+    await fetchMachineGroups(form.attribute.specific_code)
+  }
+}
+
+async function requestItemsFromAPI(item) {
+  try {
+    const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || "";
+    const url = `${API_BASE_URL}/item/search`;
+
+    const response = await axios.get(url, { params: { item } });
+
+    if (!response.data.success)
+      return;
+
+    return Array.isArray(response.data.data?.items) ? response.data.data.items : [];
+  } catch (error) {
+    console.error("Error fetching items:", error);
+  }
 }
 
 // ---------- dynamic blocks (spec/quality/other) ----------
@@ -589,6 +623,12 @@ const saveDraft = async () => {
 
 // ---------- load ----------
 onMounted(async () => {
+  // measure()
+  // keep it correct on resize/content changes
+  // ro = new ResizeObserver(measure)
+  // if (stepNavRef.value) ro.observe(stepNavRef.value)
+  // window.addEventListener('resize', measure)
+
   const t = await ensureDraftToken()
   if (!t) return
   try {
@@ -598,6 +638,12 @@ onMounted(async () => {
     form.department = sessionStorage.getItem('loggedInUserdeptName')
     form.author_id = sessionStorage.getItem('loggedInUserNo')
     form.author = sessionStorage.getItem('loggedInUserName')
+
+    if (form.attribute.itemType){
+      const result = await requestItemsFromAPI(form.attribute.itemType)
+      specificationOptions.value = result[0].specifications
+      onSelectSpecific(form.attribute)
+    }
 
     // 2) 規範 blocks (step_type = 4)
     const sp = await loadBlocks(t, 4)
@@ -623,13 +669,17 @@ onMounted(async () => {
     }
 
     // dependent lists
-    await fetchMachineGroups(form.attribute.specific)
     // recomputeDuplicates()
   } catch (e) {
     console.error('load draft failed:', e)
     alert('載入草稿失敗')
   }
 })
+
+// onBeforeUnmount(() => {
+//   ro?.disconnect()
+//   window.removeEventListener('resize', measure)
+// })
 
 // optional devtools
 defineExpose({ saveDraft })

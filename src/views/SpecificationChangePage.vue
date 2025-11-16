@@ -1,7 +1,7 @@
 <template>
   <div class="new-instruction-container">
     <div class="header">
-      <h1>已送審</h1>
+      <h1>製造式樣書變版</h1>
       <div class="right">
         <input
           v-model="keyword"
@@ -62,7 +62,7 @@
 </template>
 
 <script>
-import { getAllDocuments } from '@/services/docs'
+import { getSubmitted } from '@/services/docs'
 
 export default {
   name: 'SubmittedDocuments',
@@ -109,8 +109,9 @@ export default {
       }
       this.loading = true
       try {
-        const { items, total } = await getAllDocuments({
-          status: 2,
+        const { items, total } = await getPassed({
+          userId: this.effectiveUserId,
+          documentType: 1,
           keyword: this.keyword,
           page: this.page,
           pageSize: this.pageSize,

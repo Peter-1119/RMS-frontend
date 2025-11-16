@@ -34,12 +34,18 @@
             <div class="editor-body">
                 <div class="menu-bar" v-if="blockItem.option !== 0">
                     <template v-if="blockItem.option === 2">
-                        <button @click="addRow(blockIndex)" class="menu-btn" title="表格：新增列">新增列</button>
-                        <button @click="addColumn(blockIndex)" class="menu-btn" title="表格：新增行">新增行</button>
-                        <button @click="mergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：合併儲存格">合併儲存格</button>
-                        <button @click="unmergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：解除合併">取消合併</button>
-                        <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
-                    </template>
+                      <button @click="addRow(blockIndex)" class="menu-btn" title="表格：新增列">新增列</button>
+                      <button @click="addColumn(blockIndex)" class="menu-btn" title="表格：新增行">新增行</button>
+
+                      <button @click="deleteRow(blockIndex)" class="menu-btn" :disabled="!canDeleteRow(blockIndex)" title="表格：刪除列">刪除列</button>
+                      <button @click="deleteColumn(blockIndex)" class="menu-btn" :disabled="!canDeleteColumn(blockIndex)" title="表格：刪除行">刪除行</button>
+
+                      <button @click="mergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：合併儲存格">合併儲存格</button>
+                      <button @click="unmergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：解除合併">取消合併</button>
+
+                      <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
+                      </template>
+
                     <input type="file" :ref="el => fileInputRefs[blockIndex] = el" @change="handleImageUpload($event, blockIndex)" accept="image/*" style="display: none;">
                     <button @click="triggerFileInput(blockIndex)" class="menu-btn" title="插入圖片">插入圖片</button>
                 </div>
@@ -129,8 +135,33 @@ const setGenericColor = color => activeEditor.value?.chain().focus().setColor(co
 const canMergeOrSplit = idx => {
   const ed = editors[idx]
   if (!ed) return false
-  try { return ed.can().mergeCells() || ed.can().splitCell() } catch { return false }
+  try {
+    return ed.can().mergeCells() || ed.can().splitCell()
+  } catch {
+    return false
+  }
 }
+
+const canDeleteRow = idx => {
+  const ed = editors[idx]
+  if (!ed) return false
+  try {
+    return ed.can().deleteRow()
+  } catch {
+    return false
+  }
+}
+
+const canDeleteColumn = idx => {
+  const ed = editors[idx]
+  if (!ed) return false
+  try {
+    return ed.can().deleteColumn()
+  } catch {
+    return false
+  }
+}
+
 
 // ---------- editor init / lifecycle ----------
 const initTitleEditor = (idx) => {
@@ -245,8 +276,11 @@ const emitDelete = () => {
 
 const addRow = idx => editors[idx]?.chain().focus().addRowAfter().run()
 const addColumn = idx => editors[idx]?.chain().focus().addColumnAfter().run()
+const deleteRow = idx => editors[idx]?.chain().focus().deleteRow().run()
+const deleteColumn = idx => editors[idx]?.chain().focus().deleteColumn().run()
 const mergeCells = idx => editors[idx]?.chain().focus().mergeCells().run()
 const unmergeCells = idx => editors[idx]?.chain().focus().splitCell().run()
+
 
 const triggerFileInput = idx => {
   const el = fileInputRefs.value[idx]
@@ -333,6 +367,7 @@ transition: background-color 0.2s ease;
 
 /* TipTap Table 樣式 */
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
+.editor-content :deep(th) { position:sticky; top:100px; z-index:5; }
 .editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px auto; cursor: pointer; border: 2px solid transparent; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px 0; cursor: pointer; border: 2px solid transparent; }

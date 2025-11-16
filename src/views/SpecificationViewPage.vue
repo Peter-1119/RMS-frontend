@@ -28,8 +28,8 @@
           <tbody>
             <tr v-for="(row, idx) in list" :key="row.id" :class="[ 'cursor-pointer', activeId===row.id ? 'bg-blue-50' : '' ]" @click="selectRow(row)">
               <td>{{ (page-1)*pageSize + idx + 1 }}</td>
-              <td>{{ row.projectCode }}</td>
-              <td>{{ row.projectName }}</td>
+              <td>{{ row.projectCode.slice(0, 3) }}</td>
+              <td>{{ row.projectName.slice(3) }}</td>
               <td>
                 <button class="btn edit" @click.stop="openAddSpecsDialog(row)">編輯</button>
               </td>

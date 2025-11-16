@@ -10,7 +10,7 @@
               <span class="bar"></span>
               <span class="bar"></span>
             </button>
-            <div class="logo">製造文件管理系統</div>
+            <div class="logo">參數管理系統</div>
           </div>
           <div class="top-function">
             <button @click="handleLogout" class="logout-btn" v-if="displayedUserName !== '訪客'">登出</button>

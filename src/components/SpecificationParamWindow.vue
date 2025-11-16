@@ -1,408 +1,491 @@
 <template>
-	<div class="specification-window-wrapper" @click.self="closeWindow">
-		<div class="specification-dialog" @click="selectVisible=false">
-			<div class="header">
-				<slot name="header"></slot>
-			</div>
+  <div class="specification-window-wrapper" @click.self="closeWindow">
+    <div class="specification-dialog" @click="selectVisible=false">
+      <div class="header">
+        <slot name="header"></slot>
+      </div>
 
-			<div class="content-split">
-				<div class="content-left">
-					<div class="form-section">
-						<label for="conditionName">條件名稱:</label>
-						<input type="text" id="conditionName" v-model="localCondition.name" />
-					</div>
+      <div class="content-split">
+        <div class="content-left">
+          <div class="form-section">
+            <label for="conditionName">條件名稱:</label>
+            <input type="text" id="conditionName" v-model="localCondition.name" />
+          </div>
 
-					<div class="form-section">
-						<h4>條件細項清單:</h4>
-						<div class="scrollable-list">
-							<div v-for="(param, index) in localCondition.parameters" :key="index" class="list-item">
-								<input type="text" v-model="localCondition.parameters[index]" />
-								<button class="remove-btn" @click="removeParameter(index)">×</button>
-							</div>
-						</div>
-						<div class="add-new-param">
-							<input type="text" v-model="newParameter" placeholder="請輸入新細項" @keyup.enter="addParameter" />
-							<button class="btn add-item" @click="addParameter">新增細項</button>
-						</div>
-					</div>
-				</div>
+          <div class="form-section">
+            <h4>條件細項清單:</h4>
+            <div class="scrollable-list">
+              <div v-for="(param, index) in localCondition.parameters" :key="index" class="list-item">
+                <input type="text" v-model="localCondition.parameters[index]" />
+                <button class="remove-btn" @click="removeParameter(index)">×</button>
+              </div>
+            </div>
+            <div class="add-new-param">
+              <input type="text" v-model="newParameter" placeholder="請輸入新細項" @keyup.enter="addParameter" />
+              <button class="btn add-item" @click="addParameter">新增細項</button>
+            </div>
+          </div>
+        </div>
 
-				<div class="content-right">
-					<div class="form-section specification-section">
-						<label for="processSelect">選擇適用工程:</label>
-                        <div class="specific-input-block">
-                            <input type="text" v-model="selectedSpecification" placeholder="請輸入關鍵字" @keyup.enter="fetchSpecifications(selectedSpecification)"/>
-                            <button class="btn search" @click="fetchSpecifications(selectedSpecification)">搜尋</button>
-                        </div>
-                        <div v-if="selectVisible" class="select-block">
-                            <ul v-if="Object.entries(specificationOptions).length > 0">
-                                <li v-for="([sn, si]) in Object.entries(specificationOptions)" :key="si.code" @click="specificationSelect(sn)">{{ sn }}</li>
-                            </ul>
-                        </div>
-					</div>
+        <div class="content-right">
+          <!-- Specification search & picker -->
+          <div class="form-section specification-section">
+            <label for="processSelect">選擇適用工程:</label>
 
-                    <div class="form-section machine-list-section">
-                        <h4>未選機台</h4>
-                        <div class="scrollable-list">
-                            <details v-for="(gi, gn) in availableGroups" :key="gi.code">
-                                <summary class="machine-group-item">
-                                    <input type="checkbox" :checked="isGroupChecked(gn)" @change="checkGroupMachines(gn, $event.target.checked)"/>
-                                    <span>{{ gn }}</span>
-                                </summary>
+            <div class="specific-input-block">
+              <input
+                type="text"
+                v-model="specSearchKeyword"
+                placeholder="請輸入關鍵字"
+                @keyup.enter="fetchSpecifications(specSearchKeyword)"
+              />
+              <button class="btn search" @click="fetchSpecifications(specSearchKeyword)">搜尋</button>
+            </div>
 
-                                <div v-for="(mi, mn) in gi.machines" class="machine-list-item" :key="mi.code">
-                                    <input type="checkbox" :checked="isMachineChecked(gn, mn)" @change="checkMachine(gn, mn, $event.target.checked)"/>
-                                    <span>{{ mn }}</span>
-                                </div>
-                            </details>
-                        </div>
-                        <button class="btn move-btn" @click="addSelectedMachines">新增至已選 >></button>
-                    </div>
+            <div v-if="selectVisible" class="select-block">
+              <ul v-if="specificationOptions.length">
+                <li
+                  v-for="opt in specificationOptions"
+                  :key="opt.code"
+                  @click="specificationSelect(opt.code)"
+                >
+                  {{ opt.name }}（{{ opt.code }}）
+                </li>
+              </ul>
+              <div v-else class="empty">查無工程</div>
+            </div>
 
-                    <div class="form-section machine-list-section">
-                        <h4>已選機台</h4>
-                        <div class="scrollable-list">
-                            <template v-for="(gi, gn) in selectedGroups" :key="gi.code">
-                                <div v-for="(mi, mn) in gi.machines" :key="mi.code" class="machine-item">
-                                    <span>{{ mn }}</span>
-                                    <button class="remove-btn" @click="removeMachine(gn, mn)">x</button>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-				</div>
-			</div>
+            <div v-if="selectedSpecCode" class="mt-2 text-muted">
+              已選工程：{{ selectedSpecName || '—' }}（{{ selectedSpecCode }}）
+            </div>
+          </div>
 
-			<div class="footer">
-				<button class="btn confirm" @click="saveCondition">儲存</button>
-				<button class="btn cancel" @click="closeWindow">取消</button>
-			</div>
-		</div>
-	</div>
+          <!-- Available machines (NEW model: gCode -> { name, machines: { mCode -> { name } } }) -->
+          <div class="form-section machine-list-section">
+            <h4>未選機台</h4>
+            <div class="scrollable-list">
+              <details v-for="(gi, gCode) in availableGroups" :key="gCode">
+                <summary class="machine-group-item">
+                  <input
+                    type="checkbox"
+                    :checked="isGroupChecked(gCode)"
+                    @change="checkGroupMachines(gCode, $event.target.checked)"
+                  />
+                  <span>{{ gi.name }}（{{ gCode }}）</span>
+                </summary>
+
+                <div
+                  v-for="(mi, mCode) in gi.machines"
+                  :key="mCode"
+                  class="machine-list-item"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isMachineChecked(gCode, mCode)"
+                    @change="checkMachine(gCode, mCode, $event.target.checked)"
+                  />
+                  <span>{{ mi.name }}（{{ mCode }}）</span>
+                </div>
+              </details>
+            </div>
+            <button class="btn move-btn" @click="addSelectedMachines">新增至已選 >></button>
+          </div>
+
+          <!-- Selected machines (same new model) -->
+          <div class="form-section machine-list-section">
+            <h4>已選機台</h4>
+            <div class="scrollable-list">
+              <template v-for="(gi, gCode) in selectedGroups" :key="gCode">
+                <div v-for="(mi, mCode) in gi.machines" :key="mCode" class="machine-item">
+                  <span>{{ mi.name }}（{{ mCode }}）</span>
+                  <button class="remove-btn" @click="removeMachine(gCode, mCode)">x</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <button class="btn confirm" @click="saveCondition">儲存</button>
+        <button class="btn cancel" @click="closeWindow">取消</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script>
 import axios from 'axios';
 
 export default {
-	name: "SpecificationParamWindow",
-	emits: ['update-condition-data', 'cancel'],
-	props: {
-        condition: { type: Object, default: () => {} },
-	},
-	data() {
-		return {
-			localCondition: {},  // local condition storage 
+  name: "SpecificationParamWindow",
+  emits: ['update-condition-data', 'cancel'],
+  props: {
+    condition: { type: Object, default: () => ({}) },
+  },
+  data() {
+    return {
+      // condition
+      localCondition: {},
 
-            selectVisible: false,
-            specificationOptions: {},
-            selectedSpecification: "",
+      // spec search/pick
+      selectVisible: false,
+      specificationOptions: [],  // [{ code, name }]
+      specSearchKeyword: "",
+      selectedSpecCode: "",
+      selectedSpecName: "",
 
-			allGroups: {},  // request all machines
-            selectedGrouposInDB: {},  // temp for import machines from database
-            machinesToAdd: {},
-            machinesToDelete: {},  // temp for delete machines
+      // machine lists (normalized NEW model everywhere internally)
+      // shape: { [groupCode]: { name: <groupName>, machines: { [machineCode]: { name: <machineName> } } } }
+      allGroups: {},
+      availableGroups: {},
+      selectedGroups: {},
+      machinesChecked: {},  // same shape as availableGroups but contains only checked items
 
-            availableGroups: {},  // Display non-selected machines
-            machinesChecked: {},  // Display for machines checkbox
-            selectedGroups: {},  // Display selected machines
+      // track original in DB to build add/delete payloads correctly
+      selectedGroupsInDB: {},
 
-			newParameter: '',  // new condition parameter you want to add
-		};
-	},
-	created() {
-        this.conditionLoading();
-	},
-	methods: {
-        //  API Function  //
-        async fetchSpecifications(keyword) {
-            try{
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/mes/specifics", {params: {keyword, machine: this.machineKeyword}});
-                this.specificationOptions = response.data.data.specifics;
-                console.log("specificaion options: ", this.specificationOptions);
+      // deltas to send to backend (NEW model)
+      machinesToAdd: {},     // { gCode: { name, machines: { mCode: { name } } } }
+      machinesToDelete: {},  // same
 
-                if (Object.entries(this.specificationOptions).length > 0) {
-                    this.selectVisible = true;
-                }
-                else {
-                    this.selectVisible = false;
-                }
-            }
-            catch (error) {
-                console.error("Specifics fetch error: ", error);
-                this.specificationOptions = [];
-            }
-        },
-        async specificationSelect(specification) {
-            this.selectedSpecification = specification;
-            await this.fetchGroupMachines(specification);
-        },
-        async fetchGroupMachines(specification) {
-            this.availableGroups = {};
-            this.machinesChecked = {};
-            this.allGroups = {};
+      // condition parameters UI
+      newParameter: '',
+    };
+  },
+  created() {
+    this.conditionLoading();
+  },
+  methods: {
+    // ------------------ Normalizers ------------------
+    // OLD -> NEW shape: groups keyed by group_name with { code, machines: { machine_name: { code } } }
+    // Convert to: { [groupCode]: { name: groupName, machines: { [machineCode]: { name: machineName } } } }
+    _normalizeOldGroups(oldObj) {
+      const out = {};
+      Object.entries(oldObj || {}).forEach(([gName, gInfo]) => {
+        const gCode = (gInfo?.code || '').trim();
+        const machines = {};
+        Object.entries(gInfo?.machines || {}).forEach(([mName, mInfo]) => {
+          const mCode = (mInfo?.code || '').trim();
+          if (mCode) machines[mCode] = { name: mName };
+        });
+        if (gCode) out[gCode] = { name: gName, machines };
+      });
+      return out;
+    },
 
-            try{
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/mes/groups-machines", {params: {specific: specification}});
-                this.allGroups = response.data.data.groups;
-                console.log("allGroups: ", this.allGroups);
-            }
-            catch (error) {
-                console.error("Specifics fetch error: ", error);
-                return;
-            }
+    // NEW shape passthrough (already desired shape)
+    _normalizeNewGroups(newObj) {
+      // Ensure names/codes are trimmed
+      const out = {};
+      Object.entries(newObj || {}).forEach(([gCode, gInfo]) => {
+        const machines = {};
+        Object.entries(gInfo?.machines || {}).forEach(([mCode, mInfo]) => {
+          machines[(mCode || '').trim()] = { name: (mInfo?.name || mCode || '').trim() };
+        });
+        out[(gCode || '').trim()] = { name: (gInfo?.name || gCode || '').trim(), machines };
+      });
+      return out;
+    },
 
-            Object.entries(this.allGroups).forEach(([gn, gi]) => {
-                if (!this.selectedGroups[gn]) {
-                    let machines = {};
-                    Object.entries(gi.machines).forEach(([mn, mi]) => { machines[mn] = {"code": mi.code} })
-                    this.availableGroups[gn] = {code: gi.code, machines};
-                }
-                else {
-                    let machines = {};
-                    let selectedMachines = Object.keys(this.selectedGroups[gn].machines);
-                    if (Object.keys(gi.machines).length != selectedMachines.length) {
-                        Object.entries(gi.machines).forEach(([mn, mi]) => {
-                            if (!selectedMachines.some(machine => mn == machine)) {
-                                machines[mn] = {"code": mi.code};
-                            }
-                        })
-                        this.availableGroups[gn] = {code: gi.code, machines};
-                    }
-                }
-            })
-        },
-        async fetchConditionMachines(condition_id) {
-            try {
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/conditions/get-condition-machines", {params: {condition_id}});
-                this.groups = response.data.data.groups;
-            }
+    // Shallow union-add machines from src -> dst (same NEW model keys)
+    _mergeMachines(dst, src) {
+      Object.entries(src || {}).forEach(([gCode, gInfo]) => {
+        if (!dst[gCode]) dst[gCode] = { name: gInfo.name, machines: {} };
+        Object.entries(gInfo.machines || {}).forEach(([mCode, mInfo]) => {
+          dst[gCode].machines[mCode] = { name: mInfo.name };
+        });
+      });
+    },
 
-            catch (error) {
-                this.groups = {};
-            }
+    // Remove machines from obj if present
+    _subtractMachines(obj, toRemove) {
+      Object.entries(toRemove || {}).forEach(([gCode, gInfo]) => {
+        if (!obj[gCode]) return;
+        Object.keys(gInfo.machines || {}).forEach(mCode => {
+          delete obj[gCode].machines[mCode];
+        });
+        if (!Object.keys(obj[gCode].machines).length) delete obj[gCode];
+      });
+    },
 
-            this.selectedGroups = {};
-            this.selectedGrouposInDB = {}
-            Object.entries(this.groups).forEach(([gn, gi]) => {
-                this.selectedGroups[gn] = {code: gi.code, machines: {}};
-                Object.entries(gi.machines).forEach(([mn, mi]) => { this.selectedGroups[gn].machines[mn] = {"code": mi.code} })
+    // ------------------ Specs ------------------
+    async fetchSpecifications(keyword) {
+      try {
+        const API = import.meta.env.VITE_APP_API_BASE_URL;
+        const { data } = await axios.get(`${API}/mes/specifics`, {
+          params: { keyword, machine: this.machineKeyword }
+        });
+        const specsObj = data?.data?.specifics || {};
+        this.specificationOptions = Object.entries(specsObj).map(([code, v]) => ({
+          code: (code || '').trim(),
+          name: (v?.name || code || '').trim(),
+        }));
+        this.selectVisible = this.specificationOptions.length > 0;
+      } catch (e) {
+        console.error("Specifics fetch error:", e);
+        this.specificationOptions = [];
+        this.selectVisible = false;
+      }
+    },
 
-                this.selectedGrouposInDB[gn] = {code: gi.code, machines: {}};
-                Object.entries(gi.machines).forEach(([mn, mi]) => { this.selectedGrouposInDB[gn].machines[mn] = {"code": mi.code} })
-            })
-        },
+    async specificationSelect(specCode) {
+      const item = this.specificationOptions.find(x => x.code === specCode);
+      this.selectedSpecCode = specCode || "";
+      this.selectedSpecName = item?.name || specCode || "";
+      await this.fetchGroupMachines(specCode);
+    },
 
-        // Load condition and parameters from backend
-        async conditionLoading() {
-            this.selectedGroups = {};  
-            if (!this.condition || this.condition.id == null){
-                this.localCondition = { id: -1, name: '', parameters: []};
-            }
+    // ------------------ Machines (available) ------------------
+    async fetchGroupMachines(specCode) {
+      this.availableGroups = {};
+      this.machinesChecked = {};
+      this.allGroups = {};
 
-            else {
-                this.localCondition = {id: this.condition.id, name: this.condition.name, parameters: this.condition.parameters.map(n => n)};
-                this.fetchConditionMachines(this.condition.id);
-            }
-        },
+      try {
+        const API = import.meta.env.VITE_APP_API_BASE_URL;
+        // /mes/groups-machines (NEW shape) with { specific: <specCode> }
+        const resp = await axios.get(`${API}/mes/groups-machines`, { params: { specific: specCode } });
+        const groupsPayload = resp?.data?.data?.groups || {};
+        // normalize (already new shape; still trim/guard)
+        this.allGroups = this._normalizeNewGroups(groupsPayload);
+      } catch (e) {
+        console.error("groups-machines fetch error:", e);
+        this.allGroups = {};
+      }
 
-        // Check machine checkbox is check or not based on existing in "machinesChecked" object
-        isMachineChecked(group, machine) {
-            return this.machinesChecked[group] && this.machinesChecked[group].machines[machine] != undefined;
-        },
-        // Check action for machine checkbox
-        checkMachine(group, machine, isChecked) {
-            const machineCode = this.availableGroups[group].machines[machine].code; 
-            if (!this.machinesChecked[group]) {
-                this.machinesChecked[group] = { code: this.availableGroups[group].code, machines: {} };
-            }
+      // Build available = all - selected
+      const available = JSON.parse(JSON.stringify(this.allGroups)); // shallow clone
+      this._subtractMachines(available, this.selectedGroups);      // remove already selected
+      this.availableGroups = available;
+    },
 
-            if (isChecked){
-                this.machinesChecked[group].machines[machine] = { code: machineCode };
-            }
-            else {
-                delete this.machinesChecked[group].machines[machine];
-                if (Object.keys(this.machinesChecked[group].machines).length == 0) {
-                    delete this.machinesChecked[group];
-                }
-            }
-        },
+    // ------------------ Machines (selected in DB) ------------------
+    async fetchConditionMachines(condition_id) {
+      try {
+        const API = import.meta.env.VITE_APP_API_BASE_URL;
+        const resp = await axios.get(`${API}/conditions/get-condition-machines`, { params: { condition_id }});
+        const groupsOld = resp?.data?.data?.groups || {};
+        // convert OLD shape -> NEW internal shape
+        this.selectedGroups = this._normalizeOldGroups(groupsOld);
+        this.selectedGroupsInDB = JSON.parse(JSON.stringify(this.selectedGroups)); // snapshot
+      } catch (e) {
+        console.error("get-condition-machines error:", e);
+        this.selectedGroups = {};
+        this.selectedGroupsInDB = {};
+      }
 
-        // Check group checkbox is check or not based on existing in "machinesChecked" object
-        isGroupChecked(group) {
-            const availableCount = Object.keys(this.availableGroups[group]?.machines || {}).length;
-            const addedCount = Object.keys(this.machinesChecked[group]?.machines || {}).length;
-            return availableCount == addedCount;
-        },
-        // Check action for group checkbox
-        checkGroupMachines(group, isChecked) {
-            if (isChecked) {
-                let machines = {};
-                Object.entries(this.availableGroups[group].machines).forEach(([mn, mi]) => { machines[mn] = {"code": mi.code}})
-                this.machinesChecked[group] = { code: this.availableGroups[group].code, machines };
-            }
-            else {
-                delete this.machinesChecked[group];
-            }
-        },
+      // Since availableGroups depends on selectedGroups and chosen spec:
+      if (this.selectedSpecCode) {
+        await this.fetchGroupMachines(this.selectedSpecCode);
+      }
+    },
 
-		//  Fundamental Function  //
-		addParameter() {
-			const trimmedParam = this.newParameter.trim();
-			if (trimmedParam && !this.localCondition.parameters.includes(trimmedParam)) {
-				this.localCondition.parameters.push(trimmedParam);
-				this.newParameter = '';
-			}
-		},
-		removeParameter(index) {
-			this.localCondition.parameters.splice(index, 1);
-		},
+    // ------------------ Condition init ------------------
+    async conditionLoading() {
+      if (!this.condition || this.condition.id == null) {
+        this.localCondition = { id: -1, name: '', parameters: [] };
+        this.selectedGroups = {};
+        this.selectedGroupsInDB = {};
+      } else {
+        this.localCondition = {
+          id: this.condition.id,
+          name: this.condition.name,
+          parameters: (this.condition.parameters || []).map(n => n)
+        };
+        await this.fetchConditionMachines(this.condition.id);
+      }
+    },
 
-		addSelectedMachines() {
-            Object.entries(this.machinesChecked).forEach(([gn, gi]) => {
-                if (!this.selectedGroups[gn]) {
-                    this.selectedGroups[gn] = {code: gi.code, machines: {}};
-                }
+    // ------------------ Checkbox helpers ------------------
+    isMachineChecked(gCode, mCode) {
+      return !!this.machinesChecked[gCode]?.machines?.[mCode];
+    },
+    checkMachine(gCode, mCode, isChecked) {
+      const mName = this.availableGroups[gCode]?.machines?.[mCode]?.name || '';
+      if (!mName) return;
 
-                // Process add machine list
-                let noGroup = false;
-                if (!this.selectedGrouposInDB[gn]) {
-                    this.machinesToAdd[gn] = {code: this.selectedGroups[gn].code, machines: {}};
-                    noGroup = true;
-                }
+      if (!this.machinesChecked[gCode]) {
+        this.machinesChecked[gCode] = { name: this.availableGroups[gCode].name, machines: {} };
+      }
+      if (isChecked) {
+        this.machinesChecked[gCode].machines[mCode] = { name: mName };
+      } else {
+        delete this.machinesChecked[gCode].machines[mCode];
+        if (!Object.keys(this.machinesChecked[gCode].machines).length) {
+          delete this.machinesChecked[gCode];
+        }
+      }
+    },
+    isGroupChecked(gCode) {
+      const availCnt = Object.keys(this.availableGroups[gCode]?.machines || {}).length;
+      const checkedCnt = Object.keys(this.machinesChecked[gCode]?.machines || {}).length;
+      return availCnt > 0 && availCnt === checkedCnt;
+    },
+    checkGroupMachines(gCode, isChecked) {
+      if (isChecked) {
+        const gi = this.availableGroups[gCode];
+        const machines = {};
+        Object.entries(gi?.machines || {}).forEach(([mCode, mi]) => { machines[mCode] = { name: mi.name }});
+        this.machinesChecked[gCode] = { name: gi.name, machines };
+      } else {
+        delete this.machinesChecked[gCode];
+      }
+    },
 
-                console.log("noGroup: ", noGroup);
-                Object.entries(gi.machines).forEach(([mn, mi]) => {
-                    this.selectedGroups[gn].machines[mn] = {"code": mi.code};
+    // ------------------ Move -> Selected ------------------
+    addSelectedMachines() {
+      if (!Object.keys(this.machinesChecked).length) return;
 
-                    // Process add machine list  ##########################################  刪掉資料庫擁有的機台後加入 this.machinesToAdd 會添加 應該要 不增加
-                    if (noGroup || Object.keys(this.selectedGrouposInDB[gn].machines).every(machine => mn != machine)) {
-                        if (!this.machinesToAdd[gn]) {
-                            this.machinesToAdd[gn] = {code: gi.code, machines: {}}
-                        }
-                        this.machinesToAdd[gn].machines[mn] = {"code": mi.code};
-                    }
+      // merge into selectedGroups
+      this._mergeMachines(this.selectedGroups, this.machinesChecked);
 
-                    // Process delete machine list
-                    if (this.machinesToDelete[gn] && this.machinesToDelete[gn].machines[mn]) {
-                        delete this.machinesToDelete[gn].machines[mn];
-                    }
-                })
+      // build delta: machinesToAdd = (selected - selectedInDB)
+      // copy checked first, then prune any that already exists in DB
+      const addBuf = JSON.parse(JSON.stringify(this.machinesChecked));
+      // prune already in DB
+      Object.entries(addBuf).forEach(([gCode, gInfo]) => {
+        Object.keys(gInfo.machines).forEach(mCode => {
+          if (this.selectedGroupsInDB[gCode]?.machines?.[mCode]) {
+            delete addBuf[gCode].machines[mCode];
+          }
+        });
+        if (!Object.keys(addBuf[gCode].machines).length) delete addBuf[gCode];
+      });
+      this._mergeMachines(this.machinesToAdd, addBuf);
 
-                // Process delete machine list
-                if (this.machinesToDelete[gn] && Object.keys(this.machinesToDelete[gn].machines).length == 0) {
-                    delete this.machinesToDelete[gn];
-                }
+      // remove any to-add from machinesToDelete (undo delete)
+      Object.entries(this.machinesToDelete).forEach(([gCode, gInfo]) => {
+        Object.keys(gInfo.machines).forEach(mCode => {
+          if (this.machinesChecked[gCode]?.machines?.[mCode]) {
+            delete this.machinesToDelete[gCode].machines[mCode];
+          }
+        });
+        if (!Object.keys(this.machinesToDelete[gCode].machines).length) delete this.machinesToDelete[gCode];
+      });
 
-                Object.keys(gi.machines).forEach(machineName => {
-                    delete this.availableGroups[gn].machines[machineName];
-                });
-                
-                if (Object.keys(this.availableGroups[gn].machines).length === 0) {
-                    delete this.availableGroups[gn];
-                }
-            })
-            this.machinesChecked = {};
-		},
-		removeMachine(group, machine) {
-            if (this.allGroups[group] && this.availableGroups[group]){
-                this.availableGroups[group].machines[machine] = {code: this.selectedGroups[group].machines[machine].code};
-            }
+      // remove from available
+      this._subtractMachines(this.availableGroups, this.machinesChecked);
 
-            else if (this.allGroups[group] && !this.availableGroups[group]) {
-                this.availableGroups[group] = {code: this.selectedGroups[group].code, machines: {}};
-                this.availableGroups[group].machines[machine] = {code: this.selectedGroups[group].machines[machine].code};
-            }
+      // clear checked buffer
+      this.machinesChecked = {};
+    },
 
-            // Process add machine list
-            if (this.machinesToAdd[group] && this.machinesToAdd[group].machines[machine]) {
-                delete this.machinesToAdd[group].machines[machine];
+    // ------------------ Remove from Selected ------------------
+    removeMachine(gCode, mCode) {
+      const mName = this.selectedGroups[gCode]?.machines?.[mCode]?.name || '';
+      if (!mName) return;
 
-                if (Object.keys(this.machinesToAdd[group].machines).length == 0) {
-                    delete this.machinesToAdd[group];
-                }
-            }
+      // return to available if present in allGroups (spec scope)
+      if (this.allGroups[gCode]) {
+        if (!this.availableGroups[gCode]) {
+          this.availableGroups[gCode] = { name: this.allGroups[gCode].name, machines: {} };
+        }
+        this.availableGroups[gCode].machines[mCode] = { name: mName };
+      }
 
-            // Process delete machine list
-            if (this.selectedGrouposInDB[group] && this.selectedGrouposInDB[group].machines[machine]) {
-                if (!this.machinesToDelete[group]) {
-                    this.machinesToDelete[group] = {code: this.selectedGroups[group].code, machines: {}};
-                }
-                this.machinesToDelete[group].machines[machine] = {code: this.selectedGroups[group].machines[machine].code};
-            }
+      // delta add: if it was going to be added, cancel that
+      if (this.machinesToAdd[gCode]?.machines?.[mCode]) {
+        delete this.machinesToAdd[gCode].machines[mCode];
+        if (!Object.keys(this.machinesToAdd[gCode].machines).length) delete this.machinesToAdd[gCode];
+      }
 
-            delete this.selectedGroups[group].machines[machine];
-		},
+      // delta delete: if it exists in DB snapshot, mark delete
+      if (this.selectedGroupsInDB[gCode]?.machines?.[mCode]) {
+        if (!this.machinesToDelete[gCode]) {
+          this.machinesToDelete[gCode] = { name: this.selectedGroups[gCode].name, machines: {} };
+        }
+        this.machinesToDelete[gCode].machines[mCode] = { name: mName };
+      }
 
-		async saveCondition() {
-			if (!this.localCondition.name.trim()) {
-				alert("條件名稱不能為空。");
-				return;
-			}
-			if (this.localCondition.parameters.some(p => !p.trim())) {
-				alert("條件細項不能包含空值。");
-				return;
-			}
+      // remove from selected
+      delete this.selectedGroups[gCode].machines[mCode];
+      if (!Object.keys(this.selectedGroups[gCode].machines).length) delete this.selectedGroups[gCode];
+    },
 
-            // Update parameters of condition
-            let parametersToAdd = [];
-            let parametersToDelete = [];
-            if (this.localCondition.id == -1) {
-                parametersToAdd = this.localCondition.parameters;
-            }
-            else {
-                const originalParameters = new Set(this.condition.parameters || []);
-                const localParameters = new Set(this.localCondition.parameters || []);
+    // ------------------ Condition parameters ------------------
+    addParameter() {
+      const p = (this.newParameter || '').trim();
+      if (p && !this.localCondition.parameters.includes(p)) {
+        this.localCondition.parameters.push(p);
+        this.newParameter = '';
+      }
+    },
+    removeParameter(idx) {
+      this.localCondition.parameters.splice(idx, 1);
+    },
 
-                for (const param of localParameters) {
-                    if (!originalParameters.has(param)) {
-                        parametersToAdd.push(param);
-                    }
-                }
+    // ------------------ Save ------------------
+    async saveCondition() {
+      if (!this.localCondition.name?.trim()) {
+        alert("條件名稱不能為空。");
+        return;
+      }
+      if ((this.localCondition.parameters || []).some(p => !p.trim())) {
+        alert("條件細項不能包含空值。");
+        return;
+      }
 
-                for (const param of originalParameters) {
-                    if (!localParameters.has(param)) {
-                        parametersToDelete.push(param);
-                    }
-                }
-            }
+      // Param diffs
+      let parametersToAdd = [];
+      let parametersToDelete = [];
+      if (this.localCondition.id === -1) {
+        parametersToAdd = this.localCondition.parameters;
+      } else {
+        const original = new Set(this.condition?.parameters || []);
+        const local = new Set(this.localCondition.parameters || []);
+        for (const p of local) if (!original.has(p)) parametersToAdd.push(p);
+        for (const p of original) if (!local.has(p)) parametersToDelete.push(p);
+      }
 
-            // Update condition data
-            const conditionNameUpdate = (this.localCondition.id == -1) || (this.localCondition.name.trim() != this.condition.name.trim());
-            const conditionMachinesUpdate = Object.keys(this.machinesToAdd).length > 0 || Object.keys(this.machinesToDelete).length > 0;
-            const conditionParametersUpdate = parametersToAdd.length > 0 || parametersToDelete.length > 0;
-            if (conditionNameUpdate || conditionMachinesUpdate || conditionParametersUpdate){
-                const formData = new FormData();
-                try{
-                    formData.append('condition-id', this.localCondition.id);
-                    if (conditionNameUpdate) {
-                        formData.append('condition-name', this.localCondition.name.trim());
-                    }
-                    if (conditionMachinesUpdate) {
-                        formData.append('condition-machines', JSON.stringify({machinesToAdd: this.machinesToAdd, machinesToDelete: this.machinesToDelete}))
-                    }
-                    if (conditionParametersUpdate) {
-                        formData.append('condition-parameters', JSON.stringify({parametersToAdd, parametersToDelete}));
-                    }
-                    const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                    const response = await axios.post(API_BASE_URL + "/conditions/update-condition-data", formData);
-                    console.log("response: ", response.data.data.message);
-                }
-                catch (error) {
-                    console.error("response error: ", error);
-                }
-            }
-            
-            this.$emit("update-condition-data");
-            this.$emit("cancel");
-		},
-		closeWindow() {
-			this.$emit("cancel");
-		}
-	}
+      const conditionNameUpdate =
+        this.localCondition.id === -1 ||
+        (this.localCondition.name.trim() !== (this.condition?.name || '').trim());
+
+      const conditionMachinesUpdate =
+        Object.keys(this.machinesToAdd).length > 0 || Object.keys(this.machinesToDelete).length > 0;
+
+      const conditionParametersUpdate =
+        parametersToAdd.length > 0 || parametersToDelete.length > 0;
+
+      if (conditionNameUpdate || conditionMachinesUpdate || conditionParametersUpdate) {
+        const formData = new FormData();
+        formData.append('condition-id', this.localCondition.id);
+        if (conditionNameUpdate) {
+          formData.append('condition-name', this.localCondition.name.trim());
+        }
+        if (conditionMachinesUpdate) {
+          // send NEW model: { gCode: { name, machines: { mCode: { name } } } }
+          formData.append('condition-machines', JSON.stringify({
+            machinesToAdd: this.machinesToAdd,
+            machinesToDelete: this.machinesToDelete,
+          }));
+        }
+        if (conditionParametersUpdate) {
+          formData.append('condition-parameters', JSON.stringify({
+            parametersToAdd, parametersToDelete
+          }));
+        }
+
+        console.log("machinesToDelete:", this.machinesToDelete);
+
+        try {
+          const API = import.meta.env.VITE_APP_API_BASE_URL;
+          const resp = await axios.post(`${API}/conditions/update-condition-data`, formData);
+          console.log("update-condition-data:", resp?.data);
+        } catch (e) {
+          console.error("saveCondition error:", e);
+        }
+      }
+
+      this.$emit('update-condition-data');
+      this.$emit('cancel');
+    },
+
+    closeWindow() {
+      this.$emit('cancel');
+    },
+  }
 };
 </script>
 

@@ -1,27 +1,33 @@
 <template>
-    <div class="combination-block">
-        
-        <div class="management-header-block">
-            <label>{{ managementBlock.step }}.{{ managementBlock.tier }} 生產基本條件</label>
-            <div class="management-operation-block">
-                
-                <div class="menu color">
-                    <!-- <div class="font-color red" @click="editor?.chain().focus().setColor('red').run()"></div> -->
-                    <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
-                    <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
-                    <!-- <button class="menu-btn" @click="outputFocusRow()">輸出列</button> -->
-                </div>
-                <button class="combination-btn add" @click="addRow(false)">往上插入</button>
-                <button class="combination-btn add" @click="addRow(true)">往下插入</button>
-                <button class="combination-btn del" @click="deleteRow">刪除該列</button>
-            </div>
+  <div class="combination-block">
+    <div class="management-header-block">
+      <label>{{ managementBlock.step }}.{{ managementBlock.tier }} 生產基本條件</label>
+      <div class="management-operation-block">
+        <div class="menu color">
+          <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
+          <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
         </div>
-
-        <div class="editor-wrapper">
-            <EditorContent :editor="editor" class="editor-content management-tiptap-editor" />
-        </div>
+        <button class="combination-btn add" @click="addRow(false)">往上插入</button>
+        <button class="combination-btn add" @click="addRow(true)">往下插入</button>
+        <button class="combination-btn del" @click="deleteRow">刪除該列</button>
+      </div>
     </div>
+
+    <div class="editor-wrapper">
+      <!-- 沒有 PMS：只顯示提示文字 -->
+      <p v-if="!hasPms" class="hint empty">選擇的機台無任何參數</p>
+
+      <!-- 有 PMS 而且 editor 存在：顯示 Tiptap 表格 -->
+      <EditorContent
+        v-else-if="editor"
+        :editor="editor"
+        class="editor-content management-tiptap-editor"
+      />
+    </div>
+
+  </div>
 </template>
+
 
 <script>
 import { EditorContent, Editor } from '@tiptap/vue-3';
@@ -46,17 +52,17 @@ const tableEditorExtensions = [
     CustomTableRow, CustomTableHeader, CustomTableCell, History
 ];
 
-const lockCols = [0, 1, 2, 8, 9];
+const lockCols = [0, 1, 2, 8];
 const initialTableData = [
-    ["項次", "槽體", "管理項目", '規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)', "單位", "參數下放", "檢查頻率", "檢查方式", "檢驗人員", "記錄", "備註/參考指示書"],
-    ["", "熱水洗1", "噴壓", "", "", "", "", "", "kgf/cm2", "Y", "", "", "", "", ""],
-    ["", "熱水洗1", "溫度", "", "", "", "", "", "℃", "Y", "", "", "", "", ""],
-    ["", "剝膜1", "氫氧化鈉NaOH", "", "", "", "", "", "%", "Y", "", "", "", "", ""],
-    ["", "剝膜1", "噴壓", "", "", "", "", "", "kgf/cm2", "Y", "", "", "", "", ""],
-    ["", "剝膜1", "作業溫度", "", "", "", "", "", "℃", "Y", "", "", "", "", ""],
-    ["", "剝膜2", "氫氧化鈉NaOH", "", "", "", "", "", "%", "Y", "", "", "", "", ""],
-    ["", "剝膜2", "噴壓", "", "", "", "", "", "kgf/cm2", "Y", "", "", "", "", ""],
-    ["", "剝膜2", "作業溫度", "", "", "", "", "", "℃", "Y", "", "", "", "", ""],
+    ["項次", "槽體", "管理項目", '規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)', "單位", "檢查頻率", "檢查方式", "檢驗人員", "記錄", "備註/參考指示書"],
+    ["", "熱水洗1", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
+    ["", "熱水洗1", "溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
+    ["", "剝膜1", "氫氧化鈉NaOH", "", "", "", "", "", "%", "", "", "", "", ""],
+    ["", "剝膜1", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
+    ["", "剝膜1", "作業溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
+    ["", "剝膜2", "氫氧化鈉NaOH", "", "", "", "", "", "%", "", "", "", "", ""],
+    ["", "剝膜2", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
+    ["", "剝膜2", "作業溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
 ];
 
 const extractText = (cellNode) => {
@@ -93,6 +99,7 @@ export default {
     props: {
         machines: { type: Array, required: true },
         managementBlock: { type: Object, required: true },
+        hasPms: { type: Boolean, default: true },
     },
     data() {
         return {
@@ -101,19 +108,37 @@ export default {
         }
     },
     mounted() {
-        const jsonContent = this.localBlockData.data.jsonContent;
-        const content = (jsonContent) ? jsonContent : this.getInitialTableContent(initialTableData)
-        this.editor = new Editor({
-            content,
-            extensions: tableEditorExtensions,
-            editorProps: {handleDOMEvents: { drop: () => true, dragstart: () => true }},
-            onUpdate: ({ editor }) => {
-                this.validateTableContent(editor);
-                this.exportTableData(editor);
-            }
-        })
-        this.validateTableContent(this.editor);
+      console.log("management block: ", this.managementBlock)
+      const jsonContent = this.localBlockData.data?.jsonContent
+      const arrayData   = this.localBlockData.data?.arrayData
+
+      // ★ 如果這個 block 沒有 PMS 且沒有任何已儲存的內容，就不要建立 editor
+      if (!this.hasPms && !jsonContent && (!Array.isArray(arrayData) || !arrayData.length)) {
+        this.editor = null
+        return
+      }
+
+      let content
+      if (jsonContent) {
+        content = jsonContent
+      } else if (Array.isArray(arrayData) && arrayData.length) {
+        content = this.getInitialTableContent(arrayData)
+      } else {
+        content = this.getInitialTableContent(initialTableData)
+      }
+
+      this.editor = new Editor({
+        content,
+        extensions: tableEditorExtensions,
+        editorProps: { handleDOMEvents: { drop: () => true, dragstart: () => true } },
+        onUpdate: ({ editor }) => {
+          this.validateTableContent(editor);
+          this.exportTableData(editor);
+        },
+      })
+      this.validateTableContent(this.editor)
     },
+
     beforeUnmount() {
         if (this.editor) this.editor.destroy();
     },
@@ -122,6 +147,7 @@ export default {
     },
     methods: {
         validateTableContent(editor) {
+            if (!editor) return
             const tr = editor.state.tr;
             let changes = false;
             
@@ -190,6 +216,7 @@ export default {
             return { type: "doc", content: [table] };
         },
         rowFocusCheck() {
+            if (!this.editor) return -1
             const { selection } = this.editor.state;
             const rowDepth = this.editor.state.selection.$anchor.depth - 2;
 
@@ -204,6 +231,7 @@ export default {
             return currentRowIndex;
         },
         deleteRow() {
+            if (!this.editor) return
             let targetRowIndex = this.rowFocusCheck();
             if (targetRowIndex == 0) {
                 alert("請選擇要刪除的列");
@@ -233,6 +261,7 @@ export default {
             this.updateTable();
         },
         addRow(below) {
+            if (!this.editor) return
             if (this.rowFocusCheck() == 0) {
                 alert("請選擇要插入的列");
                 return;
@@ -246,6 +275,7 @@ export default {
             this.updateTable();
         },
         updateTable() {
+            if (!this.editor) return
             const { state, view } = this.editor;
             const tr = state.tr;
             let rowIndex = 0;
@@ -344,6 +374,7 @@ export default {
 /* Tiptap 專用 CSS 樣式 */
 .editor-content :deep(.ProseMirror) { padding: 10px; outline: none; line-height: 1.5; }
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
+.editor-content :deep(th) { position:sticky; top:100px; z-index:5; }
 .editor-content :deep(th), .editor-content :deep(td) { 
     border: 1px solid #ccc; 
     padding: 8px; 
@@ -357,7 +388,7 @@ export default {
 
 .management-tiptap-editor :deep(col:nth-child(1)) { width: 5%; } /* 項次 */
 .management-tiptap-editor :deep(col:nth-child(2)) { width: 10%; } /* 槽體/測試點 */
-.management-tiptap-editor :deep(col:nth-child(3)), 
+.management-tiptap-editor :deep(col:nth-child(3)) { width: 12.5%; }
 .management-tiptap-editor :deep(col:nth-child(4)), 
 .management-tiptap-editor :deep(col:nth-child(5)),
 .management-tiptap-editor :deep(col:nth-child(6)),
@@ -365,7 +396,7 @@ export default {
 .management-tiptap-editor :deep(col:nth-child(8)) { width: 6.5%; } 
 
 .management-tiptap-editor :deep(col:nth-child(9)) { width: 5%; } /* 單位 */
-.management-tiptap-editor :deep(col:nth-child(10)) { width: 5%; } /* 參數下放 */
+/* .management-tiptap-editor :deep(col:nth-child(10)) { width: 5%; } 參數下放 */
 .management-tiptap-editor :deep(col:nth-child(11)) { width: 6.5%; } /* 檢查頻率 */
 .management-tiptap-editor :deep(col:nth-child(12)) { width: 6.5%; } /* 檢查方式 */
 .management-tiptap-editor :deep(col:nth-child(13)) { width: 6.5%; } /* 檢驗人員 */
@@ -391,5 +422,7 @@ export default {
 .editor-content :deep(td.value-empty), .editor-content :deep(th.value-empty) { background-color: #fffee0; }
 .editor-content :deep(td.value-error), .editor-content :deep(th.value-error) { background-color: #ffeaea; }
 .editor-content :deep(td.value-invalid), .editor-content :deep(th.value-invalid) { background-color: #ffeaea; }
+
+.hint.empty { margin: 8px 0; color: #c62828; font-weight: 600; }
 
 </style>

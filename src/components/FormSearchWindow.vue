@@ -29,7 +29,8 @@
                 <div class="page-action-block">
                     <span class="icon-item prev" @click="changePage(currentPage - 1)" :class="{'disabled': currentPage === 1}">&lt;</span>
                     <label>第</label>
-                    <input type="number" class="page-input" :showSpinButton="false" v-model.number="currentPage" min="1" :max="totalPage"/>
+                    <input type="number" class="page-input" :showSpinButton="false" v-model.number="currentPage" min="1" :max="totalPage" @change="changePage(currentPage)"/>
+
                     <label>頁, 共{{ totalPage }}頁</label>
                     <span class="icon-item next" @click="changePage(currentPage + 1)" :class="{'disabled': currentPage === totalPage}">&gt;</span>
                 </div>
@@ -45,83 +46,103 @@
 <script>
 import axios from 'axios';
 
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || '';
+
 export default{
     name: "FormSearchWindow",
     props: {
         headerName: {type: String, default: ""},
-        existingForms: {type: Array, default: () => []},
+        existingForms: {type: Array, default: () => []}, // [{ formId, formName }]
     },
     data() {
         return {
-            formInfos: [],
-            results: [],
+            formInfos: [],   // 其實可以不用，但保留也無妨
+            results: [],     // 當前頁要顯示的資料
+            totalCount: 0,   // 後端回傳的 total
             selectedFormId: null,
 
             formName: "",
             formId: null,
 
-            currentPage: 1,         // 當前頁碼
-            pageRows: 8,           // 每頁顯示筆數
-            searchKeyword: '',      // 新增：搜尋關鍵字
+            currentPage: 1,
+            pageRows: 8,
+            searchKeyword: '',
         }
     },
     computed: {
         totalPage() {
-            if (!this.results.length)
+            if (!this.totalCount)
                 return 1;
-            return Math.ceil(this.results.length / this.pageRows);
+            return Math.ceil(this.totalCount / this.pageRows);
         },
-        // 當前頁面要顯示的資料
         paginatedFormInfos() {
-            const start = (this.currentPage - 1) * this.pageRows;
-            const end = start + this.pageRows;
-            return this.results.slice(start, end);
+            // 後端已經分頁了，這裡直接回 results 即可
+            return this.results;
         },
     },
     mounted() {
-        this.requestFormInfomations();
+        // 一進來就查第 1 頁
+        this.fetchForms('');
     },
     methods: {
-        requestFormInfomations() {
-            const res = [
-                {formId: "FM-R-MF-AF-035", formName: "K# 康代RTR AOI檢查機日常點檢表"},
-                {formId: "FM-R-MF-AF-036", formName: "K# 康代RTR VRS檢修機日常點檢表"},
-                {formId: "FM-R-MF-AF-050", formName: "K# 康代SBS AOI檢修機日常點檢表"},
-                {formId: "FM-R-MF-AF-051", formName: "K# 康代SBS VRS檢修機日常點檢表"},
-                {formId: "FM-R-MF-AF-032", formName: "K# 由田RTR AOI線路檢查機日常點檢表"},
-                {formId: "FM-R-MF-AA-167", formName: "K#SBS盲檢機日常點檢表"},
-                {formId: "FM-R-MF-AD-169", formName: "K# LPSM粗糙度送件紀錄表"},
-                {formId: "FM-R-MF-AD-170", formName: "K# LPSM粗糙度送測單"},
-                {formId: "FM-R-MF-AA-172", formName: "K#SBS盲檢作業日報表"},
-                {formId: "FM-R-MF-AB-232", formName: "K# RTR LVI前處理日常點檢表"},
-                {formId: "FM-R-MF-AB-238", formName: "K# SBS黑影線日常點檢表"},
-                {formId: "FM-R-MF-AB-240", formName: "K# SBS黑影線作業日報表"},
-                {formId: "FM-R-MF-AE-267", formName: "K# LPSM前處理微蝕線日常點檢表"},
-                {formId: "FM-R-MF-AT-527", formName: "K#SBS盲孔檢查機-01~03預防保養管理表"},
-            ]
+        async fetchForms(keyword = '') {
+            try {
+                const resp = await axios.get(`${API_BASE_URL}/dcc/forms`, {
+                    params: {
+                        keyword,
+                        page: this.currentPage,
+                        page_size: this.pageRows,
+                    }
+                });
 
-            this.formInfos = res.map((formInfo, index) => ({ id: index, ...formInfo }));
+                if (!resp.data || !resp.data.success) {
+                    console.error('取得表單清單失敗:', resp.data);
+                    alert('取得表單清單失敗');
+                    return;
+                }
+
+                const rows = resp.data.data || [];
+                this.totalCount = resp.data.total || 0;
+
+                const existingIds = new Set(this.existingForms.map(f => f.formId));
+
+                // 把已存在的 formId 過濾掉，再映射到前端使用的格式
+                this.results = rows
+                    .filter(r => !existingIds.has(r.dccno))
+                    .map((r, index) => ({
+                        id: index,            // 單頁內唯一就好
+                        formId: r.dccno,
+                        formName: r.dccname,
+                    }));
+
+                this.formInfos = this.results; // 如果你別的地方會用到就保留
+                this.selectedFormId = null;
+                this.formId = null;
+                this.formName = "";
+            } catch (err) {
+                console.error('呼叫 /dcc/forms 發生錯誤:', err);
+                alert('無法連線到伺服器 (表單搜尋)');
+            }
         },
+
         searchForm(searchKeyword) {
-            const keyword = searchKeyword.toLowerCase();
-            const existingIds = new Set(this.existingForms.map(f => f.formId));
-
-            this.results =  this.formInfos.filter(info => {
-                const matchKeyword = info.formName.toLowerCase().includes(keyword) || info.formId.toLowerCase().includes(keyword);
-                const isExisting = existingIds.has(info.formId);
-
-                return matchKeyword && !isExisting;
-            })
+            this.searchKeyword = searchKeyword || '';
+            this.currentPage = 1;           // 新搜尋從第 1 頁開始
+            this.fetchForms(this.searchKeyword);
         },
+
         selectForm(formInfo) {
             this.selectedFormId = formInfo.id;
             this.formId = formInfo.formId;
             this.formName = formInfo.formName;
         },
+
         changePage(page) {
-            if (page >= 1 && page <= this.totalPage)
-                this.currentPage = page;
+            if (page < 1 || page > this.totalPage) return;
+            this.currentPage = page;
+            this.fetchForms(this.searchKeyword);
         },
+
         addNewForm() {
             if (!this.formName || this.formName == ""){
                 alert("條件名稱不能為空");
@@ -133,13 +154,13 @@ export default{
             }
             this.$emit("add-new-form", {formId: this.formId, formName: this.formName});
         },
+
         closeWindow() {
             console.log("cancel window");
             this.$emit("close-window");
         }
     }
 }
-
 </script>
 
 <style scoped> 

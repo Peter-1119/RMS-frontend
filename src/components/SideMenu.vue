@@ -23,11 +23,11 @@ export default {
             menuItems: [
                 {id: 1, title: '製造條件指示書', children: [
                     {id: 11, title: '文件新建立', link: '/new-instruction'},
-                    {id: 12, title: '文件變版', link: '#'}
+                    {id: 12, title: '文件變版', link: '/instruction-change'}
                 ]},
                 {id: 2, title: '製造式樣書', children: [
                     {id: 21, title: '文件新建立', link: '/new-specification'},
-                    {id: 22, title: '文件變版', link: '#'}
+                    {id: 22, title: '文件變版', link: '/specification-change'}
                 ]},
                 {id: 3, title: '資料設定', children: [
                     {id: 31, title: "規則一覽表", link: "/Specification"},

@@ -18,7 +18,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="docInfo in results" :key="docInfo.id" @click="selectDoc(docInfo)" :class="{'selected-row': docInfo.id === selectedDocId}">
+                        <tr v-for="docInfo in paginatedDocInfos" :key="docInfo.id" @click="selectDoc(docInfo)" :class="{'selected-row': docInfo.id === selectedDocId}">
                             <td>{{ docInfo.docId }}</td>
                             <td>{{ docInfo.docName }}</td>
                         </tr>
@@ -29,7 +29,7 @@
                 <div class="page-action-block">
                     <span class="icon-item prev" @click="changePage(currentPage - 1)" :class="{'disabled': currentPage === 1}">&lt;</span>
                     <label>第</label>
-                    <input type="number" class="page-input" :showSpinButton="false" v-model.number="currentPage" min="1" :max="totalPage"/>
+                    <input type="number" class="page-input" :showSpinButton="false" v-model.number="currentPage" min="1" :max="totalPage" @change="changePage(currentPage)"/>
                     <label>頁, 共{{ totalPage }}頁</label>
                     <span class="icon-item next" @click="changePage(currentPage + 1)" :class="{'disabled': currentPage === totalPage}">&gt;</span>
                 </div>
@@ -45,99 +45,118 @@
 <script>
 import axios from 'axios';
 
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || '';
+
 export default{
     name: "DocSearchWindow",
     props: {
         headerName: {type: String, default: ""},
-        existingDocs: {type: Array, default: () => []},
+        existingDocs: {type: Array, default: () => []},  // [{ docId, docName }]
     },
     data() {
         return {
             docInfos: [],
             results: [],
+            totalCount: 0,
             selectedDocId: null,
 
             docName: "",
             docId: null,
 
-            currentPage: 1,         // 當前頁碼
-            pageRows: 8,           // 每頁顯示筆數
-            searchKeyword: '',      // 新增：搜尋關鍵字
+            currentPage: 1,
+            pageRows: 8,
+            searchKeyword: '',
         }
     },
     computed: {
         totalPage() {
-            if (!this.results.length)
+            if (!this.totalCount)
                 return 1;
-            return Math.ceil(this.results.length / this.pageRows);
+            return Math.ceil(this.totalCount / this.pageRows);
         },
-        // 當前頁面要顯示的資料
         paginatedDocInfos() {
-            const start = (this.currentPage - 1) * this.pageRows;
-            const end = start + this.pageRows;
-            return this.results.slice(start, end);
+            return this.results;
         },
     },
     mounted() {
-        this.requestDocInfomations();
+        this.fetchDocs('');
     },
     methods: {
-        requestDocInfomations() {
-            const res = [
-                {docId: "WQD012", docName: "乾膜剝膜品質確認指示書"},
-                {docId: "WWA108", docName: "K#_RTR LVI盲孔檢查機-01~08_作業流程作業指示書"},
-                {docId: "WWA124", docName: "K#_RTR/SBS盲孔檢查OCAP 異常處理流程作業指示書"},
-                {docId: "WWD125", docName: "K# 乾膜剝膜破膜點測試方法作業指示書"},
-                {docId: "WWB143", docName: "K# RTR 局部銅電剝膜線作業指示書"},
-                {docId: "WWC222", docName: "K# 康代AOI檢查機&VRS檢修機作業指示書"},
-                {docId: "WWC228", docName: "K# 康代AOI檢查機日常檢查作業指示書"},
-                {docId: "WWC229", docName: "K# 康代VRS檢查機日常檢查作業指示書"},
-                {docId: "WWC256", docName: "K# AOI檢測作業指示書"},
-                {docId: "WWQ1288", docName: "K#_RTR 盲孔檢查機-01~08預防保養作業指示書"},
-                {docId: "WWQ1308", docName: "K#_RTR LVI 盲檢機上下料搭載機-01~08預防保養作業指示書"},
-            ]
+        async fetchDocs(keyword = '') {
+            try {
+                const resp = await axios.get(`${API_BASE_URL}/dcc/docs`, {
+                    params: {
+                        keyword,
+                        page: this.currentPage,
+                        page_size: this.pageRows,
+                    }
+                });
 
-            this.docInfos = res.map((docInfo, index) => ({ id: index, ...docInfo }));
+                if (!resp.data || !resp.data.success) {
+                    console.error('取得文件清單失敗:', resp.data);
+                    alert('取得文件清單失敗');
+                    return;
+                }
+
+                const rows = resp.data.data || [];
+                this.totalCount = resp.data.total || 0;
+
+                const existingIds = new Set(this.existingDocs.map(d => d.docId));
+
+                this.results = rows
+                    .filter(r => !existingIds.has(r.dccno))
+                    .map((r, index) => ({
+                        id: index,
+                        docId: r.dccno,
+                        docName: r.dccname,
+                    }));
+
+                this.docInfos = this.results;
+                this.selectedDocId = null;
+                this.docId = null;
+                this.docName = "";
+            } catch (err) {
+                console.error('呼叫 /dcc/docs 發生錯誤:', err);
+                alert('無法連線到伺服器 (文件搜尋)');
+            }
         },
+
         searchDoc(searchKeyword) {
-            const keyword = searchKeyword.toLowerCase();
-            const existingIds = new Set(this.existingDocs.map(f => f.docId));
-
-            this.results = this.docInfos.filter(info => {
-                const matchKeyword = info.docName.toLowerCase().includes(keyword) || info.docId.toLowerCase().includes(keyword);
-                const isExisting = existingIds.has(info.docId);
-
-                return matchKeyword && !isExisting;
-            })
+            this.searchKeyword = searchKeyword || '';
+            this.currentPage = 1;
+            this.fetchDocs(this.searchKeyword);
         },
+
         selectDoc(docInfo) {
             this.selectedDocId = docInfo.id;
             this.docId = docInfo.docId;
             this.docName = docInfo.docName;
         },
+
         changePage(page) {
-            if (page >= 1 && page <= this.totalPage)
-                this.currentPage = page;
+            if (page < 1 || page > this.totalPage) return;
+            this.currentPage = page;
+            this.fetchDocs(this.searchKeyword);
         },
+
         addNewDoc() {
             if (!this.docName || this.docName == ""){
-                alert("條件名稱不能為空");
+                alert("文件名稱不能為空");
                 return;
             }
             if (!this.docId || this.docId == ""){
                 alert("請選擇表單");
                 return;
             }
-            console.log("Window emit.");
             this.$emit("add-new-doc", {docId: this.docId, docName: this.docName});
         },
+
         closeWindow() {
             console.log("cancel window");
             this.$emit("close-window");
         }
     }
 }
-
 </script>
 
 <style scoped>

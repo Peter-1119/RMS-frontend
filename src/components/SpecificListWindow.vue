@@ -19,7 +19,7 @@
                     </thead>
                     <tbody>
                         <tr v-for="s in paginatedSpecificInfos" :key="s.code">
-                            <td><input type="radio" :value="s.specific" v-model="selectedSpecific"/></td>
+                            <td><input type="radio" :value="s" v-model="selectedSpecific"/></td>
                             <td>{{ s.code }}</td>
                             <td>{{ s.specific }}</td>
                         </tr>
@@ -52,7 +52,9 @@ import axios from 'axios';
 export default {
   name: "SpecificListWindow",
   props: {
-    machineKeyword: { default: "" }
+    machineKeyword: { default: "" },
+    machineCode: { type: String, default: "" },  // 新增：由 parent 傳入
+    itemCode:    { type: String, default: "" },  // 新增：由 parent 傳入 (MATNR)
   },
   data() {
     return {
@@ -81,34 +83,36 @@ export default {
   },
   methods: {
     async requestSpecificFromAPI(keyword) {
-      // allow empty keyword to fetch ALL
-      this.specifics = [];
-      this.console = "";
-      this.currentPage = 1;
+      this.specifics = []
+      this.console = ""
+      this.currentPage = 1
+
       try {
-        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-        const { data } = await axios.get(`${API_BASE_URL}/mes/specifics`, {
-          params: { keyword, machine: this.machineKeyword }
-        });
-        const specMap = (data && data.data && data.data.specifics) || {};
-        Object.entries(specMap).forEach(([sn, si]) => {
-          this.specifics.push({ specific: sn, code: si.code });
-        });
-        if (!this.specifics.length) this.console = "沒有符合條件的製程";
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+        const params = {
+          keyword,
+        }
+        if (this.machineCode) params.machine = this.machineCode
+        if (this.itemCode)    params.matnr   = this.itemCode
+
+        const { data } = await axios.get(`${API_BASE_URL}/mes/step1/specs`, { params })
+
+        const list = (data && data.data && data.data.specifics) || []
+        this.specifics = list.map(s => ({ specific: s.name, code: s.code }))
+
+        if (!this.specifics.length) this.console = "沒有符合條件的製程"
       } catch (error) {
-        console.error("Error fetching specifics: ", error);
-        this.console = "資料獲取異常";
+        console.error("Error fetching specifics: ", error)
+        this.console = "資料獲取異常"
       }
     },
 
     select() {
-      this.$emit("selectSpecific", this.selectedSpecific);
-      this.$emit("cancel");
+      this.$emit("selectSpecific", this.selectedSpecific)
+      this.$emit("cancel")
     },
-    closeWindow() {
-      this.$emit("cancel");
-    },
-  }
+    closeWindow() { this.$emit("cancel") },
+  },
 }
 </script>
 

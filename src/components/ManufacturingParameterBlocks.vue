@@ -17,18 +17,19 @@
       </div>
 
       <!-- Parameter (Table 2) -->
-      <div v-if="paramEditors[i]" class="menu">
+      <!-- <div v-if="paramEditors[i]" class="menu"> -->
+      <div class="menu">
         <div class="l">
           <label>機檯群組：</label>
           <select v-model="blocks[i].meta.group" @change="onGroupChange(i)">
             <option value="">-- 請選擇群組 --</option>
-            <option v-for="g in groupKeys" :key="g" :value="g">{{ g }}</option>
+            <option v-for="[groupCode, groupInfo] in groupKeys" :key="groupCode" :value="groupCode">{{ groupInfo.name }}</option>
           </select>
 
           <label>機台：</label>
-          <select v-model="blocks[i].meta.machine" @change="syncToParent">
+          <select v-model="blocks[i].meta.machine" @change="onMachineChange(i)">
             <option value="">-- 請選擇機台 --</option>
-            <option v-for="m in machineKeysFor(i)" :key="m" :value="m">{{ m }}</option>
+            <option v-for="[machineCode, machineInfo] in machineKeysFor(i)" :key="machineCode" :value="machineCode">{{ machineInfo.name }}</option>
           </select>
         </div>
         <div class="r">
@@ -37,7 +38,16 @@
           <i class="dot black" @click="paramEditors[i]?.chain().focus().setColor('null').run()"></i>
         </div>
       </div>
-      <EditorContent v-if="paramEditors[i]" :editor="paramEditors[i]" class="ed ed-param" />
+      <div v-if="!blocks[i].meta.group || !blocks[i].meta.machine" class="hint">
+        請先選擇「機檯群組」與「機台」，將自動載入 PMS 參數。
+      </div>
+
+      <div v-else-if="pmsLoading[i]" class="hint">正在載入 PMS 參數…</div>
+
+      <div v-else-if="pmsEmpty[i]" class="hint empty">此機台無PMS資料</div>
+
+      <EditorContent v-else-if="paramEditors[i]" :editor="paramEditors[i]" class="ed ed-param"/>
+      <!-- <EditorContent v-if="paramEditors[i]" :editor="paramEditors[i]" class="ed ed-param"/> -->
     </div>
   </div>
 </template>
@@ -62,7 +72,7 @@ import { CellSelection } from 'prosemirror-tables'
 /* ===== Props / Emits ===== */
 const props = defineProps({
   dataBlocks: { type: Array, default: () => [] },     // [{ code, data:{ jsonParameterContent, arrayParameterData, metadata? }, ...}]
-  specification: { type: String, default: "" },       // passed from parent
+  specification: { type: Object, default: () => ({ specific: "", code: "" }) },       // passed from parent
   currentStep: { type: Number, default: 0 },
 })
 const emit = defineEmits(['update:dataBlocks','save'])
@@ -83,13 +93,17 @@ const paramEditors = ref([])    // Editor[]
 const copyCode = ref('')
 let idSeq = 0
 
+// NEW: PMS states per block index
+const pmsLoading = ref({})  // { [i]: boolean }
+const pmsEmpty   = ref({})  // { [i]: boolean }
+
 /* ===== MES: groups & machines ===== */
 const groupsMap = ref({}) // shape: { [groupName]: { code, machines: { [machineName]: { code } } } }
-const groupKeys = computed(() => Object.keys(groupsMap.value || {}))
+const groupKeys = computed(() => Object.entries(groupsMap.value))
 const machineKeysFor = (i) => {
   const g = blocks.value[i]?.meta?.group || ''
   const gm = groupsMap.value[g]?.machines || {}
-  return Object.keys(gm)
+  return Object.entries(gm)
 }
 
 async function fetchGroups() {
@@ -98,13 +112,23 @@ async function fetchGroups() {
   try {
     // Adjust URL if your blueprint is mounted under a prefix (e.g., /mes/groups-machines)
     const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, {
-      params: { specific: props.specification }
+      params: { specific: props.specification.code }
     })
     groupsMap.value = data?.data?.groups || {}
   } catch (e) {
     console.error('fetch groups-machines failed:', e)
     groupsMap.value = {}
   }
+}
+
+// NEW: resolve the Oracle MACHINE_CODE (machine_id) from current selection
+function getSelectedMachineId(i){
+  const gKey = blocks.value[i]?.meta?.group || ''
+  const mKey = blocks.value[i]?.meta?.machine || ''
+  // const mInfo = groupsMap.value?.[gKey]?.machines?.[mKey]
+  // in your data shape, key is "machineCode" (actually a name), .code is the true MACHINE_CODE
+  // return (mInfo?.code || '').trim()
+  return (mKey || '').trim()
 }
 
 /* ===== Parameter table template ===== */
@@ -185,11 +209,58 @@ function makeParamEditor(json, onUpdate) {
   })
 }
 
+async function seedFromMES(i, machineId){
+  // mark loading / clear empties
+  pmsLoading.value[i] = true
+  pmsEmpty.value[i]   = false
+  try {
+    const { data } = await axios.get(`${API_BASE_URL}/mes/pms/machine-parameters-set-attribute`, {
+      params: { machine_id: machineId }
+    })
+    const rows = data?.data?.table_rows || []
+
+    if (!rows.length){
+      // no PMS data => destroy editor if exists and show empty message
+      if (paramEditors.value[i]) {
+        paramEditors.value[i].destroy()
+        paramEditors.value[i] = null
+      }
+      pmsEmpty.value[i] = true
+      return
+    }
+
+    // build TipTap doc and show editor
+    const doc = buildParamDocFromRows(rows)
+    if (!paramEditors.value[i]) {
+      paramEditors.value[i] = makeParamEditor(
+        doc,
+        (editor)=>{ runParamValueValidation(editor); runParamDuplicateValidation() }
+      )
+    } else {
+      paramEditors.value[i].commands.setContent(doc, false)
+    }
+    // validations + sync
+    nextTick(()=>{ runAllValidations(); syncToParent() })
+  } catch(e){
+    console.error('seedFromMES error:', e)
+    // on error, fallback to empty state (don’t leave stale editor)
+    if (paramEditors.value[i]) {
+      paramEditors.value[i].destroy()
+      paramEditors.value[i] = null
+    }
+    pmsEmpty.value[i] = true
+  } finally {
+    pmsLoading.value[i] = false
+  }
+}
+
+
 /* ===== Public actions ===== */
 function addBlock(){
   const id = idSeq++
-  const firstGroup = groupKeys.value[0] || ''
-  const firstMachine = firstGroup ? (Object.keys(groupsMap.value[firstGroup]?.machines || {})[0] || '') : ''
+  const firstGroup = groupKeys.value[0]?.[0] || ''   // fix: groupKeys is entries => [code, info]
+  const firstMachine = ''                            // don’t prefill machine
+
   blocks.value.push({
     content_id: null,
     client_temp_id: `temp-${uuidv1()}`,
@@ -198,7 +269,9 @@ function addBlock(){
     meta: { group: firstGroup, machine: firstMachine },
     data:{}
   })
-  nextTick(()=> initEditors(blocks.value.length-1))
+  // don’t init editor here; wait for machine selection
+  pmsLoading.value[id] = false
+  pmsEmpty.value[id]   = false
 }
 function delBlock(i){
   if (blocks.value.length===1) return alert('至少需要保留一個組合')
@@ -229,6 +302,39 @@ function copyFromCode(targetIdx){
   blocks.value[targetIdx].meta = { ...(blocks.value[srcIdx].meta || {}) }
   runAllValidations(); alert('複製成功')
 }
+
+async function onMachineChange(i){
+  syncToParent() // keep parent in sync
+
+  const machineId = getSelectedMachineId(i)
+  // if no machine, clear editor / flags
+  if (!machineId){
+    if (paramEditors.value[i]) {
+      paramEditors.value[i].destroy()
+      paramEditors.value[i] = null
+    }
+    pmsLoading.value[i] = false
+    pmsEmpty.value[i]   = false
+    return
+  }
+  await seedFromMES(i, machineId)
+}
+function onGroupChange(i) {
+  const g = blocks.value[i]?.meta?.group || ''
+  const mk = Object.keys(groupsMap.value[g]?.machines || {})
+  if (!mk.includes(blocks.value[i].meta.machine)) {
+    blocks.value[i].meta.machine = '' // force re-select machine
+  }
+  // wipe editor and PMS flags until a machine is chosen
+  if (paramEditors.value[i]) {
+    paramEditors.value[i].destroy()
+    paramEditors.value[i] = null
+  }
+  pmsLoading.value[i] = false
+  pmsEmpty.value[i]   = false
+  syncToParent()
+}
+
 
 /* ===== Validations ===== */
 function getParamMatrix(ed){
@@ -308,10 +414,8 @@ onMounted(async ()=>{
   await fetchGroups()
 
   if (!props.dataBlocks.length){
-    // start with one block hooked to first group/machine (if any)
     addBlock()
   } else {
-    // rebuild from parent (keep metadata!)
     blocks.value = props.dataBlocks.map((blk,idx)=>({
       id:idSeq++,
       code: blk.code || `XXXY${idx+1}`,
@@ -324,20 +428,22 @@ onMounted(async ()=>{
       data: blk.data || {}
     }))
 
-    // for any block that has an invalid meta after fetching groups, auto-fix
-    blocks.value.forEach(b => {
-      if (!b.meta.group || !groupsMap.value[b.meta.group]) {
-        // b.meta.group = groupKeys.value[0] || ''
-        b.meta.group = ''
-      }
+    // fix invalid selections against current groups
+    blocks.value.forEach((b, i) => {
+      if (!b.meta.group || !groupsMap.value[b.meta.group]) b.meta.group = ''
       const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
-      if (!b.meta.machine || !mk.includes(b.meta.machine)) {
-        // b.meta.machine = mk[0] || ''
-        b.meta.machine = ''
-      }
+      if (!b.meta.machine || !mk.includes(b.meta.machine)) b.meta.machine = ''
     })
 
-    blocks.value.forEach((_,i)=> initEditors(i))
+    // try auto load PMS for blocks that already have a valid machine
+    await Promise.all(blocks.value.map(async (b, i) => {
+      const mid = getSelectedMachineId(i)
+      if (mid) await seedFromMES(i, mid)
+      else {
+        pmsLoading.value[i] = false
+        pmsEmpty.value[i]   = false
+      }
+    }))
   }
   nextTick(syncToParent)
 })
@@ -346,21 +452,29 @@ onMounted(async ()=>{
 watch(() => props.currentStep, (n) => {
   // no-op; you can react on step switch if needed
 })
-watch(() => props.specification, async () => {
-  // Re-fetch groups if user changes specification upstream
-  await fetchGroups()
-  // Fix invalid selections
-  blocks.value.forEach(b => {
-    if (!b.meta.group || !groupsMap.value[b.meta.group]) {
-      b.meta.group = groupKeys.value[0] || ''
-    }
-    const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
-    if (!b.meta.machine || !mk.includes(b.meta.machine)) {
-      b.meta.machine = mk[0] || ''
-    }
-  })
-  syncToParent()
-})
+// watch(() => props.specification, async () => {
+//   await fetchGroups()
+
+//   blocks.value.forEach((b, i) => {
+//     if (!b.meta.group || !groupsMap.value[b.meta.group]) b.meta.group = ''
+//     const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
+//     if (!b.meta.machine || !mk.includes(b.meta.machine)) b.meta.machine = ''
+//   })
+
+//   // reload PMS for valid machines, otherwise clear editor
+//   await Promise.all(blocks.value.map(async (b, i) => {
+//     const mid = getSelectedMachineId(i)
+//     if (mid) await seedFromMES(i, mid)
+//     else {
+//       if (paramEditors.value[i]) { paramEditors.value[i].destroy(); paramEditors.value[i] = null }
+//       pmsLoading.value[i] = false
+//       pmsEmpty.value[i]   = false
+//     }
+//   }))
+
+//   syncToParent()
+// })
+
 
 onBeforeUnmount(()=>{
   const payload = exportData()
@@ -406,17 +520,6 @@ function syncToParent() {
   emitTimer = setTimeout(() => emit('update:dataBlocks', exportData()), 120)
 }
 
-/* ===== UI helpers ===== */
-function onGroupChange(i) {
-  const g = blocks.value[i]?.meta?.group || ''
-  const mk = Object.keys(groupsMap.value[g]?.machines || {})
-  if (!mk.includes(blocks.value[i].meta.machine)) {
-    // blocks.value[i].meta.machine = mk[0] || ''
-    blocks.value[i].meta.machine = ''
-  }
-  syncToParent()
-}
-
 /* ===== expose (optional) ===== */
 defineExpose({ exportData })
 </script>
@@ -444,11 +547,14 @@ defineExpose({ exportData })
 .ed :deep(.ProseMirror){padding:8px;min-height:80px;outline:none}
 .ed :deep(table){border-collapse:collapse;width:100%;table-layout:fixed}
 .ed :deep(th),.ed :deep(td){border:1px solid #ddd;padding:8px;text-align:center;vertical-align:middle;min-width:72px;position:relative}
-.ed :deep(th){background:#f8f9fa;font-weight:700}
+.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:100px;z-index:5;}
 .ed :deep(.selectedCell){background:#e3f2fd!important;outline:2px solid #2196f3;outline-offset:-2px}
 .ed :deep([contenteditable="false"]){background:#f5f5f5;color:#666;cursor:not-allowed}
 .ed :deep(tr.dup-row td){background:#ffe6e6!important}      /* 5.1 duplicate row: red-ish */
 .ed :deep(tr.dup-table td){background:#ffe6e6!important}    /* 6.3 duplicate table: red-ish */
 .ed :deep(td.value-empty){background:#fff7c2}               /* 6.4.2 empty: yellow */
 .ed :deep(td.value-invalid),.ed :deep(td.value-error){background:#ffcdd2} /* 6.4.3 invalid: red */
+
+.hint{ padding:12px; color:#555; background:#f8f9fb; border:1px dashed #cfd8dc; border-radius:6px; margin:8px 0 }
+.hint.empty{ color:#9e9e9e; text-align:center; }
 </style>

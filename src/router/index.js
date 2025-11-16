@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import HomeView from '@/views/HomeView.vue';
 import NewInstruction from '@/views/NewInstruction.vue'; // 新增的組件
+import InstructionChangePage from '@/views/InstructionChangePage.vue';
 import LoginPage from '@/components/LoginPage.vue';
 import SearchPage from '@/views/SearchPage.vue';
 import DraftDocuments from '@/views/DraftDocuments.vue';
@@ -8,6 +9,7 @@ import SubmittedDocuments from '@/views/SubmittedDocuments.vue';
 import RejectedDocuments from '@/views/RejectedDocuments.vue';
 import SpecificationParamPage from '@/views/SpecificationParamPage.vue';
 import NewSpecification from "@/views/NewSpecification.vue"
+import SpecificationChangePage from '@/views/SpecificationChangePage.vue';
 import ParametersSearch from '@/views/ParametersSearch.vue';
 import SpecificationViewPage from '@/views/SpecificationViewPage.vue';
 
@@ -17,7 +19,9 @@ const routes = [
   {path: '/home',                   name: 'home-alias',             component: HomeView,                    meta: { requiresAuth: true }},
   {path: '/Specification',          name: 'Specification',          component: SpecificationParamPage,      meta: { requiresAuth: true }},
   {path: '/new-instruction',        name: 'new-instruction',        component: NewInstruction,              meta: { requiresAuth: true }},
+  {path: '/instruction-change',     name: 'instruction-change',     component: InstructionChangePage,       meta: { requiresAuth: true }},
   {path: "/new-specification",      name: "new-specification",      component: NewSpecification,            meta: { requiresAyth: true }},
+  {path: '/specification-change',   name: 'specification-change',   component: SpecificationChangePage,     meta: { requiresAuth: true }},
   {path: '/SearchPage',             name: 'SearchPage',             component: SearchPage,                  meta: { requiresAuth: true }},
   {path: '/DraftDocuments',         name: 'DraftDocuments',         component: DraftDocuments,              meta: { requiresAuth: true }},
   {path: '/SubmittedDocuments',     name: 'SubmittedDocuments',     component: SubmittedDocuments,          meta: { requiresAuth: true }},
