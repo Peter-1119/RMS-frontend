@@ -43,7 +43,7 @@ export async function getRejected({
  */
 export async function getPassed({
   userId,
-  documentType = 0,       // e.g. 'Instruction', 'Specification', or 'Instruction,Specification'
+  document_type = 0,       // e.g. 'Instruction', 'Specification', or 'Instruction,Specification'
   keyword = '',
   page = 1,
   pageSize = 20,
@@ -58,7 +58,7 @@ export async function getPassed({
     sort,
     order,
   }
-  if (documentType) params.document_type = documentType
+  if (document_type) params.document_type = document_type
 
   const { data } = await axios.get(`${API}/docs/passed`, { params })
   return {

@@ -108,7 +108,7 @@ export default {
         },
         async fetchConditions(keyword) {
             try {
-                console.log("GET /conditions/search-conditions-by-machines.")
+                // console.log("GET /conditions/search-conditions-by-machines.")
                 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
                 const response = await axios.get(API_BASE_URL + "/conditions/search-conditions-by-machines", {params: {keyword}});
                 this.conditions = response.data.data.conditions;

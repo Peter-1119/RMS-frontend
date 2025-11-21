@@ -12,6 +12,7 @@ import NewSpecification from "@/views/NewSpecification.vue"
 import SpecificationChangePage from '@/views/SpecificationChangePage.vue';
 import ParametersSearch from '@/views/ParametersSearch.vue';
 import SpecificationViewPage from '@/views/SpecificationViewPage.vue';
+import DocxPreviewPage from '@/views/DocxPreviewPage.vue'
 
 const routes = [
   {path: '/',                       redirect: '/login',},
@@ -27,7 +28,9 @@ const routes = [
   {path: '/SubmittedDocuments',     name: 'SubmittedDocuments',     component: SubmittedDocuments,          meta: { requiresAuth: true }},
   {path: '/RejectedDocuments',      name: 'RejectedDocuments',      component: RejectedDocuments,           meta: { requiresAuth: true }},
   {path: '/ParametersSearch',       name: 'ParametersSearch',       component: ParametersSearch,            meta: { requiresAuth: true }},
-  {path: '/project-specification',  name: 'SpecificationViewPage',  component: SpecificationViewPage,       meta: { requiresAuth: true }}
+  {path: '/project-specification',  name: 'SpecificationViewPage',  component: SpecificationViewPage,       meta: { requiresAuth: true }},
+  {path: '/docs/preview/:token',    name: 'docx-preview',           component: DocxPreviewPage,                                             props: true},
+  {path: '/docs/preview/:token',    name: 'docx-preview',           component: DocxPreviewPage,             meta: { hideChrome: true },     props: true},
 ];
 
 // ---- add this small helper at the top (file scope) ----

@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { Editor, EditorContent } from '@tiptap/vue-3'
+import { Focus } from '@tiptap/extensions'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
@@ -49,6 +50,7 @@ const props = defineProps({
   cols: { type: Number, default: 9 },
   token: { type: String, default: '' },
   machineCode: { type: String, default: '' },   // 第一台 MACHINE_CODE
+  version: { type: Number, default: 0 },        // ⭐ 父層資料 reload 觸發器
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -97,7 +99,6 @@ const hasUserEdited = ref(false)  // 使用者是否曾經修改過
 function hasNonEmptySteps() {
   return Array.isArray(stepsRef.value) && stepsRef.value.some(s => (s || '').trim() !== '')
 }
-
 
 /* ---------- table helpers ---------- */
 const COLS = 9
@@ -255,12 +256,12 @@ async function loadDefaultFlow(machineCode) {
       params: { machine_id: machineCode },
     })
     if (!res.data?.success) {
-      console.log('[PMS] API success=false', res.data)
+      // console.log('[PMS] API success=false', res.data)
       return
     }
     const slots = res.data.data?.slots || res.data.slots || []
     if (!Array.isArray(slots) || !slots.length) {
-      console.log('[PMS] no slots returned')
+      // console.log('[PMS] no slots returned')
       return
     }
 
@@ -271,7 +272,7 @@ async function loadDefaultFlow(machineCode) {
 
     stepsRef.value = steps
     m.value.items = tableEditor.value.getJSON()
-    console.log('[PMS] flow loaded, steps =', steps)
+    // console.log('[PMS] flow loaded, steps =', steps)
   } catch (err) {
     console.error('load default flow failed', err)
   }
@@ -279,7 +280,6 @@ async function loadDefaultFlow(machineCode) {
 
 // 專門決定「要不要自動帶入 PMS」的邏輯
 function maybeAutoLoadPms(code) {
-  console.log('[PMS] maybeAutoLoadPms code =', code)
   if (!code) return
 
   const parentItems = props.modelValue?.items
@@ -292,20 +292,106 @@ function maybeAutoLoadPms(code) {
     parentItems.type === 'doc'
 
   if (parentHasDocJson) {
-    console.log('[PMS] skip auto: parent already has doc JSON')
+    // console.log('[PMS] skip auto: parent already has doc JSON')
     return
   }
 
   // 2️⃣ 父層給的是 steps array 或 null/undefined → 視為「沒現成流程」 → 用 PMS 補預設
-  console.log('[PMS] no doc JSON from parent → auto load PMS')
+  // console.log('[PMS] no doc JSON from parent → auto load PMS')
   loadDefaultFlow(code)
 }
 
+watch(
+  () => props.version,
+  async () => {
+    if (!tableEditor.value) return
 
+    const model = clone(props.modelValue) || {
+      mode: 'table',
+      cols: 9,
+      header_json: null,
+      items: null,
+      file: null,
+    }
+
+    // 先同步內部 m
+    gate = true
+    m.value = model
+    gate = false
+
+    // 每次外部 reload -> 視為「新狀態」，讓 PMS 有機會重新載
+    hasUserEdited.value = false
+
+    // 1) header 重灌
+    if (headerEditor.value) {
+      const headerDoc = model.header_json || {
+        type: 'doc',
+        content: [{ type: 'paragraph' }],
+      }
+      updatingFromParent = true
+      headerEditor.value.commands.setContent(headerDoc, false)
+      updatingFromParent = false
+    }
+
+    // 2) table 重灌：三種情況
+    const parentItems = model.items
+
+    // 2-1 有 doc JSON（草稿 / 已存內容）
+    if (
+      parentItems &&
+      typeof parentItems === 'object' &&
+      !Array.isArray(parentItems) &&
+      parentItems.type === 'doc'
+    ) {
+      updatingFromParent = true
+      updatingFromSteps = true
+      tableEditor.value.commands.setContent(parentItems, false)
+      updatingFromSteps = false
+      updatingFromParent = false
+
+      stepsRef.value = getStepsFromDoc(tableEditor.value)
+      m.value.items = tableEditor.value.getJSON()
+      return
+    }
+
+    // 2-2 舊格式：items 是 steps array
+    if (Array.isArray(parentItems) && parentItems.length) {
+      const doc = makeTableDoc(parentItems, COLS)
+      updatingFromParent = true
+      updatingFromSteps = true
+      tableEditor.value.commands.setContent(doc, false)
+      updatingFromSteps = false
+      updatingFromParent = false
+
+      stepsRef.value = [...parentItems]
+      m.value.items = tableEditor.value.getJSON()
+      return
+    }
+
+    // 2-3 完全沒內容（items 為空），代表：
+    //   - 新草稿、還沒存過
+    //   - 或者換機台後清空流程 → 這時我們要自動帶 PMS
+    if (props.machineCode) {
+      await loadDefaultFlow(props.machineCode)
+    } else {
+      // 當真的沒有機台代碼，就給一張空表
+      const doc = makeTableDoc([], COLS)
+      updatingFromParent = true
+      updatingFromSteps = true
+      tableEditor.value.commands.setContent(doc, false)
+      updatingFromSteps = false
+      updatingFromParent = false
+
+      stepsRef.value = []
+      m.value.items = tableEditor.value.getJSON()
+    }
+  },
+  { immediate: true }   // ⭐ 第一次 mount 完也會跑一次（吃到載入草稿的值）
+)
 
 /* ---------- 決定初始 table content：支援舊資料 (steps array) / 新資料 (doc JSON) ---------- */
-const initialTableDoc = () => {
-  const items = m.value.items
+function resolveTableDocFromModel(model) {
+  const items = model?.items
   if (items && typeof items === 'object' && !Array.isArray(items) && items.type === 'doc') {
     // 新版：父層已經給 doc JSON
     return items
@@ -315,8 +401,11 @@ const initialTableDoc = () => {
   stepsRef.value = legacySteps
   return makeTableDoc(legacySteps, COLS)
 }
+const initialTableDoc = () => resolveTableDocFromModel(m.value)
 
 /* ---------- onMounted / onBeforeUnmount ---------- */
+let updatingFromParent = false  // ⭐ 新增：只在父層 reload 時設 true
+
 onMounted(() => {
   // 標題 editor
   headerEditor.value = new Editor({
@@ -337,6 +426,7 @@ onMounted(() => {
       Document, Paragraph, Text, TextStyle,
       Color.configure({ types: ['textStyle'] }),
       Table.configure({}), TableRow,
+      Focus.configure({ className: 'has-focus', mode: 'all' }),
       CustomTableHeader, CustomTableCell,
       History,
     ],
@@ -344,13 +434,14 @@ onMounted(() => {
     content: initialTableDoc(),
     onFocus: () => (activeTarget.value = 'table'),
     onUpdate: ({ editor }) => {
+      if (updatingFromParent) return   // ⭐ 父層剛灌資料進來時，不要再往外 emit
       if (updatingFromSteps) return
+
       const docJSON = editor.getJSON()
       const steps = getStepsFromDoc(editor)
       stepsRef.value = steps
       m.value.items = docJSON
 
-      // ⭐ 使用者動過內容
       if (steps.some(s => (s || '').trim() !== '')) {
         hasUserEdited.value = true
       }
@@ -405,7 +496,6 @@ onMounted(() => {
   // 🚩 這裡改成只看「父層原本傳進來的 items」，決定要不要跑 PMS
   maybeAutoLoadPms(props.machineCode)
 })
-
 onBeforeUnmount(() => {
   headerEditor.value?.destroy()
   tableEditor.value?.destroy()
@@ -439,7 +529,6 @@ function addStepRight() {
   selectStep(ed, insertPos)
   activeTarget.value = 'table'
 }
-
 function removeStep() {
   const ed = tableEditor.value
   if (!ed) return
@@ -501,6 +590,7 @@ const uploading = ref(false)
 const pickFile = () => fileInput.value?.click()
 const fullUrl = u => (u?.startsWith('http') ? u : `${API_BASE_URL}${u}`)
 const setMode = mode => { m.value.mode = mode }
+const removeImage = () => { m.value.file = null }
 
 async function handleFile(ev) {
   const f = ev.target.files?.[0]; ev.target.value = ''
@@ -587,7 +677,9 @@ async function handleFile(ev) {
     <!-- upload preview -->
     <div v-else-if="m.mode==='image'" class="upload-body">
       <div v-if="m.file" class="preview">
-        <img :src="fullUrl(m.file?.url)" alt="flow" />
+        <img :src="fullUrl(m.file?.url)" alt="flow" class="preview-image" />
+        <!-- ⭐ 新增刪除按鈕 -->
+        <button class="pic-remove-btn" @click="removeImage">X</button>
       </div>
       <div v-else class="empty">尚未選擇檔案（支援 .drawio / 圖檔）</div>
     </div>
@@ -632,16 +724,37 @@ async function handleFile(ev) {
 .pf-table-focusable{ outline:none; }
 .pf-table-focusable:focus-visible{ box-shadow:0 0 0 3px rgba(0,123,255,.25); border-radius:6px; }
 .pf-editor :deep(table){ width:100%; border-collapse:collapse; table-layout:fixed; }
-.pf-editor :deep(th), .pf-editor :deep(td){
-  border:1px solid #ddd; padding:8px; text-align:center; vertical-align:middle; word-wrap:break-word;
-}
-.pf-editor :deep(th:first-child), .pf-editor :deep(td:first-child){
-  width:72px; background:#f7f9fc; font-weight:600;
-}
+.pf-editor :deep(th), .pf-editor :deep(td){ border:1px solid #ddd; padding:8px; text-align:center; vertical-align:middle; word-wrap:break-word; }
+.pf-editor :deep(th:first-child), .pf-editor :deep(td:first-child){ width:72px; background:#f7f9fc; font-weight:600; }
 .pf-editor :deep(.ProseMirror){ outline:none; }
+.pf-editor :deep(td.has-focus){ background-color:#fff7cc; box-shadow: inset 0 0 0 2px #ff9800; }
 
 /* upload preview */
 .upload-body{ display:flex; justify-content:center; padding:16px; }
-.upload-body .preview img{ max-width:100%; height:auto; display:block; border:1px solid #eee; border-radius:4px; }
+/* .upload-body .preview img{ max-width:100%; height:auto; display:block; border:1px solid #eee; border-radius:4px; } */
+/* ⭐ 讓圖片容器變成相對定位 */
+.upload-body .preview{ position: relative; display: inline-block; }
+.upload-body .preview img.preview-image{ max-width:100%; height:auto; display:block; border:1px solid #eee; border-radius:4px; }
+
+/* ⭐ 右上角刪除按鈕 */
+.pic-remove-btn {
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size: 14px;
+}
+
+.pic-remove-btn:hover { background-color: #b52a36; transform: scale(1.05); }
 .upload-body .empty{ padding:10px; color:#777; }
 </style>

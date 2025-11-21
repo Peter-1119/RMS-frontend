@@ -110,7 +110,7 @@
                     />
                   </td>
                   <td>
-                    {{ m.code }}
+                    {{m.building}} {{ m.code }}
                     <span v-if="m._mismatch" class="tag-mismatch">非相同的條件參數</span>
                   </td>
                   <td>{{ m.name }}</td>
@@ -203,23 +203,19 @@ export default {
 
       // 1) 全域 pinned：所有已選中的機台（不分群組），使用 codeToMachine 取資料
       const pinnedRaw = this.selectedCodes
-        .map(code => {
-          const m = this.codeToMachine[code]
-          if (!m) return null
-          // 這邊順便標記有沒有 mismatch（只跟 active group 的 baseline 邏輯有關）
-          return { ...m, _mismatch: this._isMismatchInActive(code) }
-        })
-        .filter(Boolean)
+      .map(code => {
+        const m = this.codeToMachine[code]
+        if (!m) return null
+        // 已經通過 baseline 過濾的機台，一律視為「條件相同」
+        return { ...m, _mismatch: false }
+      }).filter(Boolean)
+
 
       const pinnedCodes = new Set(pinnedRaw.map(m => m.code))
 
       // 2) 當前群組中「正常匹配」的機台（但排除已 pinned 過的）
-      const matched = (this.groupMachines[active] || [])
-        .filter(x => !pinnedCodes.has(x.code))
-        .map(x => ({
-          ...x,
-          _mismatch: this._isMismatchInActive(x.code),
-        }))
+      const matched = (this.groupMachines[active] || []).filter(x => !pinnedCodes.has(x.code)).map(x => ({ ...x,  _mismatch: false }))
+
 
       // 3) baseline 過濾後，active group 中「不符合條件」的機台（mismatch rows）
       let mismatches = []
@@ -230,11 +226,11 @@ export default {
 
         const mismatchCodes = Object.keys(origMap).filter(c => !(c in filtMap))
 
-        mismatches = mismatchCodes
-          .filter(code => !pinnedCodes.has(code)) // 避免和 pinned 重複
+        mismatches = mismatchCodes.filter(code => !pinnedCodes.has(code)) // 避免和 pinned 重複
           .map(code => ({
             code,
             name: origMap[code]?.name ?? code,
+            building: origMap[code]?.building ?? '',
             _mismatch: true,
           }))
       }
@@ -292,19 +288,30 @@ export default {
       const out = {}
       const kw = (keyword || '').trim().toLowerCase()
       const hit = (s) => !kw || (s || '').toLowerCase().includes(kw)
+
       Object.entries(payload || {}).forEach(([gcode, gval]) => {
         const machines = {}
         Object.entries(gval?.machines || {}).forEach(([mcode, mval]) => {
-          if (hit(mcode) || hit(mval?.name)) {
-            machines[mcode] = { name: mval?.name ?? mcode }
+          const mv = mval || {}
+          if (hit(mcode) || hit(mv.name)) {
+            machines[mcode] = {
+              ...mv,                                     // ★ 保留 spec_code / spec_name 等全部欄位
+              name: mv.name ?? mcode,
+              building: mv.building ?? '',
+            }
           }
         })
         if (Object.keys(machines).length) {
-          out[gcode] = { name: gval?.name ?? gcode, machines }
+          out[gcode] = {
+            name: gval?.name ?? gcode,
+            machines,
+          }
         }
       })
+
       return out
     },
+
 
     // merge filtered list with the baseline (active) group from *original* (after keyword)
     _unionWithActiveGroup(filteredPayload) {
@@ -380,7 +387,7 @@ export default {
         groups.push({ code: gcode, name: gval?.name ?? gcode })
         const arr = []
         Object.entries(gval?.machines || {}).forEach(([mcode, mval]) => {
-          arr.push({ code: mcode, name: mval?.name ?? mcode })
+          arr.push({ code: mcode, name: mval?.name ?? mcode, building: mval?.building ?? '', spec_code: mval?.spec_code || '', spec_name: mval?.spec_name || ''})
         })
         groupMachines[gcode] = arr
       })
@@ -474,10 +481,10 @@ export default {
       if (this.isFiltering) return
 
       // 1) switch the right table to this group
-      if (this.activeGroupCode !== gcode) {
-        this.activeGroupCode = gcode
-        this.currentMachinePage = 1
-      }
+      // if (this.activeGroupCode !== gcode) {
+      //   this.activeGroupCode = gcode
+      //   this.currentMachinePage = 1
+      // }
 
       // 2) allowed codes under current filter/baseline state
       const allowed = this._allowedSetForGroup(gcode)
@@ -555,18 +562,18 @@ export default {
       }
     },
     confirmSelection() {
-      // Only submit enabled (matched) codes of current visible list
       const enabledSet = new Set((this.groupMachines[this.activeGroupCode] || []).map(x => x.code))
-      const nameByCode = {}
-      Object.values(this.groupMachines).forEach(arr => arr.forEach(x => { nameByCode[x.code] = x.name }))
 
-      // const payload = this.selectedCodes.filter(code => enabledSet.has(code)).map(code => ({ [nameByCode[code] || ""]: code })).filter(obj => Object.keys(obj)[0])
-      const payload = this.selectedCodes.filter(code => enabledSet.has(code)).map(code => ({code: code, name: nameByCode[code] || ""}))
+      const payload = this.selectedCodes
+        .filter(code => enabledSet.has(code))
+        .map(code => {
+          const m = this.codeToMachine[code] || {}
+          return { code, name: m.name || '', building: m.building || '', specCode: m.spec_code || m.specCode || '', specName: m.spec_name || m.specName || '',}
+        })
 
       this.$emit('select-machine', payload)
       this.$emit('cancel')
     },
-
     closeWindow() { this.$emit('cancel') },
   },
 }

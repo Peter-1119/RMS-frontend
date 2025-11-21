@@ -1,9 +1,11 @@
 <template>
   <div id="app" :class="{ 'menu-collapsed': isMenuCollapsed }">
     <div class="app-wrapper">
-      <SideMenu :is-collapsed="isMenuCollapsed" @toggle-menu="toggleMenu"/>
+      <!-- 預覽頁就不要 SideMenu -->
+      <SideMenu v-if="!$route.meta.hideChrome" :is-collapsed="isMenuCollapsed" @toggle-menu="toggleMenu"/>
       <div class="page-content-container">
-        <header class="top-bar">
+        <!-- 預覽頁就不要 top bar -->
+        <header class="top-bar" v-if="!$route.meta.hideChrome">
           <div class="top-header">
             <button class="menu-toggle-btn" @click="toggleMenu">
               <span class="bar"></span>
@@ -25,6 +27,7 @@
     </div>
   </div>
 </template>
+
 
 <script>
 import SideMenu from './components/SideMenu.vue';

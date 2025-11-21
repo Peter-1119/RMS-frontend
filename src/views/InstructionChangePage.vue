@@ -111,7 +111,7 @@ export default {
       try {
         const { items, total } = await getPassed({
           userId: this.effectiveUserId,
-          documentType: 0,
+          document_type: 'instruction',
           keyword: this.keyword,
           page: this.page,
           pageSize: this.pageSize,

@@ -11,211 +11,245 @@
       </button>
     </div>
 
-    <div class="steps-navigation">
-      <div v-for="(step, index) in steps" :key="index" :class="['step-item', { 'active': currentStep === index + 1, 'completed': currentStep > index + 1 }]" @click="goToStep(index + 1)">
-        <div class="step-circle">{{ index }}</div>
+    <div class="steps-navigation" :class="{ 'collapsed': navCollapsed }">
+      <div
+        v-for="(step, index) in steps" :key="index" :class="[
+          'step-item', stepStatusClass(index), { 'active': currentStep === index + 1, 'completed': currentStep > index + 1 }
+        ]"
+        @click="goToStep(index + 1)"
+      >
+        <div class="step-circle">{{ index + 1 }}</div>
         <div class="step-label">{{ step.label }}</div>
       </div>
     </div>
 
+
     <div class="form-section">
-      <div v-if="currentStep === 1" class="step-content">
-        <h2>基本屬性</h2>
-        <div class="fundamental-attribute-block">
-          <div class="attribute">
-            <div class="form-group"><label for="doc-code">文管編號：</label><input type="text" id="doc-code" v-model="form.documentID" readonly/></div>
-            <div class="form-group"><label for="doc-name">文件名稱：</label><input type="text" id="doc-name" v-model="form.documentName"/></div>
-            <div class="form-group"><label for="doc-version">文件版本：</label><input type="text" id="doc-version" v-model="form.documentVersion" readonly/></div>
-            <div class="form-group">
-              <label for="apply-project">適用工程：</label>
-              <!-- <input class="input-machine" type="text" id="apply-project" v-model="form.attribute.applyProject" @click="projectsListVisible=!projectsListVisible" readonly/> -->
-              <select v-model="form.attribute.applyProject">
-                <option value="">-- 請選擇適用工程 --</option>
-                <option v-for="p in projectList" :key="p.id" :value="p.projectName">{{ p.projectName }}</option>
-              </select>
+      <!-- 一頁式內容區：Step 1 ~ 8 -->
+      <div v-if="currentStep !== 9" class="content-page">
+        <!-- Step 1 -->
+        <section :ref="el => sectionRefs[0].value = el" class="step-section">
+          <h2>基本屬性</h2>
+          <div class="fundamental-attribute-block">
+            <div class="attribute">
+              <div class="form-group"><label for="doc-code">文管編號：</label><input type="text" id="doc-code" v-model="form.documentID" readonly/></div>
+              <div class="form-group"><label for="doc-name">文件名稱：</label><input type="text" id="doc-name" v-model="form.documentName"/></div>
+              <div class="form-group"><label for="doc-version">文件版本：</label><input type="text" id="doc-version" v-model="form.documentVersion" readonly/></div>
+              <div class="form-group">
+                <label for="apply-project">適用工程：</label>
+                <select v-model="form.attribute.applyProject">
+                  <option value="">-- 請選擇適用工程 --</option>
+                  <option v-for="p in projectList" :key="p.id" :value="p.projectName">{{ p.projectName }}</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="machines">適用機台：</label>
+                <input class="input-machine" type="text" id="machines" v-model="inputMachines" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
+              </div>
+              <div class="form-group"><label for="department">制訂單位：</label><input type="text" id="department" v-model="form.department" readonly/></div>
+              <div class="form-group"><label for="author">制訂者：</label><input type="text" id="author" v-model="form.author" readonly/></div>
+              <div class="form-group"><label for="confirmer">確認者：</label><input type="text" id="confirmer" v-model="form.confirmer"/></div>
+              <div class="form-group"><label for="approver">承認者：</label><input type="text" id="approver" v-model="form.approver"/></div>
             </div>
-            <div class="form-group">
-              <label for="machines">適用機台：</label>
-              <input class="input-machine" type="text" id="machines" v-model="inputMachines" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
+            <div class="supplement">
+              <div class="form-group"><label for="revise-reason">變更理由：</label><textarea id="revise-reason" v-model="form.reviseReason"></textarea></div>
+              <div class="form-group"><label for="revise-point">變更要點：</label><textarea id="revise-point" v-model="form.revisePoint"></textarea></div>
             </div>
-            <div class="form-group"><label for="department">制訂單位：</label><input type="text" id="department" v-model="form.department" readonly/></div>
-            <div class="form-group"><label for="author">制訂者：</label><input type="text" id="author" v-model="form.author" readonly/></div>
-            <div class="form-group"><label for="approver">承認者：</label><input type="text" id="approver" v-model="form.approver"/></div>
-            <div class="form-group"><label for="confirmer">確認者：</label><input type="text" id="confirmer" v-model="form.confirmer"/></div>
           </div>
-          <div class="supplement">
-            <div class="form-group"><label for="revise-reason">變更理由：</label><textarea id="revise-reason" v-model="form.reviseReason"></textarea></div>
-            <div class="form-group"><label for="revise-point">變更要點：</label><textarea id="revise-point" v-model="form.revisePoint"></textarea></div>
+
+          <ProjectListWindow 
+            v-if="projectsListVisible"
+            @selectProject="getProject"
+            @cancel="projectsListVisible=false"
+          ></ProjectListWindow>
+
+          <MachinesListWindow 
+            v-if="machinesListVisible"
+            :project="form.attribute.applyProject"
+            @selectMachine="getMachines"
+            @cancel="machinesListVisible=false"
+          ></MachinesListWindow>
+        </section>
+
+        <!-- Step 2 -->
+        <section :ref="el => sectionRefs[1].value = el" class="step-section">
+          <h2>目的</h2>
+          <div class="purpose-group">
+            <textarea v-model="form.documentPurpose" placeholder="此處將填寫文件的目的相關內容。"></textarea>
           </div>
-        </div>
+        </section>
 
-        <ProjectListWindow 
-          v-if="projectsListVisible"
-          @selectProject="getProject"
-          @cancel="projectsListVisible=false"
-        ></ProjectListWindow>
-
-        <MachinesListWindow 
-          v-if="machinesListVisible"
-          :project="form.attribute.applyProject"
-          @selectMachine="getMachines"
-          @cancel="machinesListVisible=false"
-        ></MachinesListWindow>
-      </div>
-
-      <div v-if="currentStep === 2" class="step-content">
-        <h2>目的</h2>
-        <div class="purpose-group">
-          <textarea v-model="form.documentPurpose" placeholder="此處將填寫文件的目的相關內容。"></textarea>
-        </div>
-      </div>
-
-      <div v-if="currentStep === 3" class="step-content">
-        <h2>製造流程</h2>
-        <ProcessFlowBlock
-          :key="firstMachineCode + '-' + draftToken"
-          v-model="processFlowData"
-          :cols="9"
-          :token="draftToken"
-          :machineCode="firstMachineCode"
-        />
-      </div>
-
-      <div v-if="currentStep === 4" class="step-content">
-        <h2>管理條件</h2>
-        <div class="Management">
-          <button class="layer-action-btn add" @click="addManagementLayer">新增下一層</button>
-        </div>
-        
-        <div class="management-combination-block">
-          <ManagementSpecificBlock
-            :machines="form.attribute.machines"
-            :managementBlock="managementSpecific"
-            :has-pms="hasPmsForStep3"
-            @update-table-data="updateManagementTableData"
+        <!-- Step 3 -->
+        <section :ref="el => sectionRefs[2].value = el" class="step-section">
+          <h2>製造流程</h2>
+          <ProcessFlowBlock
+            v-model="processFlowData"
+            :cols="9"
+            :token="draftToken"
+            :machineCode="firstMachineCode"
+            :version="flowVersion" 
           />
-        </div>
-        <div v-if="managementBlocks.length > 0" class="management-content-bloc">
+        </section>
+
+        <!-- Step 4 -->
+        <section :ref="el => sectionRefs[3].value = el" class="step-section">
+          <h2>管理條件</h2>
+          <!-- 原本 Step 4 的內容搬進來 -->
+          <!-- ... ManagementSpecificBlock & DynamicEditorBlock ... -->
+          <div class="Management">
+            <button class="layer-action-btn add" @click="addManagementLayer">新增下一層</button>
+          </div>
+          
+          <div class="management-combination-block">
+            <ManagementSpecificBlock
+              :machines="form.attribute.machines"
+              :managementBlock="managementSpecific"
+              :has-pms="hasPmsForStep3"
+              @update-table-data="updateManagementTableData"
+            />
+          </div>
+          <div v-if="managementBlocks.length > 0" class="management-content-bloc">
+            <DynamicEditorBlock
+              v-for="blk in managementBlocks"
+              :key="blk.id"
+              :block-editors="blk"
+              @update-block="updateManagementBlockData"
+              @delete-block="removeManagementLayer"
+            />
+          </div>
+        </section>
+
+        <!-- Step 5 -->
+        <section :ref="el => sectionRefs[4].value = el" class="step-section">
+          <h2>製造條件參數一覽表</h2>
+          <ManufacturingConditionRuleBlocks
+            :data-blocks="mcrBlocks"
+            :cond-template="condTemplate"
+            :param-template="paramTemplate"
+            :current-step="currentStep"
+            :has-pms="hasPmsForMcr"
+            :has-conditions="hasCondForMcr"
+            :spec-options="specOptionsForMcr"
+            @update:dataBlocks="mcrBlocks = $event"
+            @save="mcrBlocks = $event"
+          />
+        </section>
+
+        <!-- Step 6 -->
+        <section :ref="el => sectionRefs[5].value = el" class="step-section">
+          <h2>異常處置</h2>
+          <!-- 原本 Step 6 的 DynamicEditorBlock 區塊 -->
+          <div class="Exception">
+            <button class="layer-action-btn add" @click="addExceptionLayer">新增下一層</button>
+          </div>
+
           <DynamicEditorBlock
-            v-for="blk in managementBlocks"
-            :key="blk.id"
-            :block-editors="blk"
-            @update-block="updateManagementBlockData"
-            @delete-block="removeManagementLayer"
-          />
-        </div>
-      </div>
+            v-for="blockContent in exceptionBlocks"
+            :key="blockContent.id"
+            :blockEditors="blockContent"
+            @delete-block="removeExceptionLayer(blockContent.id)"
+            @update-block="updateExceptionBlockData"
+          ></DynamicEditorBlock>
+        </section>
 
-      <div v-if="currentStep === 5" class="step-content">
-        <h2>製造條件參數一覽表</h2>
-
-        <ManufacturingConditionRuleBlocks
-          :data-blocks="mcrBlocks"
-          :cond-template="condTemplate"
-          :param-template="paramTemplate"
-          :current-step="currentStep"
-
-          :has-pms="hasPmsForMcr"
-          :has-conditions="hasCondForMcr"
-
-          @update:dataBlocks="mcrBlocks = $event"
-          @save="mcrBlocks = $event"/>
-      </div>
-
-      <div v-if="currentStep === 6" class="step-content">
-        <h2>異常處置</h2>
-        <div class="Exception">
-          <button class="layer-action-btn add" @click="addExceptionLayer">新增下一層</button>
-        </div>
-
-        <DynamicEditorBlock
-          v-for="blockContent in exceptionBlocks"
-          :key="blockContent.id"
-          :blockEditors="blockContent"
-          @delete-block="removeExceptionLayer(blockContent.id)"
-          @update-block="updateExceptionBlockData"
-        ></DynamicEditorBlock>
-      </div>
-
-      <div v-if="currentStep === 7" class="step-content">
-        <h2>相關文件</h2>
-        <div class="relative-document">
-          <button class="layer-action-btn add" @click="docWindowVisible=true">新增文件</button>
-        </div>
-
-        <div v-for="(docInfo, docIndex) in relativeDocuments" class="document-block" :key="docInfo.id">
-          <div class="doc-info-block">
-            <label class="doc-label no">6.{{ docIndex + 1 }}</label>
-            <label class="doc-label id">{{ docInfo.docId }}</label>  
-            <label class="doc-label name">{{ docInfo.docName }}</label>
+        <!-- Step 7 -->
+        <section :ref="el => sectionRefs[6].value = el" class="step-section">
+          <h2>相關文件</h2>
+          <!-- 原本 Step 7 的 DocSearchWindow 區塊 -->
+          <div class="relative-document">
+            <button class="layer-action-btn add" @click="docWindowVisible=true">新增文件</button>
           </div>
-          <div class="doc-btn-block">
-            <button class="remove-btn" @click="relativeDocumentRemove(docInfo.id)">x</button>
+
+          <div v-for="(docInfo, docIndex) in relativeDocuments" class="document-block" :key="docInfo.id">
+            <div class="doc-info-block">
+              <label class="doc-label no">6.{{ docIndex + 1 }}</label>
+              <label class="doc-label id">{{ docInfo.docId }}</label>  
+              <label class="doc-label name">{{ docInfo.docName }}</label>
+            </div>
+            <div class="doc-btn-block">
+              <button class="remove-btn" @click="relativeDocumentRemove(docInfo.id)">x</button>
+            </div>
           </div>
-        </div>
-        <DocSearchWindow 
-          v-if="docWindowVisible"
-          headerName="相關文件選取"
-          :existingDocs="relativeDocuments"
-          @add-new-doc="addRelativeDocument"
-          @close-window="docWindowVisible=false">
-        </DocSearchWindow>
+          <DocSearchWindow 
+            v-if="docWindowVisible"
+            headerName="相關文件選取"
+            :existingDocs="relativeDocuments"
+            @add-new-doc="addRelativeDocument"
+            @close-window="docWindowVisible=false">
+          </DocSearchWindow>
+        </section>
+
+        <!-- Step 8 -->
+        <section :ref="el => sectionRefs[7].value = el" class="step-section">
+          <h2>使用表單</h2>
+          <!-- 原本 Step 8 的 FormSearchWindow 區塊 -->
+          <div class="used-form">
+            <button class="layer-action-btn add" @click="formWindowVisible=true">新增表單</button>
+          </div>
+
+          <div v-for="(formInfo, formIndex) in usedForms" class="form-block" :key="formInfo.id">
+            <div class="form-info-block">
+              <label class="form-label no">7.{{ formIndex + 1 }}</label>
+              <label class="form-label id">{{ formInfo.formId }}</label>  
+              <label class="form-label name">{{ formInfo.formName }}</label>
+            </div>
+            <div class="form-btn-block">
+              <button class="remove-btn" @click="formRemove(formInfo.id)">x</button>
+            </div>
+          </div>
+          <FormSearchWindow 
+            v-if="formWindowVisible"
+            headerName="表單選取"
+            :existingForms="usedForms"
+            @add-new-form="addUsedForm"
+            @close-window="formWindowVisible=false">
+          </FormSearchWindow>
+        </section>
       </div>
 
-      <div v-if="currentStep === 8" class="step-content">
-        <h2>使用表單</h2>
-        <div class="used-form">
-          <button class="layer-action-btn add" @click="formWindowVisible=true">新增表單</button>
-        </div>
-
-        <div v-for="(formInfo, formIndex) in usedForms" class="form-block" :key="formInfo.id">
-          <div class="form-info-block">
-            <label class="form-label no">7.{{ formIndex + 1 }}</label>
-            <label class="form-label id">{{ formInfo.formId }}</label>  
-            <label class="form-label name">{{ formInfo.formName }}</label>
-          </div>
-          <div class="form-btn-block">
-            <button class="remove-btn" @click="formRemove(formInfo.id)">x</button>
-          </div>
-        </div>
-        <FormSearchWindow 
-          v-if="formWindowVisible"
-          headerName="表單選取"
-          :existingForms="usedForms"
-          @add-new-form="addUsedForm"
-          @close-window="formWindowVisible=false">
-        </FormSearchWindow>
-      </div>
-
-      <div v-if="currentStep === 9" class="step-content">
+      <!-- 輸出頁：Step 9 獨立畫面 -->
+      <div v-else class="output-page">
         <div style="display: flex; justify-content: space-between; align-items:center;">
           <h2>文件產出</h2>
           <div style="display:flex; gap:.5rem;">
+            <!-- 不再寫「預覽」，這顆專門當正式文件下載 (Word) -->
             <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">
-              {{ loading ? '產生中…' : '預覽（PDF）' }}
+              {{ loading ? '產生中…' : '產生文件（Word）' }}
             </button>
-            <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button>
+            <!-- <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button> -->
           </div>
         </div>
 
         <p v-if="errorMsg" style="color:#c00; margin:.5rem 0;">{{ errorMsg }}</p>
 
-        <div v-if="pdfSrc" class="pdf-viewer">
-          <iframe :src="pdfSrc" width="100%" height="600px" frameborder="0"></iframe>
+        <!-- ✅ 這裡改成 DOCX 預覽 -->
+        <div class="docx-viewer" style="margin-top: 1rem;">
+          <div v-if="previewLoading">預覽產生中…</div>
+          <WordPreview v-else-if="docxSrc" :file-url="docxSrc" />
+          <small v-else style="color:#666;">尚未產生預覽。</small>
         </div>
-      </div>
-
-      <div class="form-actions">
-        <button v-if="currentStep > 1" @click="prevStep" class="nav-btn prev-btn">上一步</button>
-        <button v-if="currentStep < steps.length" @click="nextStep" class="nav-btn next-btn">下一步</button>
-        <button v-if="currentStep === steps.length" @click="submitForm" class="submit-btn">送出</button>
       </div>
     </div>
   </div>
+  <!-- 右側浮動工具列 -->
+  <div class="floating-tools">
+    <button class="tool-btn" @click="$router.push('/home')" title="回首頁">
+      <!-- 這裡放 icon，暫時用字 -->
+      ⌂
+    </button>
+    <button class="tool-btn" @click="scrollToTop" title="回到最上層">
+      ↑
+    </button>
+    <button class="tool-btn" @click="saveDraft" :disabled="isSaving" title="儲存草稿">
+      💾
+    </button>
+  </div>
+
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+
 import axios from 'axios'
 
 import ProjectListWindow from '@/components/ProjectListWindow.vue'
@@ -226,6 +260,8 @@ import DynamicEditorBlock from '@/components/DynamicEditorBlock.vue'
 import ManufacturingConditionRuleBlocks from '@/components/ManufacturingConditionRuleBlocks.vue'
 import DocSearchWindow from '@/components/DocSearchWindow.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
+import PdfPreview from '@/components/PdfPreview.vue'
+import WordPreview from '@/components/WordPreview.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
 import { initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
@@ -249,15 +285,175 @@ const ensureDraftToken = async () => {
   }
 }
 
-
 // ---------- nav / steps ----------
 const currentStep = ref(1)
 const steps = [
-  { label: '基本屬性' }, { label: '目的' }, { label: '製造流程' }, { label: '管理條件' }, { label: '製造條件參數一覽表' }, { label: '異常處置' }, { label: '相關文件' }, { label: '使用表單' }, { label: '文件產出' },
+  { label: '基本屬性', status: false},
+  { label: '目的', status: false },
+  { label: '製造流程', status: false },
+  { label: '管理條件', status: false },
+  { label: '製造條件參數一覽表', status: false },
+  { label: '異常處置', status: false },
+  { label: '相關文件', status: false },
+  { label: '使用表單', status: false },
+  { label: '文件產出' },
 ]
-const goToStep = s => { currentStep.value = s }
-const nextStep = () => { if (currentStep.value < steps.length) currentStep.value++ }
-const prevStep = () => { if (currentStep.value > 1) currentStep.value-- }
+
+const flowVersion = ref(0)   // 專門給 Step3 流程用的 reload 版本號
+
+
+// 一頁式 section refs（只需要前 8 章節）
+const sectionRefs = Array.from({ length: 8 }, () => ref(null))
+
+// 步驟列縮放
+const navCollapsed = ref(false)
+
+// 捲動時同步：1) 縮小 step-navigation  2) 更新目前所在章節
+const handleScroll = () => {
+  const scrollY =
+    window.scrollY ||
+    document.documentElement.scrollTop ||
+    document.body.scrollTop ||
+    0
+
+  // 1) 控制縮小 / 放大
+  navCollapsed.value = scrollY > 120
+
+  // 2) 根據捲動位置，讓 step-navigation 自動切換 active 章節
+  //    - 只在 Step 1~8 的一頁式畫面才做；Step 9（輸出頁）不需要跟著跑
+  if (currentStep.value === 9) return
+
+  const navHeight = navCollapsed.value ? 56 : 96
+  const targetY = scrollY + navHeight + 24 // 稍微往下 24px，避免剛貼到邊界就跳來跳去
+
+  let closestIndex = 0
+  let closestDist = Infinity
+
+  sectionRefs.forEach((r, idx) => {
+    const el = r.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const sectionTop = rect.top + scrollY
+
+    const dist = Math.abs(sectionTop - targetY)
+    if (dist < closestDist) {
+      closestDist = dist
+      closestIndex = idx
+    }
+  })
+
+  // index 0 -> Step 1, index 1 -> Step 2, ...
+  currentStep.value = closestIndex + 1
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', handleScroll, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleScroll)
+})
+
+const scrollToTop = () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const scrollToStep = (index) => {
+  currentStep.value = index
+
+  // Step 1 ~ 8：一頁式捲動
+  if (index >= 1 && index <= 8) {
+    const el = sectionRefs[index - 1].value
+    if (el) {
+      const scrollY =
+        window.scrollY ||
+        document.documentElement.scrollTop ||
+        document.body.scrollTop ||
+        0
+      const navHeight = navCollapsed.value ? 56 : 96
+      const rect = el.getBoundingClientRect()
+      const offsetTop = rect.top + scrollY - navHeight - 16
+
+      window.scrollTo({
+        top: offsetTop,
+        behavior: 'smooth',
+      })
+    }
+  }
+
+  // Step 9：切到輸出頁，順便回到最上
+  if (index === 9) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+const goToStep = scrollToStep
+const nextStep = () => {
+  if (currentStep.value < steps.length) scrollToStep(currentStep.value + 1)
+}
+const prevStep = () => {
+  if (currentStep.value > 1) scrollToStep(currentStep.value - 1)
+}
+
+// ---------- step 驗證狀態（只先做 Step1, Step2） ----------
+const isStep1Valid = computed(() => {
+  // 版本：可能是 number 或 string，統一轉成 float
+  const versionNum = parseFloat(String(form.documentVersion ?? '0'))
+
+  // Left block 必填欄位
+  const leftFields = [
+    form.documentID,
+    form.documentName,
+    form.documentVersion,
+    form.attribute.applyProject,
+    form.department,
+    form.author,
+    form.confirmer,
+    form.approver,
+  ]
+
+  // 槽：選了機台才算有填
+  const hasMachines =
+    (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0) ||
+    (String(inputMachines.value ?? '').trim().length > 0)
+
+  // 先檢查左邊欄位 & 機台
+  if (!hasMachines) return false
+  if (leftFields.some(v => !String(v ?? '').trim())) return false
+
+  // 版本 > 1.0 時，右側「變更理由」「變更要點」也變成必填
+  if (versionNum > 1.0) {
+    if (!String(form.reviseReason ?? '').trim()) return false
+    if (!String(form.revisePoint ?? '').trim()) return false
+  }
+
+  return true
+})
+
+const isStep2Valid = computed(() => {
+  return String(form.documentPurpose ?? '').trim().length > 0
+})
+
+const stepStatusClass = (index) => {
+  const stepNo = index + 1
+
+  // 只在 stepNo <= currentStep 時顯示紅 / 綠
+  if (stepNo > currentStep.value) return ''
+
+  if (stepNo === 1) {
+    steps[index].status = isStep1Valid.value ? true : false
+    return isStep1Valid.value ? 'step-ok' : 'step-error'
+  }
+  if (stepNo === 2) {
+    steps[index].status = isStep2Valid.value ? true : false
+    return isStep2Valid.value ? 'step-ok' : 'step-error'
+  }
+
+  // 其他步驟先不做驗證
+  steps[index].status = true
+  return 'step-ok'
+}
+
 
 // ---------- basic form ----------
 let itemID = 0
@@ -286,6 +482,7 @@ const machinesListVisible = ref(false)
 const getProject = val => { if (val) form.attribute.applyProject = val }
 const getMachines = async (val) => {
   form.attribute.machines = val || []
+  console.log("form attribute machines: ", form.attribute.machines)
 
   // 顯示在 input 內的機台名稱
   inputMachines.value = (val || []).map(machine => machine.name).join(', ')
@@ -300,35 +497,50 @@ const getMachines = async (val) => {
   // ⚠️ 這裡是關鍵：
   // 若「機台真的有變」（包括從空 -> 有機台），重置 Step3 的流程資料
   if (newFirstCode !== lastMachineCodeForProcessFlow.value) {
-    console.log('[Step3] machine changed for process flow:', lastMachineCodeForProcessFlow.value, '→', newFirstCode)
+    // console.log('[Step3] machine changed for process flow:', lastMachineCodeForProcessFlow.value, '→', newFirstCode)
 
     // 重置流程資料成「完全空」，讓 ProcessFlowBlock 重新掛載時判定為「新狀態」→ 自動用 PMS 帶入
-    processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null,}
+    processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null }
 
     // 記住目前流程綁的這台機台
     lastMachineCodeForProcessFlow.value = newFirstCode
+
+    // ⭐ 通知流程區塊重新吃「空資料（或 PMS）」：子元件會自己判斷是否要載 PMS
+    flowVersion.value++
   } else {
     console.log('[Step3] machine unchanged, keep existing processFlowData')
   }
 
   // ---------- 以下維持你原本 Step4 / Step5 的 PMS / MCR ----------
   if (Array.isArray(val) && val.length > 0) {
-    const [name, code] = Object.entries(val[0])[0]
+    const code = val[0].code
 
+    // 先處理 Step4 的 PMS（你原本就有）
     await loadPmsTemplate(code)
 
-    mcrBlocks.value = []
+    // ⭐ 再來：先把 Step5 要用的 template & flag 準備好
     await loadMcrTemplates(code)
-  } else {
-    managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } }
-    paramTemplate.value = null
-    condTemplate.value = null
+    // loadMcrTemplates 會設定：
+    //   hasPmsForMcr.value, hasCondForMcr.value
+    //   paramTemplate.value, condTemplate.value
+
+    // ⭐ 最後一步才清掉 mcrBlocks 讓子元件重建 Editor
     mcrBlocks.value = []
+  } else {
+    // 沒選機台 → 完全清空
+    managementSpecific.value = {
+      ...managementSpecific.value,
+      data: { jsonContent: null, arrayData: [] }
+    }
+
+    hasPmsForMcr.value  = false
+    hasCondForMcr.value = false
+    paramTemplate.value = null
+    condTemplate.value  = null
+    mcrBlocks.value     = []
   }
+
 }
-
-
-
 
 // ---------- process (step 3) ----------
 const processFlowData = ref({
@@ -345,7 +557,7 @@ const firstMachineCode = computed(() => {
   if (!Array.isArray(machines) || !machines.length) return ''
   const m0 = machines[0]
 
-  console.log("first machine code: ", m0.machineCode || m0.MACHINE_CODE || m0.code || '')
+//   console.log("first machine code: ", m0.machineCode || m0.MACHINE_CODE || m0.code || '')
 
   // 根據你實際的欄位調整，這裡做比較保險的寫法
   return m0.machineCode || m0.MACHINE_CODE || m0.code || ''
@@ -354,8 +566,6 @@ const firstMachineCode = computed(() => {
 
 // process-flow <-> blocks (step_type = 0)
 function serializeProcessFlowToBlocks(pf) {
-  console.log("pf: ", pf)
-  console.log("pf items: ", pf.items)
   if (pf.mode === 'table') {
     return [{
       step_type: 0,
@@ -437,7 +647,6 @@ function loadProcessFlowFromBlocks(resp) {
   return { mode: 'table', cols: 9, header_json: null, items: [], file: null }
 }
 
-
 // ---------- 管理條件 (step 4) ----------
 const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
 const hasPmsForStep3  = ref(false)   // Step 3 生產基本條件 PMS
@@ -445,10 +654,7 @@ const hasPmsForStep3  = ref(false)   // Step 3 生產基本條件 PMS
 // 載入第一台機台的 PMS 模板
 const loadPmsTemplate = async (machineCode) => {
   if (!machineCode) {
-    managementSpecific.value = {
-      ...managementSpecific.value,
-      data: { jsonContent: null, arrayData: [] },
-    }
+    managementSpecific.value = { ...managementSpecific.value,  data: { jsonContent: null, arrayData: [] } }
     return
   }
 
@@ -457,6 +663,8 @@ const loadPmsTemplate = async (machineCode) => {
     const { data } = await axios.get(`${API}/mes/pms/machine-parameters`, {
       params: { machine_id: machineCode },
     })
+
+    console.log()
     
     hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false
     
@@ -640,33 +848,75 @@ const loadMcrTemplates = async (machineCode) => {
   }
 }
 
+const specOptionsForMcr = computed(() => {
+  const machines = form.attribute?.machines || []
+  const map = new Map()
+
+  machines.forEach(m => {
+    const code = m.specCode || m.spec_code
+    if (!code) return
+    const name = m.specName || m.spec_name || code
+    if (!map.has(code)) {
+      map.set(code, name)
+    }
+  })
+
+  // 給子元件用：[{code, name}]
+  return Array.from(map, ([code, name]) => ({ code, name }))
+})
 
 // NEW — send both parameter & condition for each tier
 const serializeMCRToParams = () => {
-  return (mcrBlocks.value || []).map((blk, i) => ({
-    step_type: 2,
-    tier_no: i + 1,
-    code: blk.code || `XXXX${i + 1}`,
-    jsonParameterContent: blk.data?.jsonParameterContent || null,
-    arrayParameterData:   blk.data?.arrayParameterData   || [],
-    jsonConditionContent: blk.data?.jsonConditionContent || null,
-    arrayConditionData:   blk.data?.arrayConditionData   || [],
-  }))
+  if (!hasPmsForMcr.value && !hasCondForMcr.value)
+    return []
+
+  return (mcrBlocks.value || []).map((blk, i) => {
+    const specCode = blk.specCode || blk.data?.metadata?.specification?.code || ''
+    const specName = blk.specName || blk.data?.metadata?.specification?.name || ''
+
+    return {
+      step_type: 2,
+      tier_no: i + 1,
+      code: blk.code || `XXXX${i + 1}`,
+      jsonParameterContent: blk.data?.jsonParameterContent || null,
+      arrayParameterData:   blk.data?.arrayParameterData   || [],
+      jsonConditionContent: blk.data?.jsonConditionContent || null,
+      arrayConditionData:   blk.data?.arrayConditionData   || [],
+      metadata: {
+        ...(blk.data?.metadata || {}),
+        specification: {
+          code: specCode,
+          name: specName,
+        },
+      },
+    }
+  })
 }
 
 // NEW — rebuild the exact structure you render
 const loadMCRFromParams = (payload) => {
-  // payload.blocks: [{id, code, jsonParameterContent, arrayParameterData, jsonConditionContent, arrayConditionData}]
-  mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
-    id: i + 1,
-    code: b.code || `XXXX${i + 1}`,
-    data: {
-      jsonParameterContent: b.jsonParameterContent || null,
-      arrayParameterData:   b.arrayParameterData   || [],
-      jsonConditionContent: b.jsonConditionContent || null,
-      arrayConditionData:   b.arrayConditionData   || [],
-    },
-  }))
+  mcrBlocks.value = (payload.blocks || []).map((b, i) => {
+    const spec = b.metadata?.specification || {}
+    return {
+      id: b.id ?? i + 1,
+      code: b.code || `XXXX${i + 1}`,
+      specCode: spec.code || '',
+      specName: spec.name || '',
+      data: {
+        jsonParameterContent: b.jsonParameterContent || null,
+        arrayParameterData:   b.arrayParameterData   || [],
+        jsonConditionContent: b.jsonConditionContent || null,
+        arrayConditionData:   b.arrayConditionData   || [],
+        metadata: {
+          ...(b.metadata || {}),
+          specification: {
+            code: spec.code || '',
+            name: spec.name || '',
+          },
+        },
+      },
+    }
+  })
 }
 
 // ---------- 異常處置 (step 6) ----------
@@ -742,34 +992,75 @@ const formRemove = id => {
 // ---------- 文件產出 (step 9) — skipped per your request ----------
 const loading  = ref(false)
 const errorMsg = ref('')
-const captureId = ref('')
+// const captureId = ref('')
 
-async function generateAndDisplayPdf() {
-  loading.value = true
+// ✅ DOCX 預覽相關
+const docxSrc = ref(null)          // blob URL
+const previewLoading = ref(false)
+let lastDocxUrl = null
+
+watch(currentStep, (val) => {
+  if (val === 9) {
+    fetchPreviewDocx()
+  }
+})
+
+async function fetchPreviewDocx() {
+  previewLoading.value = true
   errorMsg.value = ''
-  captureId.value = ''
   try {
     const payload = {
-      attribute: [{...form}],
-      content: [...serializeProcessFlowToBlocks(processFlowData.value), ...serializeManagementToBlocks(), ...serializeMCRToParams(), ...serializeExceptionsToBlocks()],
+      attribute: [{ ...form }],
+      content: [
+        ...serializeProcessFlowToBlocks(processFlowData.value),
+        ...serializeManagementToBlocks(),
+        ...serializeMCRToParams(),
+        ...serializeExceptionsToBlocks(),
+      ],
       reference: [
-        ...(relativeDocuments.value || []).map(d => ({referenceType: 0, referenceDocumentID: d.docId, referenceDocumentName: d.docName})),
-        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+        ...(relativeDocuments.value || []).map(d => ({
+          referenceType: 0,
+          referenceDocumentID: d.docId,
+          referenceDocumentName: d.docName,
+        })),
+        ...(usedForms.value || []).map(f => ({
+          referenceType: 1,
+          referenceDocumentID: f.formId,
+          referenceDocumentName: f.formName,
+        })),
       ],
     }
 
-    const res = await axios.post(`${API_BASE_URL}/capture/capture-request`, payload)
-    if (!res?.data?.ok) throw new Error(res?.data?.error || 'capture failed')
-    captureId.value = res.data.payload_id
-    alert(`Captured OK. payload_id = ${captureId.value}`)
+    // ⬇⬇⬇ 這裡改成 /docs/preview/docx
+    const url = `${API_BASE_URL}/docs/preview/docx`
+    const res = await axios.post(url, payload, { responseType: 'blob' })
 
-    res = await axios.post(`${API_BASE_URL}/docs/generate/word`, payload)
-    console.log("docx: ", res)
+    console.log('[NewInstruction] preview docx res:', res)
+    console.log('[NewInstruction] blob size =', res.data.size)
+
+    const blob = new Blob(
+      [res.data],
+      {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+    )
+
+    if (lastDocxUrl) {
+      URL.revokeObjectURL(lastDocxUrl)
+    }
+    const blobUrl = URL.createObjectURL(blob)
+    lastDocxUrl = blobUrl
+    docxSrc.value = blobUrl
+
+    console.log('[NewInstruction] docxSrc set:', docxSrc.value)
+
+    // 預覽模式就不要再 window.open
+    // window.open(blobUrl, '_blank')
   } catch (e) {
     console.error(e)
-    errorMsg.value = e?.message || 'capture error'
+    errorMsg.value = (e && e.message) || 'preview docx error'
   } finally {
-    loading.value = false
+    previewLoading.value = false
   }
 }
 
@@ -785,6 +1076,11 @@ function extractFilenameFromDisposition(disposition, fallback = 'document.docx')
 }
 
 async function generateAndDownloadDocx() {
+  // if (steps.some(step => !step.status)) {
+  //   alert('請把內容完成才可下載')
+  //   return
+  // }
+
   loading.value = true
   errorMsg.value = ''
   try {
@@ -844,7 +1140,6 @@ async function generateAndDownloadDocx() {
   }
 }
 
-
 // ---------- saving ----------
 const isSaving = ref(false)
 
@@ -894,6 +1189,7 @@ onMounted(async () => {
   catch (e) {
     alert('載入適用工程失敗')
   }
+
   const t = await ensureDraftToken()
   if (!t) return
   try {
@@ -909,6 +1205,9 @@ onMounted(async () => {
         hasCondForMcr.value = true
         hasPmsForMcr.value = true
         hasPmsForStep3.value = true
+    }
+    else {
+      form.attribute.machines = [];
     }
 
     // 🚩 在這裡初始化「流程目前綁的機台」
@@ -930,7 +1229,19 @@ onMounted(async () => {
 
     // 4) MCR
     const mp = await loadParams(t, 2)
-    if (mp?.success) loadMCRFromParams(mp)
+    if (mp?.success && (mp.blocks || []).length > 0) {
+      loadMCRFromParams(mp)           // 有資料 → 用使用者最後版本
+    } else {
+      // 沒有任何 Step5 草稿 & 有機台 → 用 MCR template 初始化
+      const machines = form.attribute?.machines || []
+      if (machines.length > 0) {
+        const code = machines[0].machineCode || machines[0].MACHINE_CODE || machines[0].code || ''
+        if (code) {
+          await loadMcrTemplates(code)
+          mcrBlocks.value = []        // 讓子元件用 template 畫初始表格
+        }
+      }
+    }
 
     // 5) exceptions
     const ex = await loadBlocks(t, 3)
@@ -943,6 +1254,8 @@ onMounted(async () => {
       relativeDocuments.value = (r.documents || []).map(d => ({ id: nextId++, docId: d.docId, docName: d.docName }))
       usedForms.value = (r.forms || []).map(f => ({ id: nextId++, formId: f.formId, formName: f.formName }))
     }
+
+    flowVersion.value++
   } catch (e) {
     console.error(e)
     alert('載入草稿失敗')
@@ -972,45 +1285,93 @@ onMounted(async () => {
 .back-btn .icon, .save-btn .icon { width: 18px; height: 18px; margin-right: 8px; filter: invert(100%); }
 
 .steps-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
   display: flex;
-  justify-content: space-around;
-  margin-bottom: 30px;
-  background-color: #e3f2fd; /* 淺藍色背景 */
-  padding: 15px 10px;
-  border-radius: 8px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
-  position: sticky; /* 關鍵屬性 */
-  top: 0;           /* 滾動到距離視窗頂部 0px 時固定 */
-  z-index: 1000;    /* 確保它在其他內容之上，避免被覆蓋 */
-  box-shadow: 0 2px 5px rgba(0,0,0,0.7); /* 增加一點陰影，讓它看起來更像是浮動在上面 */
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  transition: all 0.2s ease;
 }
-.step-item { display: flex; flex-direction: column; align-items: center; cursor: pointer; opacity: 0.7; transition: opacity 0.3s ease, transform 0.2s ease; }
-.step-item:hover { opacity: 1; transform: translateY(-2px); }
-.step-item.active { opacity: 1; }
-.step-item.completed .step-circle { background-color: #28a745; color: white; }
-.step-item.active .step-circle { background-color: #007bff; color: white; box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.25); }
-.step-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background-color: #cccccc;
-  color: #555;
+
+.steps-navigation.collapsed {
+  padding: 6px 12px;
+  transform: translateY(-4px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+.step-item {
   display: flex;
-  justify-content: center;
   align-items: center;
-  font-weight: bold;
-  font-size: 18px;
-  margin-bottom: 8px;
-  border: 2px solid transparent;
-  transition: all 0.3s ease;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 999px;
+  transition: background 0.15s, transform 0.15s;
 }
-.step-label { font-size: 14px; color: #555; text-align: center; }
-.step-item.active .step-label { color: #007bff; font-weight: bold; }
 
-.form-section { padding: 20px 0; }
+.steps-navigation.collapsed .step-item {
+  transform: scale(0.92);
+}
 
-.step-content { background-color: #f9f9f9; padding: 25px; border-radius: 8px; min-height: 250px; border: 1px solid #e0e0e0; }
-.step-content h2 { font-size: 22px; color: #333; margin-top: 0; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #007bff; display: inline-block; }
+.step-item.active {
+  background: #1f6feb;
+  color: #fff;
+}
+
+.step-item.completed {
+  background: #e5f1ff;
+}
+
+.step-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size: 13px;
+  background: rgba(0,0,0,0.05);
+}
+
+.step-item.active .step-circle {
+  background: rgba(255,255,255,0.2);
+}
+
+.step-label {
+  font-size: 14px;
+}
+
+.steps-navigation.collapsed .step-circle {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
+.steps-navigation.collapsed .step-label {
+  font-size: 13px;
+}
+
+.step-item.step-error {
+  background-color: #ffe5e5;
+  border-color: #e74c3c;
+  color: #000000;
+}
+
+.step-item.step-ok {
+  background-color: #e6f9e8;
+  border-color: #27ae60;
+  color: #000000;
+}
+
+/* 如果你希望只是圈圈變色，也可以額外寫：
+.step-item.step-error .step-circle { background-color: #e74c3c; color: #fff; }
+.step-item.step-ok .step-circle { background-color: #27ae60; color: #fff; }
+*/
+
+
 
 .fundamental-attribute-block { display: flex; border: unset; padding: 0px; }
 .fundamental-attribute-block .attribute { display: flex; flex-direction: column; width: 100%; }
@@ -1082,5 +1443,42 @@ onMounted(async () => {
 .form-label.id { display: inline-block; width: 200px; border-right: 1px solid #ddd; }
 .form-btn-block { display: flex; align-items: center;}
 .remove-btn { background: none; border: none; color: red; font-weight: bold; cursor: pointer; font-size: 1.2em; }
+
+.floating-tools {
+  position: fixed;
+  right: 24px;
+  bottom: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+}
+
+.tool-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 2px 8px rgba(15,23,42,0.18);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  font-size: 18px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.tool-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15,23,42,0.22);
+  background: #f3f4f6;
+}
+
+.tool-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 
 </style>

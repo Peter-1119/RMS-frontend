@@ -62,7 +62,7 @@
 </template>
 
 <script>
-import { getSubmitted } from '@/services/docs'
+import { getPassed } from '@/services/docs'
 
 export default {
   name: 'SubmittedDocuments',
@@ -111,7 +111,7 @@ export default {
       try {
         const { items, total } = await getPassed({
           userId: this.effectiveUserId,
-          documentType: 1,
+          document_type: 'specification',
           keyword: this.keyword,
           page: this.page,
           pageSize: this.pageSize,

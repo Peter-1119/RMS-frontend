@@ -5,15 +5,8 @@
                 <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
                 
                 <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
-                <!-- <template v-if="blockIndex === 0">
-                    <EditorContent :editor="titleEditor" class="title-editor-content" />
-                </template>
-                <template v-else>
-                    <input type="text" placeholder="輸入標題" v-model="blockItem.jsonHeader" class="process-title-input">
-                </template> -->
 
                 <div class="menu color">
-                    <!-- <div class="font-color red" @click="setGenericColor('red')"></div> -->
                     <div class="font-color blue" @click="setGenericColor('blue')"></div>
                     <div class="font-color black" @click="setGenericColor(null)"></div>
                 </div>
@@ -367,7 +360,7 @@ transition: background-color 0.2s ease;
 
 /* TipTap Table 樣式 */
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
-.editor-content :deep(th) { position:sticky; top:100px; z-index:5; }
+.editor-content :deep(th) { position:sticky; top:35px; z-index:5; }
 .editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px auto; cursor: pointer; border: 2px solid transparent; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px 0; cursor: pointer; border: 2px solid transparent; }

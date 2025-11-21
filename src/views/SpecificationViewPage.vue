@@ -155,7 +155,6 @@ async function load() {
   loading.value = true
   try {
     const { items, total: t } = await getEngineeringList({ keyword: keyword.value, page: page.value, pageSize: pageSize.value })
-    console.log("items: ", items)
     list.value = items || []
     total.value = t || 0
     if (activeId.value && !list.value.some(x => x.id === activeId.value)) {

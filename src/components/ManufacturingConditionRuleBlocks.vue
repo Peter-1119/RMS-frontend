@@ -7,6 +7,19 @@
 
     <div v-for="(b,i) in blocks" :key="b.id" class="blk">
       <div class="blk-hd">
+        <div class="spec-select">
+          <label>製程：</label>
+          <select v-model="blocks[i].specCode" @change="onSpecChange(i)">
+            <option value="">-- 請選擇製程 --</option>
+            <option
+              v-for="opt in specOptions"
+              :key="opt.code"
+              :value="opt.code"
+            >
+              {{ opt.name || opt.code }}
+            </option>
+          </select>
+        </div>
         <div><b>程式號碼：</b>{{ b.code }}</div>
         <div class="copybox">
           <label>參數代碼：</label>
@@ -72,6 +85,7 @@
 import { ref, onMounted, nextTick, onBeforeUnmount, watch, computed } from 'vue'
 import { v1 as uuidv1 } from 'uuid'
 import { EditorContent, Editor } from '@tiptap/vue-3'
+import { Focus } from '@tiptap/extensions'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
@@ -94,6 +108,7 @@ const props = defineProps({
   // 新增：這台機台在「製造條件參數一覽表」中是否有 PMS / 條件參數
   hasPms:        { type: Boolean, default: true },
   hasConditions: { type: Boolean, default: true },
+  specOptions: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:dataBlocks','save'])
@@ -175,17 +190,51 @@ const Cell = TableCell.extend({
 })
 const TableOnlyDoc = Document.extend({ content:'table' })
 const TExt = [
-  TableOnlyDoc, ...Base,
+  TableOnlyDoc, ...Base, Focus.configure({ className: 'has-focus', mode: 'all' }),
   Table.configure({ resizable:false, allowTableNodeSelection:true, handleWidth:5, cellMinWidth:50 }),
   Row, Hdr, Cell, History
 ]
 
 /* ===== Reactive state ===== */
+const lastExternalDataJson = ref('')   // 記錄上次「外部」給我的 dataBlocks 內容
 const blocks = ref([])          // {id, code, data?}
 const condEditors = ref([])     // Editor[]
 const paramEditors = ref([])    // Editor[]
 const copyCode = ref('')
 let idSeq = 0
+
+const specNameByCode = computed(() => {
+  const m = {}
+  ;(props.specOptions || []).forEach(o => {
+    if (!o?.code) return
+    m[o.code] = o.name || o.code
+  })
+  return m
+})
+
+function buildProgramCodeForSpec(specCode, index) {
+  const sc = (specCode || '').toString()
+  if (!sc) return `XXXX${index + 1}`
+
+  const normalized = sc.replace(/-/g, '')   // "R221-01" -> "R22101"
+  const seq = String(index + 1).padStart(2, '0')  // 01, 02, ...
+  return `RE${normalized}${seq}`
+}
+
+function updateCodeForBlock(idx) {
+  const b = blocks.value[idx]
+  if (!b) return
+  b.code = buildProgramCodeForSpec(b.specCode, idx)
+}
+
+function onSpecChange(i) {
+  const b = blocks.value[i]
+  const code = b.specCode || ''
+  b.specName = specNameByCode.value[code] || ''
+  updateCodeForBlock(i)
+  syncToParent()
+}
+
 
 /* ===== Normalizers – accept flexible templates ===== */
 
@@ -229,7 +278,7 @@ function buildCondDocFromArray(templateArr) {
 // Build parameter table TipTap doc from 2D array rows
 // rows: string[][]
 function buildParamDocFromRows(rows) {
-  const LOCK_COLS = [0,1,7,8]
+  const LOCK_COLS = [0,1,7]
   const trows = rows.map((row, rIdx) => ({
     type:'tableRow',
     content: row.map((txt, cIdx) => ({
@@ -303,7 +352,7 @@ function makeCondEditor(json, onUpdate) {
       onUpdate?.({ editor })
       // keep parent’s mcrBlocks in sync with live edits
       syncToParent()
-    }
+    }   
   })
 }
 
@@ -313,7 +362,7 @@ function makeParamEditor(json, onUpdate) {
     content: json || tmplDoc || buildParamDocFromRows([[]]),
     extensions: TExt,
     editorProps:{
-      handleDOMEvents:{ drop:()=>true, dragstart:()=>true, mousedown:()=>false },
+      handleDOMEvents:{ drop:()=>true, dragstart:()=>true, mousedown:()=>false, handleKeydown, keydown: (view, event) => handleKeydown(view, event) },
       handleKeyDown(view, event) {
         if (!['Backspace','Delete'].includes(event.key)) return false
         const sel = view.state.selection
@@ -345,24 +394,51 @@ function makeParamEditor(json, onUpdate) {
 /* ===== Public actions (unchanged UI) ===== */
 function addBlock(){
   const id = idSeq++
-  blocks.value.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, id, code:`XXXX${blocks.value.length + 1}`, data:{} })
+  blocks.value.push({
+    content_id: null,
+    client_temp_id: `temp-${uuidv1()}`,
+    id,
+    code: `XXXX${blocks.value.length + 1}`,  // 先給暫時 code
+    specCode: '',
+    specName: '',
+    data:{},
+  })
   nextTick(()=> initEditors(blocks.value.length-1))
 }
 function delBlock(i){
   if (blocks.value.length===1) return alert('至少需要保留一個組合')
   if (!confirm('確定要刪除此組合嗎？')) return
-  condEditors.value[i]?.destroy(); paramEditors.value[i]?.destroy()
-  blocks.value.splice(i,1); condEditors.value.splice(i,1); paramEditors.value.splice(i,1)
-  blocks.value = blocks.value.map((b, i) => ({...b, code: `XXXX${i + 1}`}))
+  condEditors.value[i]?.destroy()
+  paramEditors.value[i]?.destroy()
+  blocks.value.splice(i,1)
+  condEditors.value.splice(i,1)
+  paramEditors.value.splice(i,1)
+
+  // 重新依照每個 block 自己的 specCode + index 重算程式號碼
+  blocks.value = blocks.value.map((b, idx) => ({
+    ...b,
+    code: buildProgramCodeForSpec(b.specCode, idx),
+  }))
+
   nextTick(runAllValidations)
 }
 function duplicateBlock(i){
-  const src = blocks.value[i]; const id = idSeq++
+  const src = blocks.value[i]
+  const id = idSeq++
+  const newIndex = blocks.value.length  // push 後會是最後一筆
+
+  const specCode = src.specCode || ''
+  const specName = src.specName || specNameByCode.value[specCode] || ''
+
   blocks.value.push({
-    id, code:`XXXX${blocks.value.length + 1}`, data:{
-      jsonConditionContent: condEditors.value[i].getJSON(),
-      jsonParameterContent: paramEditors.value[i].getJSON()
-    }
+    id,
+    code: buildProgramCodeForSpec(specCode, newIndex),
+    specCode,
+    specName,
+    data: {
+      jsonConditionContent: condEditors.value[i]?.getJSON() || null,
+      jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
+    },
   })
   nextTick(()=> initEditors(blocks.value.length-1))
 }
@@ -370,9 +446,28 @@ function copyFromCode(targetIdx){
   if (!copyCode.value) return alert('請輸入要複製的代碼')
   const srcIdx = blocks.value.findIndex(b=>b.code===copyCode.value)
   if (srcIdx<0) return alert('找不到指定的代碼')
-  condEditors.value[targetIdx].commands.setContent(condEditors.value[srcIdx].getJSON())
-  paramEditors.value[targetIdx].commands.setContent(paramEditors.value[srcIdx].getJSON())
-  runAllValidations(); alert('複製成功')
+
+  const src = blocks.value[srcIdx]
+  const tgt = blocks.value[targetIdx]
+  if (!src || !tgt) return
+
+  // 內容複製
+  if (condEditors.value[targetIdx] && condEditors.value[srcIdx]) {
+    condEditors.value[targetIdx].commands.setContent(condEditors.value[srcIdx].getJSON())
+  }
+  if (paramEditors.value[targetIdx] && paramEditors.value[srcIdx]) {
+    paramEditors.value[targetIdx].commands.setContent(paramEditors.value[srcIdx].getJSON())
+  }
+
+  // ★ 規格複製
+  tgt.specCode = src.specCode
+  tgt.specName = src.specName || specNameByCode.value[src.specCode] || ''
+
+  // ★ 依 target index 重算程式號碼
+  updateCodeForBlock(targetIdx)
+
+  runAllValidations()
+  alert('複製成功')
 }
 
 /* ===== Condition table row ops (unchanged logic) ===== */
@@ -592,6 +687,70 @@ function runAllValidations(){
   paramEditors.value.forEach(ed=> ed && runParamValueValidation(ed))
   runParamDuplicateValidation()
 }
+function handleKeydown(view, event) {
+  if (event.key !== 'Enter') return false
+
+  const { state } = view
+  const { $from } = state.selection
+
+  // 找到目前所在的 cell / header
+  let cellNode = null
+  let cellDepth = -1
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d)
+    if (node.type.name === 'customTableCell' || node.type.name === 'tableHeader') {
+      cellNode = node
+      cellDepth = d
+      break
+    }
+  }
+  if (!cellNode || cellDepth < 0) return false
+
+  // rowNode = 這個 cell 所在的那一列
+  const rowNode = $from.node(cellDepth - 1)
+  // tableNode = 整張 table
+  const tableNode = $from.node(cellDepth - 2)
+
+  let rowIndex = -1
+  let colIndex = -1
+
+  // 取得 rowIndex
+  tableNode.content.forEach((row, _offset, index) => {
+    if (row === rowNode) {
+        rowIndex = index
+    }
+  })
+
+  // 取得 colIndex
+  rowNode.content.forEach((cell, _offset, index) => {
+    if (cell === cellNode) {
+        colIndex = index
+    }
+  })
+
+  if (rowIndex < 0 || colIndex < 0) return false
+
+  // 欄位 index 對應 initialTableData：
+  // 0 "項次"
+  // 1 "槽體"
+  // 2 "管理項目"
+  // 3 "規格下限(OOS-)"
+  // 4 "操作下限(OOC-)"
+  // 5 "設定值"
+  // 6 "操作上限(OOC+)"
+  // 7 "規格上限(OOS+)"
+  // 8 "單位"
+  // ...
+  const blockedCols = [2, 3, 4, 5, 6]
+
+  // 如果是在需要鎖 Enter 的那些欄位，就擋掉
+  if (blockedCols.includes(colIndex)) {
+    event.preventDefault()
+    return true       // 告訴 ProseMirror：這個事件已經處理完了
+  }
+
+  return false
+}
 
 /* ===== init per index ===== */
 function initEditors(i) {
@@ -612,47 +771,75 @@ function initEditors(i) {
 }
 
 /* ===== Mount / Unmount ===== */
-onMounted(()=>{
-  if (!props.dataBlocks.length){ 
-    addBlock() 
-  }
-  else {
+onMounted(()=> {
+  if (!props.dataBlocks.length){
+    // 新文件
+    addBlock()
+  } else {
     blocks.value = props.dataBlocks.map((blk,idx)=>({
-      id:idSeq++,
+      id: blk.id ?? idx + 1,
       code: blk.code || `XXXX${idx+1}`,
       content_id: blk.content_id,
       client_temp_id: blk.client_temp_id,
-      data: blk.data || {}
+      specCode: blk.specCode || blk.data?.metadata?.specification?.code || '',
+      specName: blk.specName || blk.data?.metadata?.specification?.name || '',
+      data: blk.data || {},
     }))
     blocks.value.forEach((_,i)=> initEditors(i))
   }
   nextTick(syncToParent)
+  lastExternalDataJson.value = JSON.stringify(props.dataBlocks || [])
 })
 
-// If templates change later (e.g., user switches machine),
-// re-seed ONLY empty editors to avoid clobbering user edits.
-watch(() => props.condTemplate, () => {
-  condEditors.value.forEach((ed,i)=>{
-    const hasUserContent = !!blocks.value[i]?.data?.jsonConditionContent
-    if (!hasUserContent && ed) {
-      const doc = normalizeCondTemplate()
-      if (doc) ed.commands.setContent(doc, false)
+
+watch(
+  () => props.dataBlocks,
+  (newBlocks) => {
+    const json = JSON.stringify(newBlocks || [])
+
+    // ⭐ 如果這次的內容跟 lastExternalDataJson 一樣，多半是自己 emit update:dataBlocks
+    // 父層原封不動丟回來 → 不要重建 editor，避免無限迴圈
+    if (json === lastExternalDataJson.value) {
+      return
     }
-  })
-})
-watch(() => props.paramTemplate, () => {
-  paramEditors.value.forEach((ed,i)=>{
-    const hasUserContent = !!blocks.value[i]?.data?.jsonParameterContent
-    if (!hasUserContent && ed) {
-      const doc = normalizeParamTemplate()
-      if (doc) ed.commands.setContent(doc, false)
+
+    // === 外部真正有改變（載入草稿 / 換機台） → 全面重建 ===
+
+    // 先把舊 editor 全部 destroy
+    condEditors.value.forEach(e => e?.destroy())
+    paramEditors.value.forEach(e => e?.destroy())
+    condEditors.value = []
+    paramEditors.value = []
+
+    if (!newBlocks || !newBlocks.length) {
+      // 1) 新機台 / 沒有草稿 → 建一個新的空 block
+      blocks.value = []
+      addBlock()
+    } else {
+      // 2) 有草稿資料 → 依照草稿內容建立 blocks & editors
+      blocks.value = newBlocks.map((blk, idx) => ({
+        id: blk.id ?? idx + 1,
+        code: blk.code || `XXXX${idx + 1}`,
+        content_id: blk.content_id,
+        client_temp_id: blk.client_temp_id,
+        specCode: blk.specCode || blk.data?.metadata?.specification?.code || '',
+        specName: blk.specName || blk.data?.metadata?.specification?.name || '',
+        data: blk.data || {},
+      }))
+
+      blocks.value.forEach((_, i) => initEditors(i))
     }
-  })
-})
+
+    nextTick(runAllValidations)
+
+    // 更新本次外部狀態簽章
+    lastExternalDataJson.value = json
+  },
+  { deep: true }
+)
 
 onBeforeUnmount(()=>{
   const payload = exportData()
-  console.log("manufacturing Condition Rule Blocks: ", payload)
   emit('save', payload)
   condEditors.value.forEach(e=>e?.destroy())
   paramEditors.value.forEach(e=>e?.destroy())
@@ -673,29 +860,44 @@ function extractTableArray(ed){
 }
 
 function exportData(){
-  return blocks.value.map((b,i)=>({
-    // keep code so backend can save parameter table textHeader
-    code: b.code,
-    content_id: b.content_id,
-    client_temp_id: b.client_temp_id,
-    id: b.id,
-    data:{
-      // condition
-      jsonConditionContent: condEditors.value[i]?.getJSON(),
-      arrayConditionData:   extractTableArray(condEditors.value[i]),
-      // parameter
-      jsonParameterContent: paramEditors.value[i]?.getJSON(),
-      arrayParameterData:   extractTableArray(paramEditors.value[i]),
-      // for parameter table “textHeader” requirement
-      paramHeaderText: b.code,
+  return blocks.value.map((b,i)=>{
+    const spec = {
+      code: b.specCode || '',
+      name: b.specName || specNameByCode.value[b.specCode] || '',
     }
-  }))
+
+    return {
+      id: b.id,
+      code: b.code,
+      content_id: b.content_id,
+      client_temp_id: b.client_temp_id,
+      specCode: spec.code,
+      specName: spec.name,
+      data:{
+        jsonConditionContent: condEditors.value[i]?.getJSON() || null,
+        arrayConditionData:   extractTableArray(condEditors.value[i]),
+        jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
+        arrayParameterData:   extractTableArray(paramEditors.value[i]),
+        paramHeaderText: b.code,
+        metadata: {
+          ...(b.data?.metadata || {}),
+          specification: spec,
+        },
+      },
+    }
+  })
 }
+
 
 let emitTimer = null
 function syncToParent() {
   clearTimeout(emitTimer)
-  emitTimer = setTimeout(() => emit('update:dataBlocks', exportData()), 150)
+  emitTimer = setTimeout(() => {
+    const payload = exportData()
+    // ⭐ 先把這次要 emit 的內容記錄起來
+    lastExternalDataJson.value = JSON.stringify(payload || [])
+    emit('update:dataBlocks', payload)
+  }, 150)
 }
 
 /* ===== expose (optional) ===== */
@@ -723,7 +925,7 @@ defineExpose({ exportData })
 .ed :deep(.ProseMirror){padding:8px;min-height:80px;outline:none}
 .ed :deep(table){border-collapse:collapse;width:100%;table-layout:fixed}
 .ed :deep(th),.ed :deep(td){border:1px solid #ddd;padding:8px;text-align:center;vertical-align:middle;min-width:72px;position:relative}
-.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:100px;z-index:5;}
+.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:35px;z-index:5;}
 .ed :deep(.selectedCell){background:#e3f2fd!important;outline:2px solid #2196f3;outline-offset:-2px}
 .ed :deep([contenteditable="false"]){background:#f5f5f5;color:#666;cursor:not-allowed}
 .ed :deep(tr.dup-row td){background:#ffe6e6!important}      /* 5.1 duplicate row: red-ish */
@@ -733,6 +935,7 @@ defineExpose({ exportData })
 .ed :deep(.dropdown-cell){width:100%;padding:4px}
 .ed :deep(.cell-dropdown){width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;background:#fff}
 .ed :deep(.cell-dropdown:focus){outline:2px solid #2196f3;border-color:#2196f3}
+.ed :deep(td.has-focus){ background-color:#fff7cc; box-shadow: inset 0 0 0 2px #ff9800; }
 
 .hint { margin: 6px 0; color: #555; }
 .hint.empty { margin: 8px 0; color: #c62828; font-weight: 600; }

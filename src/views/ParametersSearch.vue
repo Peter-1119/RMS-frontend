@@ -16,35 +16,17 @@
             <div class="fundamental-attribute">
               <div class="form-group">
                 <label>適用工程：</label>
-                <input
-                  class="window-input"
-                  type="text"
-                  v-model="form.specific"
-                  @click="specificsListVisible = true"
-                  readonly
-                />
+                <input class="window-input" type="text" v-model="form.specific" @click="specificsListVisible = true" readonly/>
               </div>
 
               <div class="form-group">
                 <label>適用機台：</label>
-                <input
-                  class="window-input"
-                  type="text"
-                  v-model="form.machine"
-                  @click="machineWindowVisable = true"
-                  readonly
-                />
+                <input class="window-input" type="text" v-model="form.machine" @click="machineWindowVisable = true" readonly/>
               </div>
 
               <div class="form-group">
                 <label>品目：</label>
-                <input
-                  class="window-input"
-                  type="text"
-                  v-model="form.item"
-                  @click="itemWindowVisable = true"
-                  readonly
-                />
+                <input class="window-input" type="text" v-model="form.item" @click="itemWindowVisable = true" readonly/>
               </div>
 
               <div class="form-group">
@@ -55,30 +37,15 @@
 
             <!-- Step2：依機台動態產生條件 select -->
             <div class="condition-attribute">
-              <div
-                v-for="condition in conditions"
-                :key="condition.id"
-                class="form-group"
-              >
+              <div v-for="condition in conditions" :key="condition.id" class="form-group">
                 <label>{{ condition.name }}：</label>
                 <select v-model="selectedConditions[condition.id]">
                   <option value=""></option>
-                  <option
-                    v-for="p in condition.parameters"
-                    :key="p"
-                    :value="p"
-                  >
-                    {{ p }}
-                  </option>
+                  <option v-for="p in condition.parameters" :key="p" :value="p">{{ p }}</option>
                 </select>
               </div>
 
-              <p
-                v-if="form.machineCode && !conditions.length"
-                style="margin-top: 12px; color: #666;"
-              >
-                此機台目前尚未設定任何條件。
-              </p>
+              <p v-if="form.machineCode && !conditions.length" style="margin-top: 12px; color: #666;">此機台目前尚未設定任何條件。</p>
             </div>
           </div>
         </div>
@@ -101,9 +68,7 @@
             <th>機台</th>
             <th>品目</th>
             <!-- 動態條件欄位 -->
-            <th v-for="header in conditionHeaders" :key="header">
-              {{ header }}
-            </th>
+            <th v-for="header in conditionHeaders" :key="header">{{ header }}</th>
             <th>程式代碼</th>
           </tr>
         </thead>
@@ -115,26 +80,14 @@
             @click="selectResult(resultPageStartIndex + idx, row)"
           >
             <td>
-              <input
-                type="radio"
-                :checked="selectedResultIndex === (resultPageStartIndex + idx)"
-              />
+              <input type="radio" :checked="selectedResultIndex === (resultPageStartIndex + idx)"/>
             </td>
             <td>{{ row.specific_name }}</td>
-
             <!-- ✅ 這裡改成用 form.machine 顯示全名，若沒選就 fallback 到 machine_code -->
             <td>{{ form.machine || row.machine_code }}</td>
-
             <td>{{ row.item_code }}</td>
-
             <!-- 各條件實際顯示的參數 -->
-            <td
-              v-for="header in conditionHeaders"
-              :key="header"
-            >
-              {{ (row.conditions && row.conditions[header]) || '' }}
-            </td>
-
+            <td v-for="header in conditionHeaders" :key="header">{{ (row.conditions && row.conditions[header]) || '' }}</td>
             <td>{{ row.program_code }}</td>
           </tr>
         </tbody>
@@ -154,17 +107,7 @@
 
       <table class="param-table" v-if="parameterRows.length">
         <thead>
-          <tr>
-            <th>槽體名稱</th>
-            <th>參數名稱</th>
-            <th>規格上限</th>
-            <th>操作上限</th>
-            <th>中值</th>
-            <th>操作下限</th>
-            <th>規格下限</th>
-            <th>單位</th>
-            <th>參數下放</th>
-            <th>說明</th>
+          <tr><th>槽體名稱</th><th>參數名稱</th><th>規格上限</th><th>操作上限</th><th>中值</th><th>操作下限</th><th>規格下限</th><th>單位</th><th>參數下放</th><th>說明</th>
           </tr>
         </thead>
         <tbody>
@@ -397,182 +340,71 @@ export default {
       this.parameterRows = []
 
       if (!row || !row.document_token) return
+
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ""
+
+        // ★ 用 document_type 決定要打哪一個 step
+        const stepType = row.document_type === 1 ? 5 : 2
+
         const { data } = await axios.get(
           `${API_BASE_URL}/parameters/${row.document_token}/blocks`,
-          { params: { step_type: row.step_type || 2 } }
+          { params: { step_type: stepType } }
         )
+
         this.parameterRows = (data && data.data && data.data.rows) || []
       } catch (e) {
         console.error('load parameter rows error:', e)
         this.parameterRows = []
       }
-    },
+    }
+
   },
 }
 </script>
 
 <style scoped>
-.parameters-search-container {
-  width: 95%;
-  margin: auto;
-  justify-content: center;
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-}
-.header-block {
-  margin-bottom: 20px;
-  padding: 8px;
-}
-.header-panel {
-  display: flex;
-}
-.header-left-panel {
-  width: 90%;
-}
-.header-right-panel {
-  display: flex;
-  width: 10%;
-  align-items: center;
-  justify-content: center;
-}
-.header-right-panel .btn {
-  padding: 12px 25px;
-  font-size: 16px;
-  background-color: #007bff;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-.header-right-panel .btn:hover {
-  background-color: #0056b3;
-}
+.parameters-search-container { width: 95%; margin: auto; justify-content: center; padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }
+.header-block { margin-bottom: 20px; padding: 8px; }
+.header-panel { display: flex; }
+.header-left-panel { width: 90%; }
+.header-right-panel { display: flex; width: 10%; align-items: center; justify-content: center; }
+.header-right-panel .btn { padding: 12px 25px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s ease; }
+.header-right-panel .btn:hover { background-color: #0056b3; }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  border-radius: 5px;
-  margin-bottom: 14px;
-}
-.header h1 {
-  margin: 0;
-}
-.header button {
-  display: flex;
-  background-color: #ffffff;
-  padding: 10px 18px;
-  gap: 5px;
-  border: 1px solid #000;
-  border-radius: 6px;
-}
-.header img {
-  width: 18px;
-  height: 18px;
-}
+.header { display: flex; justify-content: space-between; border-radius: 5px; margin-bottom: 14px; }
+.header h1 { margin: 0; }
+.header button { display: flex; background-color: #ffffff; padding: 10px 18px; gap: 5px; border: 1px solid #000; border-radius: 6px; }
+.header img { width: 18px; height: 18px; }
 
-.fundamental-attribute {
-  display: flex;
-}
-.form-group {
-  margin-right: 12px;
-  align-items: center;
-}
+.fundamental-attribute { display: flex; }
+.form-group { margin-right: 12px; align-items: center; }
 .form-group input,
-.form-group select {
-  padding: 6px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
-}
-.form-group .window-input {
-  cursor: pointer;
-}
+.form-group select { padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+.form-group .window-input { cursor: pointer;}
 
-.condition-attribute {
-  display: flex;
-  flex-wrap: wrap;
-}
-.condition-attribute .form-group {
-  display: flex;
-  margin-top: 12px;
-}
+.condition-attribute { display: flex; flex-wrap: wrap; }
+.condition-attribute .form-group { display: flex; margin-top: 12px; }
 
-.result-block {
-  margin-top: 10px;
-  padding: 10px 0;
-}
-.result-block h2 {
-  margin: 10px 0;
-}
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 10px;
-}
+.result-block { margin-top: 10px; padding: 10px 0; }
+.result-block h2 { margin: 10px 0; }
+.result-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
 .result-table th,
-.result-table td {
-  border: 1px solid #ddd;
-  padding: 6px 8px;
-  text-align: center;
-  word-wrap: break-word;
-}
-.result-table tbody tr.active {
-  background-color: #eef6ff;
-}
-.result-table tbody tr:hover {
-  background-color: #f2f8ff;
-}
+.result-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
+.result-table tbody tr.active { background-color: #eef6ff; }
+.result-table tbody tr:hover { background-color: #f2f8ff; }
 
-.empty-text {
-  color: #888;
-  margin: 8px 0;
-}
+.empty-text { color: #888; margin: 8px 0; }
 
-.parameter-block {
-  margin-top: 20px;
-  padding: 10px 0 20px;
-}
-.parameter-block h2 {
-  margin: 10px 0;
-}
-.param-table {
-  width: 100%;
-  border-collapse: collapse;
-}
+.parameter-block { margin-top: 20px; padding: 10px 0 20px; }
+.parameter-block h2 { margin: 10px 0; }
+.param-table { width: 100%; border-collapse: collapse; }
 .param-table th,
-.param-table td {
-  border: 1px solid #ddd;
-  padding: 6px 8px;
-  text-align: center;
-  word-wrap: break-word;
-}
+.param-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
 
-.page-action-block {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 0;
-}
-.icon-item {
-  background: #eee;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  user-select: none;
-}
-.icon-item:hover {
-  background: #ddd;
-}
-.icon-item.disabled {
-  opacity: .5;
-  pointer-events: none;
-}
-.page-input {
-  width: 72px;
-  padding: 2px 6px;
-}
+.page-action-block { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 0; }
+.icon-item { background: #eee; padding: 4px 8px; border-radius: 4px; cursor: pointer; user-select: none; }
+.icon-item:hover { background: #ddd; }
+.icon-item.disabled { opacity: .5; pointer-events: none; }
+.page-input { width: 72px; padding: 2px 6px; }
 </style>

@@ -33,7 +33,7 @@
           </select>
         </div>
         <div class="r">
-          <i class="dot red" @click="paramEditors[i]?.chain().focus().setColor('red').run()"></i>
+          <!-- <i class="dot red" @click="paramEditors[i]?.chain().focus().setColor('red').run()"></i> -->
           <i class="dot blue" @click="paramEditors[i]?.chain().focus().setColor('blue').run()"></i>
           <i class="dot black" @click="paramEditors[i]?.chain().focus().setColor('null').run()"></i>
         </div>
@@ -72,7 +72,7 @@ import { CellSelection } from 'prosemirror-tables'
 /* ===== Props / Emits ===== */
 const props = defineProps({
   dataBlocks: { type: Array, default: () => [] },     // [{ code, data:{ jsonParameterContent, arrayParameterData, metadata? }, ...}]
-  specification: { type: Object, default: () => ({ specific: "", code: "" }) },       // passed from parent
+  specification: { type: [Array, Object], default: () => ([])},       // passed from parent
   currentStep: { type: Number, default: 0 },
 })
 const emit = defineEmits(['update:dataBlocks','save'])
@@ -98,67 +98,198 @@ const pmsLoading = ref({})  // { [i]: boolean }
 const pmsEmpty   = ref({})  // { [i]: boolean }
 
 /* ===== MES: groups & machines ===== */
-const groupsMap = ref({}) // shape: { [groupName]: { code, machines: { [machineName]: { code } } } }
+// specGroupsMap: 後端回傳的完整 map
+// {
+//   "R221-01": {
+//     "G1": { name: "群組1", machines: [{code,name,building}, ...] },
+//     ...
+//   },
+//   "R331-03": { ... },
+// }
+const specGroupsMap = ref({})
+
+// 壓平成原本 UI 需要的 groupsMap：
+// {
+//   "G1": {
+//      name: "群組1",
+//      machines: {
+//        "M001": { name: "機台1", specCodes: ["R221-01", ...] },
+//        ...
+//      }
+//   },
+//   ...
+// }
+const groupsMap = computed(() => {
+  const merged = {}
+
+  for (const [specCode, groups] of Object.entries(specGroupsMap.value || {})) {
+    for (const [gCode, gInfo] of Object.entries(groups || {})) {
+      const gKey = gCode
+      if (!merged[gKey]) {
+        merged[gKey] = {
+          name: gInfo.name,
+          machines: {},
+        }
+      }
+
+      for (const m of (gInfo.machines || [])) {
+        const mKey = m.code
+        if (!merged[gKey].machines[mKey]) {
+          merged[gKey].machines[mKey] = {
+            name: m.name,
+            specCodes: [],
+          }
+        }
+        if (!merged[gKey].machines[mKey].specCodes.includes(specCode)) {
+          merged[gKey].machines[mKey].specCodes.push(specCode)
+        }
+      }
+    }
+  }
+
+  return merged
+})
+
 const groupKeys = computed(() => Object.entries(groupsMap.value))
+
 const machineKeysFor = (i) => {
   const g = blocks.value[i]?.meta?.group || ''
   const gm = groupsMap.value[g]?.machines || {}
   return Object.entries(gm)
 }
 
+// 取得目前 attribute.specification 中第一個有 code 的工程代碼
+const primarySpecificCode = computed(() => {
+  if (Array.isArray(props.specification)) {
+    const first = props.specification.find(s => s && s.code)
+    return first ? first.code : ''
+  }
+  if (props.specification && props.specification.code) {
+    return props.specification.code
+  }
+  return ''
+})
+
+// 把 "R221-01" → "22101"
+function normalizeSpecificCode(code) {
+  if (!code) return '00000'
+  const digits = String(code).match(/\d+/g)
+  if (digits && digits.length) return digits.join('')
+  return String(code).replace(/[^0-9A-Za-z]/g, '')
+}
+
+// 產生程式號碼：RE + 22101 + 01
+function buildProgramCode(blockIndex, specCode) {
+  const base = normalizeSpecificCode(specCode || primarySpecificCode.value)
+  const seq  = String(blockIndex + 1).padStart(2, '0') // 01, 02, ...
+  return `RE${base}${seq}`
+}
+
+function findSpecCodeForGroupAndMachine(groupCode, machineCode) {
+  const g = (groupCode || '').trim()
+  const m = (machineCode || '').trim()
+  if (!g || !m) return ''
+
+  // 直接從 specGroupsMap 走一遍
+  for (const [specCode, groups] of Object.entries(specGroupsMap.value || {})) {
+    const group = groups[g]
+    if (!group) continue
+    if ((group.machines || []).some(x => (x.code || '').trim() === m)) {
+      return specCode
+    }
+  }
+  return ''
+}
+
 async function fetchGroups() {
-  console.log("props specification: ", props.specification)
-  if (!props.specification) return
+  // 把 specification 轉成 code list
+  let specCodes = []
+
+  if (Array.isArray(props.specification)) {
+    specCodes = props.specification.map(s => s && s.code).filter(Boolean)
+  } else if (props.specification && props.specification.code) {
+    specCodes = [props.specification.code]
+  }
+
+  console.log("specCodes: ", specCodes)
+
+  if (!specCodes.length) {
+    specGroupsMap.value = {}
+    return
+  }
+
   try {
-    // Adjust URL if your blueprint is mounted under a prefix (e.g., /mes/groups-machines)
-    const { data } = await axios.get(`${API_BASE_URL}/mes/groups-machines`, {
-      params: { specific: props.specification.code }
+    const { data } = await axios.get(`${API_BASE_URL}/mes/spec-groups-machines`, {
+      params: { specific: specCodes },   // 這裡會序列化成 ?specific=A&specific=B
     })
-    groupsMap.value = data?.data?.groups || {}
+    specGroupsMap.value = data?.data?.specGroups || {}
   } catch (e) {
-    console.error('fetch groups-machines failed:', e)
-    groupsMap.value = {}
+    console.error('fetch spec-groups-machines failed:', e)
+    specGroupsMap.value = {}
   }
 }
 
+// 取得對應的適用工程 code（簡化版：先吃第一個，有多工程你之後可以再細調）
+function getSpecCodeForBlock(i) {
+  const spec = props.specification
+
+  // 如果未來你把 specification 改成 array，這裡先支援一下
+  if (Array.isArray(spec) && spec.length > 0) {
+    // TODO：如果每個 group 對應不同 spec，可以在這裡用 group 去反查 spec
+    return (spec[0].code || '').trim()
+  }
+
+  // 原本是單一 object 的情況
+  if (spec && typeof spec === 'object') {
+    return (spec.code || spec.specific || '').trim()
+  }
+
+  return ''
+}
+
+// 依照「適用工程 code + block index」產生程式號碼
+function updateProgramCode(i) {
+  const specCode = getSpecCodeForBlock(i)  // e.g. "L262-01" / "R221-01"
+  if (!specCode) {
+    // 沒有適用工程就用舊 fallback
+    blocks.value[i].code = `XXXY${String(i + 1).padStart(2, '0')}`
+    return
+  }
+
+  // 移除連結符號，類似你說的 .split('-').join('')
+  const normalized = specCode.replace(/-/g, '')   // R221-01 -> R22101
+
+  // 兩位數流水號
+  const seq = String(i + 1).padStart(2, '0')      // 0 -> "01", 1 -> "02", ...
+
+  // 最後組合：RE + <工程碼去掉'-'> + <流水號>
+  // e.g. "RE" + "22101" + "01" -> "RE2210101"
+  blocks.value[i].code = `RE${normalized}${seq}`
+}
+
+
+
 // NEW: resolve the Oracle MACHINE_CODE (machine_id) from current selection
 function getSelectedMachineId(i){
-  const gKey = blocks.value[i]?.meta?.group || ''
   const mKey = blocks.value[i]?.meta?.machine || ''
-  // const mInfo = groupsMap.value?.[gKey]?.machines?.[mKey]
-  // in your data shape, key is "machineCode" (actually a name), .code is the true MACHINE_CODE
-  // return (mInfo?.code || '').trim()
   return (mKey || '').trim()
 }
 
+
 /* ===== Parameter table template ===== */
 const LOCK_COLS = [0,1,7,8]
-const DEFAULT_ROWS = [
-  ['槽體','管理項目','規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)','單位','參數下放','說明'],
-  ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['熱水洗1','溫度','','','','','','℃','Y',''],
-  ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
-  ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['剝膜1','作業溫度','','','','','','℃','Y',''],
-]
-const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
+
 function buildParamDocFromRows(rows) {
   const trows = rows.map((row, rIdx) => ({
-    type:'tableRow',
+    type: 'tableRow',
     content: row.map((txt, cIdx) => ({
       type: rIdx === 0 ? 'tableHeader' : 'tableCell',
-      attrs:{ contenteditable: (rIdx===0 || LOCK_COLS.includes(cIdx)) ? false : true },
-      content:[{ type:'paragraph', content: txt ? [{ type:'text', text: String(txt) }] : [] }]
-    }))
+      attrs: { contenteditable: (rIdx === 0 || LOCK_COLS.includes(cIdx)) ? false : true },
+      content: [{ type: 'paragraph', content: txt ? [{ type: 'text', text: String(txt) }] : [] }],
+    })),
   }))
-  return { type:'doc', content:[{ type:'table', content:trows }] }
-}
-function normalizeParamTemplate() {
-  const t = DEFAULT_ROWS
-  if (!t) return buildParamDocFromRows([[]])
-  if (isDoc(t)) return t
-  if (Array.isArray(t)) return buildParamDocFromRows(t)
-  return buildParamDocFromRows(DEFAULT_ROWS)
+
+  return { type: 'doc', content: [{ type: 'table', content: trows }] }
 }
 
 /* ===== Helpers ===== */
@@ -173,7 +304,11 @@ const cellText = (n) => {
 
 /* ===== Editor factory ===== */
 function makeParamEditor(json, onUpdate) {
-  const seed = json || normalizeParamTemplate()
+  if (!json) {
+    console.warn('makeParamEditor called without json content, skip editor init')
+    return null
+  }
+
   return new Editor({
     content: seed,
     extensions: TExt,
@@ -265,50 +400,131 @@ function addBlock(){
     content_id: null,
     client_temp_id: `temp-${uuidv1()}`,
     id,
-    code:`XXXY${blocks.value.length + 1}`,
+    code: '',  // 先留空，下面用 updateProgramCode 填
     meta: { group: firstGroup, machine: firstMachine },
     data:{}
   })
+
+  const idx = blocks.value.length - 1
+  // 一建立 block 就依照目前的適用工程 + index 算程式號碼
+  updateProgramCode(idx)
+
   // don’t init editor here; wait for machine selection
   pmsLoading.value[id] = false
   pmsEmpty.value[id]   = false
 }
+
+function renumberCodes() {
+  blocks.value.forEach((b, idx) => {
+    if (!b.code) return
+
+    // 把「最後兩位數字」視為流水號
+    const m = b.code.match(/^(.*?)(\d{2})$/)
+    if (m) {
+      const prefix = m[1]                  // e.g. "RE22101"
+      const seq = String(idx + 1).padStart(2, '0') // "01", "02", ...
+      b.code = `${prefix}${seq}`           // e.g. "RE22101" + "02"
+    } else if (b.code.startsWith('XXXY')) {
+      // 舊格式還是用 XXXY1, XXXY2 補一下
+      b.code = `XXXY${idx + 1}`
+    }
+    // 其他奇怪格式就先暫時不動
+  })
+}
 function delBlock(i){
-  if (blocks.value.length===1) return alert('至少需要保留一個組合')
+  if (blocks.value.length === 1) return alert('至少需要保留一個組合')
   if (!confirm('確定要刪除此組合嗎？')) return
+
   paramEditors.value[i]?.destroy()
-  blocks.value.splice(i,1); paramEditors.value.splice(i,1)
-  blocks.value = blocks.value.map((b, idx) => ({...b, code: `XXXY${idx + 1}`}))
+  blocks.value.splice(i, 1)
+  paramEditors.value.splice(i, 1)
+
+  // ✅ 只重排尾巴的流水號，不動前綴（RE + 製程碼那一段）
+  renumberCodes()
+
   nextTick(runAllValidations)
 }
+
 function duplicateBlock(i){
   const src = blocks.value[i]
-  const duplicatedMeta = { ...(src.meta || {}) }
+  const newIndex = blocks.value.length   // 將會是最後一個 index
+  let newCode = src.code
+
+  const m = src.code && src.code.match(/^(.*?)(\d{2})$/)
+  if (m) {
+    const prefix = m[1]
+    const seq = String(newIndex + 1).padStart(2, '0')
+    newCode = `${prefix}${seq}`
+  } else {
+    // fallback：沒 match 到就用舊邏輯
+    newCode = `XXXY${newIndex + 1}`
+  }
+
   blocks.value.push({
     id: idSeq++,
-    // code:`${src.code}_copy`,
-    code:`XXXY${blocks.value.length + 1}`,
-    meta: duplicatedMeta,
+    code: newCode,
+    meta: { ...(src.meta || {}) },
     data:{ jsonParameterContent: paramEditors.value[i]?.getJSON() }
   })
   nextTick(()=> initEditors(blocks.value.length-1))
 }
-function copyFromCode(targetIdx){
-  if (!copyCode.value) return alert('請輸入要複製的代碼')
-  const srcIdx = blocks.value.findIndex(b=>b.code===copyCode.value)
-  if (srcIdx<0) return alert('找不到指定的代碼')
-  paramEditors.value[targetIdx].commands.setContent(paramEditors.value[srcIdx].getJSON())
-  // also copy group/machine meta?
+
+function copyFromCode(targetIdx) {
+  if (!copyCode.value) {
+    return alert('請輸入要複製的代碼')
+  }
+
+  const srcIdx = blocks.value.findIndex(b => b.code === copyCode.value)
+  if (srcIdx < 0) {
+    return alert('找不到指定的代碼')
+  }
+
+  const srcEditor = paramEditors.value[srcIdx]
+
+  // 🧱 防呆：來源 block 沒有 PMS 表格，就不要幫他生預設表格
+  if (!srcEditor) {
+    return alert('此程式號碼沒有 PMS 參數可複製')
+  }
+
+  const srcJson = srcEditor.getJSON()
+
+  // 目標 block 若沒有 editor，才在這裡建立（用來源 JSON，不會用預設模板）
+  if (!paramEditors.value[targetIdx]) {
+    paramEditors.value[targetIdx] = makeParamEditor(
+      srcJson,
+      (editor) => {
+        runParamValueValidation(editor)
+        runParamDuplicateValidation()
+      }
+    )
+  } else {
+    // 已經有 editor，就直接覆蓋內容
+    paramEditors.value[targetIdx].commands.setContent(srcJson)
+  }
+
+  // 同步 meta（群組、機台、specCode）
   blocks.value[targetIdx].meta = { ...(blocks.value[srcIdx].meta || {}) }
-  runAllValidations(); alert('複製成功')
+
+  runAllValidations()
+  alert('複製成功')
 }
 
-async function onMachineChange(i){
+async function onMachineChange(i) {
+  const machineId = getSelectedMachineId(i)
+
+  // 先推 metadata 中的 specCode
+  const g = blocks.value[i]?.meta?.group || ''
+  const m = blocks.value[i]?.meta?.machine || ''
+  const specCode = findSpecCodeForGroupAndMachine(g, m)
+  blocks.value[i].meta.specCode = specCode || blocks.value[i].meta.specCode || ''
+
+  // 依 specCode + index 重算程式號碼
+  // blocks.value[i].code = buildProgramCode(i, blocks.value[i].meta.specCode)
+
   syncToParent() // keep parent in sync
 
-  const machineId = getSelectedMachineId(i)
-  // if no machine, clear editor / flags
-  if (!machineId){
+  if (!machineId) {
+    // 清 editor & flags
     if (paramEditors.value[i]) {
       paramEditors.value[i].destroy()
       paramEditors.value[i] = null
@@ -317,14 +533,20 @@ async function onMachineChange(i){
     pmsEmpty.value[i]   = false
     return
   }
+
   await seedFromMES(i, machineId)
 }
+
 function onGroupChange(i) {
   const g = blocks.value[i]?.meta?.group || ''
   const mk = Object.keys(groupsMap.value[g]?.machines || {})
   if (!mk.includes(blocks.value[i].meta.machine)) {
     blocks.value[i].meta.machine = '' // force re-select machine
   }
+
+  // 👉 群組改變時，就根據「適用工程 + block index」更新程式號碼
+  updateProgramCode(i)
+
   // wipe editor and PMS flags until a machine is chosen
   if (paramEditors.value[i]) {
     paramEditors.value[i].destroy()
@@ -334,7 +556,6 @@ function onGroupChange(i) {
   pmsEmpty.value[i]   = false
   syncToParent()
 }
-
 
 /* ===== Validations ===== */
 function getParamMatrix(ed){
@@ -402,49 +623,97 @@ function runAllValidations(){
 /* ===== init per index ===== */
 function initEditors(i) {
   const b = blocks.value[i]
-  paramEditors.value[i] = makeParamEditor(
-    b.data?.jsonParameterContent || null,
-    (editor) => { runParamValueValidation(editor); runParamDuplicateValidation() }
+  const json = b.data?.jsonParameterContent
+
+  // 沒有 json 就不要建 editor（避免生出任何預設表格）
+  if (!json) return
+
+  const ed = makeParamEditor(json, (editor) => {
+      runParamValueValidation(editor)
+      runParamDuplicateValidation()
+    }
   )
-  nextTick(runAllValidations)
+
+  if (ed) {
+    paramEditors.value[i] = ed
+    nextTick(runAllValidations)
+  }
 }
 
+
+
 /* ===== Mount / Unmount ===== */
-onMounted(async ()=>{
+onMounted(async () => {
   await fetchGroups()
 
-  if (!props.dataBlocks.length){
+  if (!props.dataBlocks.length) {
+    // 新草稿
     addBlock()
   } else {
-    blocks.value = props.dataBlocks.map((blk,idx)=>({
-      id:idSeq++,
-      code: blk.code || `XXXY${idx+1}`,
-      content_id: blk.content_id,
-      client_temp_id: blk.client_temp_id,
-      meta: {
-        group: blk.data?.metadata?.machineGroup || '',
-        machine: blk.data?.metadata?.machine || '',
-      },
-      data: blk.data || {}
-    }))
+    // 從後端載入既有資料
+    blocks.value = props.dataBlocks.map((blk, idx) => {
+      const meta = blk.data?.metadata || {}
+      const group = meta.machineGroup || meta.group || ''
+      const machine = meta.machine || ''
+      const specCode = meta.specCode || ''       // 新增：嘗試讀出 specCode
 
-    // fix invalid selections against current groups
-    blocks.value.forEach((b, i) => {
-      if (!b.meta.group || !groupsMap.value[b.meta.group]) b.meta.group = ''
-      const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
-      if (!b.meta.machine || !mk.includes(b.meta.machine)) b.meta.machine = ''
+      return {
+        id: idSeq++,
+        code: blk.code || buildProgramCode(idx, specCode),
+        content_id: blk.content_id,
+        client_temp_id: blk.client_temp_id,
+        meta: {
+          group,
+          machine,
+          specCode,
+        },
+        data: blk.data || {},
+      }
     })
 
-    // try auto load PMS for blocks that already have a valid machine
-    await Promise.all(blocks.value.map(async (b, i) => {
-      const mid = getSelectedMachineId(i)
-      if (mid) await seedFromMES(i, mid)
-      else {
-        pmsLoading.value[i] = false
-        pmsEmpty.value[i]   = false
+    // 修正不合法的群組/機台
+    blocks.value.forEach((b, i) => {
+      if (!b.meta.group || !groupsMap.value[b.meta.group]) {
+        b.meta.group = ''
       }
-    }))
+      const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
+      if (!b.meta.machine || !mk.includes(b.meta.machine)) {
+        b.meta.machine = ''
+      }
+    })
+
+    // 初始化 editor（保留你原本的三種情況邏輯）
+    await Promise.all(
+      blocks.value.map(async (b, i) => {
+        const hasJson = !!b.data?.jsonParameterContent
+        const mid = getSelectedMachineId(i)
+
+        if (hasJson) {
+          paramEditors.value[i] = makeParamEditor(
+            b.data.jsonParameterContent,
+            (editor) => {
+              runParamValueValidation(editor)
+              runParamDuplicateValidation()
+            }
+          )
+          pmsLoading.value[i] = false
+          pmsEmpty.value[i] = false
+        } else if (mid) {
+          await seedFromMES(i, mid)
+        } else {
+          pmsLoading.value[i] = false
+          pmsEmpty.value[i] = false
+        }
+      })
+    )
+    blocks.value.forEach((b, i) => {
+      // 舊資料可能已經有 code，如果你想「保留舊的」就加條件判斷
+      if (!b.code || b.code.startsWith('XXXY')) {
+        updateProgramCode(i)
+      }
+    })
   }
+
   nextTick(syncToParent)
 })
 
@@ -452,28 +721,41 @@ onMounted(async ()=>{
 watch(() => props.currentStep, (n) => {
   // no-op; you can react on step switch if needed
 })
-// watch(() => props.specification, async () => {
-//   await fetchGroups()
+watch(
+  () => {
+    if (Array.isArray(props.specification)) {
+      return props.specification
+        .map(s => s && s.code)
+        .filter(Boolean)
+        .join('|')
+    }
+    return props.specification && props.specification.code
+      ? props.specification.code
+      : ''
+  },
+  async () => {
+    await fetchGroups()
 
-//   blocks.value.forEach((b, i) => {
-//     if (!b.meta.group || !groupsMap.value[b.meta.group]) b.meta.group = ''
-//     const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
-//     if (!b.meta.machine || !mk.includes(b.meta.machine)) b.meta.machine = ''
-//   })
+    // 調整每個 block 的群組/機台是否合法
+    blocks.value.forEach((b, i) => {
+      if (!b.meta.group || !groupsMap.value[b.meta.group]) {
+        b.meta.group = ''
+      }
+      const mk = Object.keys(groupsMap.value[b.meta.group]?.machines || {})
+      if (!b.meta.machine || !mk.includes(b.meta.machine)) {
+        b.meta.machine = ''
+        if (paramEditors.value[i]) {
+          paramEditors.value[i].destroy()
+          paramEditors.value[i] = null
+        }
+        pmsLoading.value[i] = false
+        pmsEmpty.value[i]   = false
+      }
+    })
 
-//   // reload PMS for valid machines, otherwise clear editor
-//   await Promise.all(blocks.value.map(async (b, i) => {
-//     const mid = getSelectedMachineId(i)
-//     if (mid) await seedFromMES(i, mid)
-//     else {
-//       if (paramEditors.value[i]) { paramEditors.value[i].destroy(); paramEditors.value[i] = null }
-//       pmsLoading.value[i] = false
-//       pmsEmpty.value[i]   = false
-//     }
-//   }))
-
-//   syncToParent()
-// })
+    syncToParent()
+  }
+)
 
 
 onBeforeUnmount(()=>{
@@ -509,10 +791,12 @@ function exportData(){
       metadata: {
         machineGroup: b.meta?.group || '',
         machine: b.meta?.machine || '',
+        specCode: b.meta?.specCode || '',      // ⬅ 新增
       }
     }
   }))
 }
+
 
 let emitTimer = null
 function syncToParent() {
@@ -547,7 +831,7 @@ defineExpose({ exportData })
 .ed :deep(.ProseMirror){padding:8px;min-height:80px;outline:none}
 .ed :deep(table){border-collapse:collapse;width:100%;table-layout:fixed}
 .ed :deep(th),.ed :deep(td){border:1px solid #ddd;padding:8px;text-align:center;vertical-align:middle;min-width:72px;position:relative}
-.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:100px;z-index:5;}
+.ed :deep(th){background:#f8f9fa;font-weight:700;position:sticky;top:35px;z-index:5;}
 .ed :deep(.selectedCell){background:#e3f2fd!important;outline:2px solid #2196f3;outline-offset:-2px}
 .ed :deep([contenteditable="false"]){background:#f5f5f5;color:#666;cursor:not-allowed}
 .ed :deep(tr.dup-row td){background:#ffe6e6!important}      /* 5.1 duplicate row: red-ish */

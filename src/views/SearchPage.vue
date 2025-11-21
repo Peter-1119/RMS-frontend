@@ -1,7 +1,7 @@
 <template>
   <div class="new-instruction-container">
     <div class="header">
-      <h1>已送審</h1>
+      <h1>文件檢索</h1>
       <div class="right">
         <input
           v-model="keyword"
@@ -37,7 +37,8 @@
               </button>
             </td>
             <td>{{ item.documentId }}</td>
-            <td>{{ item.documentName }}</td>
+            <td class="doc-name"><button class="doc-link" @click="openWordPreview(item)">{{ item.documentName }}</button></td>
+            <!-- <td>{{ item.documentName }}</td> -->
             <td>{{ item.documentVersion }}</td>
             <td>{{ item.author }}</td>
             <td>{{ item.issueDate }}</td>
@@ -131,6 +132,28 @@ export default {
         this.loading = false
       }
     },
+    openWordPreview(item) {
+      if (!item || !item.documentToken) return
+
+      const token = encodeURIComponent(item.documentToken)
+
+      // base 要帶上 BASE_URL（例如 /rms/ 之類），不要加 #
+      const base = window.location.origin + (import.meta.env.BASE_URL || '/')
+      // 這裡直接接 docs/preview/...
+      const url = `${base}docs/preview/${token}`
+
+      const features = [
+        'noopener',
+        'noreferrer',
+        'width=1200',
+        'height=800',
+        'resizable=yes',
+        'scrollbars=yes'
+      ].join(',')
+
+      // 用固定名字，之後再點別的文件會重用同一個預覽視窗
+      window.open(url, 'docxPreviewWindow', features)
+    },
     changePage(p) {
       if (p < 1 || p > this.totalPages) return
       this.page = p
@@ -180,4 +203,17 @@ export default {
 
 .pager { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .page-info { min-width: 60px; text-align:center; }
+
+.doc-name .doc-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: #1f6feb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.doc-name .doc-link:hover { color: #0b4bb3; }
+
 </style>
