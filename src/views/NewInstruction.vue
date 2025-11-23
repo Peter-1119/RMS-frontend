@@ -37,7 +37,7 @@
               <div class="form-group"><label for="doc-version">文件版本：</label><input type="text" id="doc-version" v-model="form.documentVersion" readonly/></div>
               <div class="form-group">
                 <label for="apply-project">適用工程：</label>
-                <select v-model="form.attribute.applyProject">
+                <select v-model="form.attribute.applyProject" :disabled="!!form.previousDocumentToken">
                   <option value="">-- 請選擇適用工程 --</option>
                   <option v-for="p in projectList" :key="p.id" :value="p.projectName">{{ p.projectName }}</option>
                 </select>
@@ -388,12 +388,6 @@ const scrollToStep = (index) => {
 }
 
 const goToStep = scrollToStep
-const nextStep = () => {
-  if (currentStep.value < steps.length) scrollToStep(currentStep.value + 1)
-}
-const prevStep = () => {
-  if (currentStep.value > 1) scrollToStep(currentStep.value - 1)
-}
 
 // ---------- step 驗證狀態（只先做 Step1, Step2） ----------
 const isStep1Valid = computed(() => {
@@ -402,7 +396,6 @@ const isStep1Valid = computed(() => {
 
   // Left block 必填欄位
   const leftFields = [
-    form.documentID,
     form.documentName,
     form.documentVersion,
     form.attribute.applyProject,
@@ -434,6 +427,141 @@ const isStep2Valid = computed(() => {
   return String(form.documentPurpose ?? '').trim().length > 0
 })
 
+const isStep3Valid = computed(() => {
+  const pf = processFlowData.value || {}
+
+  // 1) 圖片模式：有檔案就算有填寫
+  if (pf.mode === 'image') {
+    return !!(pf.file && (pf.file.url || pf.file.path || pf.asset_id))
+  }
+
+  // 2) 表格模式
+  if (pf.mode === 'table') {
+    const items = pf.items
+
+    // 2-1 舊格式：items 是 steps array（純字串陣列）
+    if (Array.isArray(items)) {
+      return items.some(s => String(s || '').trim() !== '')
+    }
+
+    // 2-2 新格式：TipTap doc JSON
+    if (items && typeof items === 'object' && items.type === 'doc') {
+      try {
+        hasNonEmptyFlowCell(items)
+      } catch (e) {
+        if (e && e.message === '__HAS_CONTENT__') {
+          return true
+        }
+      }
+      return false
+    }
+
+    return false
+  }
+
+  // 其他未知模式 → 視為沒填
+  return false
+})
+
+const isStep4Valid = computed(() => {
+  const pmsStatus = isPmsTableValid()      // true / false / null
+  const hasDynamic = (managementBlocks.value || []).length > 0
+
+  // 是否「這一步有東西要填」
+  const hasAnyContent = (pmsStatus !== null) || hasDynamic
+  if (!hasAnyContent) {
+    // ✅ 規則 1：沒有 PMS & 沒有 DynamicBlock → Step4 不需要填寫
+    return null          // 用 null 代表「不適用」
+  }
+
+  let ok = true
+  if (pmsStatus !== null) {
+    ok = ok && pmsStatus
+  }
+  if (hasDynamic) {
+    ok = ok && areDynamicBlocksValid(managementBlocks.value)
+  }
+  return ok
+})
+
+/**
+ * Step 5 是否「填寫完」
+ * 回傳：
+ *  - true  → 填寫完畢
+ *  - false → 有該填沒填 / 有錯誤 / 有重複
+ *  - null  → N/A（沒有 PMS & 沒有條件 table，不上色）
+ */
+const isStep5Valid = computed(() => {
+  const hasCond = hasCondForMcr.value
+  const hasPms  = hasPmsForMcr.value
+  const blocksArr = mcrBlocks.value || []
+
+  // 規則 1：完全沒有 PMS + 沒有條件 → 此 step 不用上色
+  if (!hasCond && !hasPms) {
+    return null
+  }
+
+  // 有東西要填，但一個 block 都沒有 → 視為沒填
+  if (!blocksArr.length) return false
+
+  let ok = true
+
+  // ---- 条件 table 檢查 ----
+  if (hasCond) {
+    for (const b of blocksArr) {
+      const v = isConditionTableValidForBlock(b)
+      if (v === false) {
+        ok = false
+        break
+      }
+    }
+    if (ok && hasConditionDuplicates(blocksArr)) {
+      ok = false
+    }
+  }
+
+  // ---- PMS table 檢查 ----
+  if (ok && hasPms) {
+    for (const b of blocksArr) {
+      const v = isParamTableValidForBlock(b)
+      if (v === false) {
+        ok = false
+        break
+      }
+    }
+    if (ok && hasParamTableDuplicates(blocksArr)) {
+      ok = false
+    }
+  }
+
+  return ok
+})
+
+// Step 6：異常處置（DynamicEditorBlock）
+// - 沒有任一層 exceptionBlocks → 視為 N/A（不上色）
+// - 有層級 → 套用 DynamicEditor 的 title / content 規則
+const isStep6Valid = computed(() => {
+  const blocksArr = exceptionBlocks.value || []
+  if (!blocksArr.length) return null   // 不要求一定要寫異常處置
+
+  return areDynamicBlocksValid(blocksArr)
+})
+
+// Step 7：相關文件
+// - 沒選任何文件 → 不上色
+// - 至少有一筆 → OK
+const isStep7Valid = computed(() => {
+  return (relativeDocuments.value || []).length > 0 ? true : null
+})
+
+// Step 8：使用表單
+// - 沒選表單 → 不上色
+// - 至少一筆 → OK
+const isStep8Valid = computed(() => {
+  return (usedForms.value || []).length > 0 ? true : null
+})
+
+
 const stepStatusClass = (index) => {
   const stepNo = index + 1
 
@@ -448,12 +576,68 @@ const stepStatusClass = (index) => {
     steps[index].status = isStep2Valid.value ? true : false
     return isStep2Valid.value ? 'step-ok' : 'step-error'
   }
+  if (stepNo === 3) {
+    steps[index].status = isStep3Valid.value ? true : false
+    return isStep3Valid.value ? 'step-ok' : 'step-error'
+  }
+  if (stepNo === 4) {
+    const v = isStep4Valid.value
+    // v === null → 不適用，不改變背景
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+  // 🔹 新增：Step 5
+  if (stepNo === 5) {
+    const v = isStep5Valid.value
+    // v === null → 沒有 PMS & 沒有條件 table，不上色
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+  // 🔹 Step 6：異常處置（DynamicEditorBlock）
+  if (stepNo === 6) {
+    const v = isStep6Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // 🔹 Step 7：相關文件
+  if (stepNo === 7) {
+    const v = isStep7Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = true
+    return 'step-ok'
+  }
+
+  // 🔹 Step 8：使用表單
+  if (stepNo === 8) {
+    const v = isStep8Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = true
+    return 'step-ok'
+  }
 
   // 其他步驟先不做驗證
   steps[index].status = true
   return 'step-ok'
 }
-
 
 // ---------- basic form ----------
 let itemID = 0
@@ -474,6 +658,7 @@ const form = reactive({
   revisePoint: '',
   documentStyle: 'FM-R-MF-AZ-052 Rev9.0',
   documentPurpose: '',
+  previousDocumentToken: '', // 🔸 新增
 })
 
 // ---------- popups ----------
@@ -557,12 +742,59 @@ const firstMachineCode = computed(() => {
   if (!Array.isArray(machines) || !machines.length) return ''
   const m0 = machines[0]
 
-//   console.log("first machine code: ", m0.machineCode || m0.MACHINE_CODE || m0.code || '')
-
   // 根據你實際的欄位調整，這裡做比較保險的寫法
   return m0.machineCode || m0.MACHINE_CODE || m0.code || ''
 })
 
+// ---------- helper: 從 TipTap node 抽文字 ----------
+function extractTextFromNode(node) {
+  if (!node) return ''
+  if (node.type === 'text' && node.text) return node.text
+  const children = node.content || []
+  let out = ''
+  for (const child of children) {
+    out += extractTextFromNode(child)
+  }
+  return out
+}
+
+/**
+ * 檢查流程 table 的「流程列」是否有非空內容
+ * - 只看 table 裡的 row：
+ *   rowIndex 偶數   → header 列（有「步驟，1，2，3」）
+ *   rowIndex 奇數   → 流程列（有「熱水洗1、剝膜1…」）
+ * - 流程列內的第 0 欄是標題「流程」，從第 1 欄起才是流程內容
+ */
+function hasNonEmptyFlowCell(docJson) {
+  if (!docJson || docJson.type !== 'doc') return false
+  const content = Array.isArray(docJson.content) ? docJson.content : []
+  const tableNode = content.find(n => n.type === 'table')
+  if (!tableNode) return false
+
+  const rows = Array.isArray(tableNode.content) ? tableNode.content : []
+  let rowIdx = 0
+
+  for (const row of rows) {
+    const cells = Array.isArray(row.content) ? row.content : []
+
+    // 奇數列：流程列
+    const isProcessRow = rowIdx % 2 === 1
+    if (isProcessRow) {
+      cells.forEach((cell, ci) => {
+        // ci === 0 是左邊的「流程」那格，不算內容
+        if (ci === 0) return
+        const text = extractTextFromNode(cell)
+        if (String(text || '').trim() !== '') {
+          // 有任一流程格有文字，就算「有填寫」
+          throw new Error('__HAS_CONTENT__')
+        }
+      })
+    }
+    rowIdx++
+  }
+
+  return false
+}
 
 // process-flow <-> blocks (step_type = 0)
 function serializeProcessFlowToBlocks(pf) {
@@ -664,7 +896,7 @@ const loadPmsTemplate = async (machineCode) => {
       params: { machine_id: machineCode },
     })
 
-    console.log()
+    console.log("hasPmsForStep3: ", hasPmsForStep3.value)
     
     hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false
     
@@ -774,6 +1006,130 @@ const loadManagementFromBlocks = (payload) => {
   })
 }
 
+// ---------- Step4 驗證用 helper ----------
+
+// 遞迴把 TipTap JSON 裡的文字抽出來
+function extractPlainTextFromNode(node) {
+  if (!node) return ''
+  if (node.type === 'text' && node.text) return node.text
+  const children = node.content || []
+  let out = ''
+  for (const child of children) {
+    out += extractPlainTextFromNode(child)
+  }
+  return out
+}
+
+// 支援 string / doc JSON
+function extractPlainTextFromDocJson(doc) {
+  if (!doc) return ''
+  if (typeof doc === 'string') return doc.trim()
+  return extractPlainTextFromNode(doc).trim()
+}
+
+/** Step4-1: PMS 表格是否有效
+ *  - 沒有 PMS（hasPmsForStep3 = false 或 arrayData 太少）→ 回傳 null（代表「不適用」）
+ *  - 有 PMS：每列第 3~7 欄都要「非空 & 數字」才算 valid
+ */
+function isPmsTableValid() {
+  if (!hasPmsForStep3.value) return null
+
+  const arr = managementSpecific.value?.data?.arrayData
+  if (!Array.isArray(arr) || arr.length <= 1) {
+    // 只有表頭或完全沒資料 → 視為沒有 PMS
+    return null
+  }
+
+  // 從第 2 列開始檢查（index 1 起）
+  for (let r = 1; r < arr.length; r++) {
+    const row = arr[r] || []
+    // 第 3~7 欄（index 3 ~ 7）
+    for (let c = 3; c <= 7; c++) {
+      const raw = (row[c] ?? '').toString().trim()
+      if (!raw) return false        // empty
+      const num = Number(raw)
+      if (!Number.isFinite(num)) return false  // invalid number
+    }
+  }
+  return true
+}
+
+/** Step4-2: 單一 DynamicEditorBlock 的某一 item 是否有效 */
+function isDynamicBlockItemValid(item) {
+  const titleText = extractPlainTextFromDocJson(item.jsonHeader)
+  const hasTitle = titleText.length > 0
+
+  // 👉 只要這個項目存在，title 一律必填
+  if (!hasTitle) {
+    return false
+  }
+
+  const contentText = extractPlainTextFromDocJson(item.jsonContent)
+  const hasFiles = Array.isArray(item.files) && item.files.length > 0
+
+  // option 0: 純標題 OK（小標）
+  if (item.option === 0) {
+    return true
+  }
+
+  // option 1: 文字框 or 圖 → 要有文字或有檔案其一
+  if (item.option === 1) {
+    return !!(contentText.length || hasFiles)
+  }
+
+  // option 2: 表格 → 每一列不能全為空
+  if (item.option === 2) {
+    const doc = item.jsonContent
+    if (!doc || typeof doc !== 'object') return false
+
+    const tables = Array.isArray(doc.content)
+      ? doc.content.filter(n => n.type === 'table')
+      : []
+    if (!tables.length) return false
+
+    const tableNode = tables[0]
+    const rows = Array.isArray(tableNode.content) ? tableNode.content : []
+
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r]
+      const cells = Array.isArray(row.content) ? row.content : []
+      const isHeaderRow = (r === 0)
+      if (isHeaderRow) continue
+
+      let rowHasText = false
+      for (const cell of cells) {
+        const cellText = extractPlainTextFromNode(cell).trim()
+        if (cellText) {
+          rowHasText = true
+          break
+        }
+      }
+      if (!rowHasText) {
+        // 有一列完全空 → 視為未填完
+        return false
+      }
+    }
+    return true
+  }
+
+  return true
+}
+
+
+/** Step4-3: 所有 DynamicEditorBlock 是否都有效 */
+function areDynamicBlocksValid(blocksArr) {
+  const blocks = blocksArr || []
+  for (const blk of blocks) {
+    const items = blk.data || []
+    for (const item of items) {
+      if (!isDynamicBlockItemValid(item)) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
 // ---------- 製造條件參數一覽表 (step 5) ----------
 const mcrBlocks = ref([])
 const paramTemplate = ref(null)   // tiptap JSON for parameter table
@@ -864,6 +1220,154 @@ const specOptionsForMcr = computed(() => {
   // 給子元件用：[{code, name}]
   return Array.from(map, ([code, name]) => ({ code, name }))
 })
+
+// ---------- Step5 驗證用 helper ----------
+
+// 保險轉成 2D array
+function normalize2DArray(arr) {
+  if (!Array.isArray(arr)) return []
+  return arr.map(row => (Array.isArray(row) ? row : []))
+}
+
+/**
+ * 單一 block 的條件 table 是否填寫完畢
+ * 規則：
+ *  - 只在 hasCondForMcr = true 時才檢查
+ *  - 除第一列(row=0)與第一行(col=0)外，其餘都要有選項（非空字串）
+ */
+function isConditionTableValidForBlock(block) {
+  if (!hasCondForMcr.value) return null
+
+  const rows = normalize2DArray(block?.data?.arrayConditionData)
+  if (!rows.length) return false
+
+  const rowCount = rows.length
+  const colCount = rows[0].length || 0
+
+  // 至少要有 header + 1 列資料，且至少 2 欄
+  if (rowCount <= 1 || colCount <= 1) return false
+
+  for (let r = 1; r < rowCount; r++) {
+    const row = rows[r] || []
+    for (let c = 1; c < colCount; c++) {
+      const v = (row[c] ?? '').toString().trim()
+      if (!v) {
+        // 有一格沒選 → 視為未填完
+        return false
+      }
+    }
+  }
+  return true
+}
+
+/**
+ * Condition table 是否有重複列（跨所有 block）
+ *  - 忽略 header row
+ *  - key = 這一列「除第一欄外」的值
+ */
+function hasConditionDuplicates(blocksArr) {
+  const seen = new Map()   // key -> [{blockIdx,rowIndex}, ...]
+
+  blocksArr.forEach((b, blockIdx) => {
+    const rows = normalize2DArray(b?.data?.arrayConditionData)
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] || []
+      const slice = row.slice(1)  // 去掉第 0 欄
+      const hasAny = slice.some(v => (v ?? '').toString().trim() !== '')
+      if (!hasAny) continue   // 全空列就不拿來比對
+
+      const key = JSON.stringify(slice)
+      const list = seen.get(key) || []
+      list.push({ blockIdx, rowIndex: r })
+      seen.set(key, list)
+    }
+  })
+
+  for (const list of seen.values()) {
+    if (list.length > 1) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * 單一 block 的 PMS table 是否填寫完畢
+ * 規則：
+ *  - 只在 hasPmsForMcr = true 時才檢查
+ *  - 每一列（從 row=1 起）第 2~6 欄必須：
+ *      - 非空
+ *      - 可轉成數字
+ *  - 同列內數值須維持「非遞減」（a > b 就視為錯）
+ */
+function isParamTableValidForBlock(block) {
+  if (!hasPmsForMcr.value) return null
+
+  const rows = normalize2DArray(block?.data?.arrayParameterData)
+  if (!rows.length) return false
+
+  const rowCount = rows.length
+  const colCount = rows[0].length || 0
+
+  // 至少 header + 1 列，且要有到第 6 欄 (index 6)
+  if (rowCount <= 1 || colCount <= 6) return false
+
+  for (let r = 1; r < rowCount; r++) {
+    const row = rows[r] || []
+    const values = []
+
+    // 參考 runParamValueValidation：檢查第 2~6 欄
+    for (let c = 2; c <= 6; c++) {
+      const raw = (row[c] ?? '').toString().trim()
+      if (!raw) return false
+      const num = Number(raw)
+      if (!Number.isFinite(num)) return false
+      values.push(num)
+    }
+
+    // 檢查單調性：前者 > 後者 就當 error
+    for (let i = 1; i < values.length; i++) {
+      if (values[i - 1] > values[i]) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+/**
+ * PMS table 是否有重複（跨 block）
+ *  - 參照 getParamMatrix / runParamDuplicateValidation：
+ *    sig = 每個 block 的 matrix(JSON.stringify)，其中
+ *      row: r>=1
+ *      col: 2~6
+ */
+function hasParamTableDuplicates(blocksArr) {
+  const sigs = []
+
+  blocksArr.forEach((b, idx) => {
+    const rows = normalize2DArray(b?.data?.arrayParameterData)
+    const mat = []
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] || []
+      const slice = row.slice(2, 7) // index 2~6
+      mat.push(slice.map(v => (v ?? '').toString().trim()))
+    }
+
+    sigs.push({ idx, key: JSON.stringify(mat) })
+  })
+
+  for (let i = 0; i < sigs.length; i++) {
+    for (let j = i + 1; j < sigs.length; j++) {
+      if (sigs[i].key && sigs[i].key === sigs[j].key) {
+        return true
+      }
+    }
+  }
+  return false
+}
 
 // NEW — send both parameter & condition for each tier
 const serializeMCRToParams = () => {
@@ -1005,11 +1509,41 @@ watch(currentStep, (val) => {
   }
 })
 
+watch(
+  () => form.attribute.applyProject,
+  async (newVal, oldVal) => {
+    if (!oldVal || newVal === oldVal) return
+    if (!form.documentID) return  // 沒文管編號就不用清
+
+    const ok = window.confirm('已存在文管編號，變更適用工程會清除現有文管編號，是否繼續？')
+    if (!ok) {
+      // 還原選擇
+      form.attribute.applyProject = oldVal
+      return
+    }
+
+    // 1) 清前端欄位
+    form.documentID = ''
+
+    // 2) 通知後端清空 document_id
+    const t = await ensureDraftToken()
+    if (t) {
+      try {
+        await clearDocId(t)
+      } catch (e) {
+        console.error('clearDocId failed', e)
+      }
+    }
+  }
+)
+
+
 async function fetchPreviewDocx() {
   previewLoading.value = true
   errorMsg.value = ''
   try {
     const payload = {
+      token: draftToken.value,
       attribute: [{ ...form }],
       content: [
         ...serializeProcessFlowToBlocks(processFlowData.value),
@@ -1085,6 +1619,7 @@ async function generateAndDownloadDocx() {
   errorMsg.value = ''
   try {
     const payload = {
+      token: draftToken.value,
       attribute: [{...form}],
       content: [...serializeProcessFlowToBlocks(processFlowData.value), ...serializeManagementToBlocks(), ...serializeMCRToParams(), ...serializeExceptionsToBlocks()],
       reference: [
@@ -1095,34 +1630,24 @@ async function generateAndDownloadDocx() {
     const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
 
     console.log("payload: ", payload)
-    const res = await axios.post(url, payload, {
-      responseType: 'blob',
-    })
+    const res = await axios.post(url, payload, { responseType: 'blob' })
 
-    const contentType =
-      res.headers['content-type'] ||
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    const dispo = res.headers['content-disposition']
-    const filename = extractFilenameFromDisposition(dispo, 'document.docx')
-
-    const blob = new Blob([res.data], { type: contentType })
-
-    // IE/old Edge
-    // @ts-ignore
-    if (window.navigator && window.navigator.msSaveOrOpenBlob) {
-      // @ts-ignore
-      window.navigator.msSaveOrOpenBlob(blob, filename)
-      return
+    // 🔸 從 header 拿回 docID，塞回 form，讓文管編號顯示出來
+    const docIdFromHeader = res.headers['x-document-id']
+    if (docIdFromHeader) {
+      form.documentID = docIdFromHeader
     }
 
-    const blobUrl = URL.createObjectURL(blob)
+    // 以下是原本下載 blob 的程式碼
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    })
+    const urlBlob = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    document.body.appendChild(a)
+    a.href = urlBlob
+    a.download = `${form.documentName || form.documentID || 'document'}.docx`
     a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+    URL.revokeObjectURL(urlBlob)
   } catch (e) {
     console.error(e)
     if (e?.response?.data instanceof Blob) {
@@ -1200,7 +1725,7 @@ onMounted(async () => {
     form.author_id = sessionStorage.getItem('loggedInUserNo')
     form.author = sessionStorage.getItem('loggedInUserName')
     // 顯示在 input 內的機台名稱
-    if (form.attribute.machines){
+    if (form.attribute.machines && form.attribute.machines.length > 0){
         inputMachines.value = form.attribute.machines.map(machine => machine.name).join(", ")
         hasCondForMcr.value = true
         hasPmsForMcr.value = true
@@ -1321,9 +1846,9 @@ onMounted(async () => {
   color: #fff;
 }
 
-.step-item.completed {
+/* .step-item.completed {
   background: #e5f1ff;
-}
+} */
 
 .step-circle {
   width: 24px;

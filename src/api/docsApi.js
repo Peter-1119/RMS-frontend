@@ -54,3 +54,9 @@ export async function loadReferences(token) {
   const { data } = await http.get(`/${encodeURIComponent(token)}/references`);
   return data; // {success, documents, forms}
 }
+
+// docsApi.js
+export async function clearDocId(token) {
+  const { data } = await http.post(`/clear-doc-id`, { token })
+  return data  // {success: true}
+}

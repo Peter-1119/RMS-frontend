@@ -62,10 +62,10 @@
 </template>
 
 <script>
-import { getPassed } from '@/services/docs'
+import { getPassed, createRevision } from '@/services/docs'
 
 export default {
-  name: 'SubmittedDocuments',
+  name: 'SpecificationChangePage',
   data() {
     return {
       searchData: [],
@@ -138,10 +138,32 @@ export default {
       this.load()
     },
     // open detail/draft editor route based on type
-    performSearch(item) {
+    async performSearch(item) {
       if (!item) return
-      const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
-      this.$router.push({ name: routeName, query: { token: item.documentToken } })
+
+      try {
+        this.loading = true
+        // 1) 建立新一版
+        const res = await createRevision(item.documentToken)
+        if (!res?.success || !res.token) {
+          alert(res?.message || '建立變版草稿失敗')
+          return
+        }
+
+        const newToken = res.token
+        const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
+
+        // 2) 導到新的草稿 token
+        this.$router.push({
+          name: routeName,
+          query: { token: newToken },
+        })
+      } catch (e) {
+        console.error(e)
+        alert('建立變版草稿失敗')
+      } finally {
+        this.loading = false
+      }
     },
     // debounce keyword input
     onKeywordInput() {

@@ -311,24 +311,24 @@ export default {
 
       return out
     },
-
-
     // merge filtered list with the baseline (active) group from *original* (after keyword)
     _unionWithActiveGroup(filteredPayload) {
-      if (!this.activeGroupCode) return filteredPayload
+      // 新需求：如果某個群組完全被 baseline 過濾掉，就直接從列表消失，
+      // 不再硬把舊的 active 群組塞回來。
+      // 只是在有 need 的情況下，可以順手把名稱補齊（通常也不需要特別處理）。
       const out = JSON.parse(JSON.stringify(filteredPayload || {}))
-      const origKW = this._keywordFilterPayload(this.originalGroupsPayload, this.keyword)
-      const activeOrig = origKW[this.activeGroupCode]
-      if (activeOrig) {
-        // ensure group present, but only machines that pass keyword remain here
-        out[this.activeGroupCode] = out[this.activeGroupCode] || { name: activeOrig.name, machines: {} }
-        // DO NOT merge machines here; right table handles mismatches visually.
-        // We only ensure the group remains in left column.
-        out[this.activeGroupCode].name = activeOrig.name
+
+      // 如果 activeGroupCode 仍然存在於過濾後的結果，保留原本名稱（from original）
+      if (this.activeGroupCode && out[this.activeGroupCode]) {
+        const origKW = this._keywordFilterPayload(this.originalGroupsPayload, this.keyword)
+        const activeOrig = origKW[this.activeGroupCode]
+        if (activeOrig) {
+          out[this.activeGroupCode].name = activeOrig.name
+        }
       }
+
       return out
     },
-
     /** keyword-filtered ORIGINAL payload */
     _kwOrig() {
       return this._keywordFilterPayload(this.originalGroupsPayload, this.keyword)
@@ -508,7 +508,7 @@ export default {
         // choose a deterministic baseline from this group
         const first = [...allowed][0]
         const name = this.groupMachines[gcode]?.find(x => x.code === first)?.name || first
-        await this.filterByBaseline(first, name)
+        await this.filterByBaseline(first, name, gcode)
       }
       if (this.selectedCodes.length === 0) {
         await this.restoreOriginal()
@@ -530,30 +530,44 @@ export default {
       }
     },
 
-    async filterByBaseline(code, name) {
+    async filterByBaseline(code, name, preferredGroupCode = null) {
       try {
         this.isFiltering = true
         this.baselineCode = code
         const API = import.meta.env.VITE_APP_API_BASE_URL
-        const payload = { machine_code: code, machine_name: name, keyword: this.keyword || null, project: this.project || null }
+        const payload = {
+          machine_code: code,
+          machine_name: name,
+          keyword: this.keyword || null,
+          project: this.project || null,
+        }
         const { data } = await axios.post(`${API}/mes/filter-by-baseline`, payload)
         const serverFiltered = data?.data?.groups || {}
 
-        // Keep active group visible
+        // 保留 active group 在左邊列表（即使這個 group 變成沒有符合 baseline 的機台）
         const merged = this._unionWithActiveGroup(serverFiltered)
 
-        // Build left list from merged; remember raw serverFiltered for mismatch calc
+        // 左邊列表 + groupMachines
         this.applyGroupsPayload(merged, { filtered: true, preserveActive: true })
         this.isFiltered = true
 
-        // >>> NEW: prune selection so mismatches are not "checked"
+        // 只保留仍然在 serverFiltered 中出現的機台（PMS/條件相同）
         const enabledSet = new Set(
           Object.values(serverFiltered).flatMap(g => Object.keys(g.machines || {}))
         )
         this.selectedCodes = this.selectedCodes.filter(c => enabledSet.has(c))
 
-        if (!this.groups.find(g => g.code === this.activeGroupCode) && this.groups.length) {
-          this.activeGroupCode = this.groups[0].code
+        // ⚠️ 這裡是重點：如果原本的 activeGroup 已經不在 groups 裡，就考慮跳到 preferredGroup
+        const activeStillExists = this.groups.some(g => g.code === this.activeGroupCode)
+        if (!activeStillExists && this.groups.length) {
+          // 優先跳到這次觸發 baseline 的那個群組（若存在）
+          if (preferredGroupCode && this.groups.some(g => g.code === preferredGroupCode)) {
+            this.activeGroupCode = preferredGroupCode
+          } else {
+            // 否則退回第一個 group
+            this.activeGroupCode = this.groups[0].code
+          }
+          this.currentMachinePage = 1
         }
       } catch (e) {
         console.error('Error /filter-by-baseline:', e)
@@ -561,19 +575,23 @@ export default {
         this.isFiltering = false
       }
     },
-    confirmSelection() {
-      const enabledSet = new Set((this.groupMachines[this.activeGroupCode] || []).map(x => x.code))
 
-      const payload = this.selectedCodes
-        .filter(code => enabledSet.has(code))
-        .map(code => {
-          const m = this.codeToMachine[code] || {}
-          return { code, name: m.name || '', building: m.building || '', specCode: m.spec_code || m.specCode || '', specName: m.spec_name || m.specName || '',}
-        })
+    confirmSelection() {
+      const payload = this.selectedCodes.map(code => {
+        const m = this.codeToMachine[code] || {}
+        return {
+          code,
+          name: m.name || '',
+          building: m.building || '',
+          specCode: m.spec_code || m.specCode || '',
+          specName: m.spec_name || m.specName || '',
+        }
+      })
 
       this.$emit('select-machine', payload)
       this.$emit('cancel')
     },
+
     closeWindow() { this.$emit('cancel') },
   },
 }

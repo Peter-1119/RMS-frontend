@@ -69,6 +69,14 @@ export async function getPassed({
   }
 }
 
+export async function createRevision(previousToken) {
+  const { data } = await axios.post(`${API}/docs/revise`, {
+    previous_token: previousToken,
+  })
+  return data
+}
+
+
 /**
  * Search across ALL authors' documents.
  * @param {Object} opts

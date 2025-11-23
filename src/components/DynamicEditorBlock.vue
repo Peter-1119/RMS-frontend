@@ -221,7 +221,7 @@ onMounted(() => {
   localBlockContents.data.forEach(bd => {
     bd.client_temp_id = `temp-${uuidv1()}`
   })
-  console.log("localBlockContents: ", localBlockContents)
+//   console.log("localBlockContents: ", localBlockContents)
   // lazy init only for active options
   nextTick(() => {
     localBlockContents.data.forEach((blk, i) => { initTitleEditor(i) })

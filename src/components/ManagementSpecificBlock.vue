@@ -162,14 +162,14 @@ export default {
 
             let content
             if (jsonContent) {
-                // 優先使用草稿 / DB 儲存的內容
-                content = jsonContent
+              // 優先使用草稿 / DB 儲存的內容
+              content = jsonContent
             } else if (arrayData.length) {
-                // 其次使用 PMS 回來的 arrayData
-                content = this.getInitialTableContent(arrayData)
+              // 其次使用 PMS 回來的 arrayData
+              content = this.getInitialTableContent(arrayData)
             } else {
-                // 兩邊都沒有 → fallback 初始模板
-                content = this.getInitialTableContent(initialTableData)
+              // 兩邊都沒有 → fallback 初始模板
+              content = this.getInitialTableContent(initialTableData)
             }
 
             this.localBlockData = { ...blk }

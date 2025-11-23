@@ -1,6 +1,7 @@
+// SpecificationParameterWindow.vue
 <template>
   <div class="specification-window-wrapper" @click.self="closeWindow">
-    <div class="specification-dialog" @click="selectVisible=false">
+    <div class="specification-dialog">
       <div class="header">
         <slot name="header"></slot>
       </div>
@@ -15,49 +16,51 @@
           <div class="form-section">
             <h4>條件細項清單:</h4>
             <div class="scrollable-list">
-              <div v-for="(param, index) in localCondition.parameters" :key="index" class="list-item">
+              <div
+                v-for="(param, index) in localCondition.parameters"
+                :key="index"
+                class="list-item"
+              >
                 <input type="text" v-model="localCondition.parameters[index]" />
-                <button class="remove-btn" @click="removeParameter(index)">×</button>
+                <button class="remove-btn" @click="removeParameter(index)">x</button>
               </div>
             </div>
             <div class="add-new-param">
-              <input type="text" v-model="newParameter" placeholder="請輸入新細項" @keyup.enter="addParameter" />
+              <input
+                type="text"
+                v-model="newParameter"
+                placeholder="請輸入新細項"
+                @keyup.enter="addParameter"
+              />
               <button class="btn add-item" @click="addParameter">新增細項</button>
             </div>
           </div>
         </div>
 
         <div class="content-right">
-          <!-- Specification search & picker -->
+          <!-- ★ 改成「搜尋機台群組」 -->
           <div class="form-section specification-section">
-            <label for="processSelect">選擇適用工程:</label>
+            <label for="groupKeyword">搜尋機台群組:</label>
 
             <div class="specific-input-block">
               <input
+                id="groupKeyword"
                 type="text"
-                v-model="specSearchKeyword"
-                placeholder="請輸入關鍵字"
-                @keyup.enter="fetchSpecifications(specSearchKeyword)"
+                v-model.trim="groupKeyword"
+                placeholder="請輸入至少兩個字的關鍵字"
+                @keyup.enter="searchMachineGroups"
               />
-              <button class="btn search" @click="fetchSpecifications(specSearchKeyword)">搜尋</button>
+              <button
+                class="btn search"
+                @click="searchMachineGroups"
+                :disabled="isSearchingGroups"
+              >
+                {{ isSearchingGroups ? '搜尋中…' : '搜尋' }}
+              </button>
             </div>
-
-            <div v-if="selectVisible" class="select-block">
-              <ul v-if="specificationOptions.length">
-                <li
-                  v-for="opt in specificationOptions"
-                  :key="opt.code"
-                  @click="specificationSelect(opt.code)"
-                >
-                  {{ opt.name }}（{{ opt.code }}）
-                </li>
-              </ul>
-              <div v-else class="empty">查無工程</div>
-            </div>
-
-            <div v-if="selectedSpecCode" class="mt-2 text-muted">
-              已選工程：{{ selectedSpecName || '—' }}（{{ selectedSpecCode }}）
-            </div>
+            <small class="text-muted">
+              提示：依關鍵字搜尋機台群組，結果會直接顯示在下方「未選機台」清單。
+            </small>
           </div>
 
           <!-- Available machines (NEW model: gCode -> { name, machines: { mCode -> { name } } }) -->
@@ -71,7 +74,7 @@
                     :checked="isGroupChecked(gCode)"
                     @change="checkGroupMachines(gCode, $event.target.checked)"
                   />
-                  <span>{{ gi.name }}（{{ gCode }}）</span>
+                  <span>{{ gi.name }}</span>
                 </summary>
 
                 <div
@@ -84,11 +87,13 @@
                     :checked="isMachineChecked(gCode, mCode)"
                     @change="checkMachine(gCode, mCode, $event.target.checked)"
                   />
-                  <span>{{ mi.name }}（{{ mCode }}）</span>
+                  <span>{{ mi.name }}</span>
                 </div>
               </details>
             </div>
-            <button class="btn move-btn" @click="addSelectedMachines">新增至已選 >></button>
+            <button class="btn move-btn" @click="addSelectedMachines">
+              新增至已選 >>
+            </button>
           </div>
 
           <!-- Selected machines (same new model) -->
@@ -96,8 +101,12 @@
             <h4>已選機台</h4>
             <div class="scrollable-list">
               <template v-for="(gi, gCode) in selectedGroups" :key="gCode">
-                <div v-for="(mi, mCode) in gi.machines" :key="mCode" class="machine-item">
-                  <span>{{ mi.name }}（{{ mCode }}）</span>
+                <div
+                  v-for="(mi, mCode) in gi.machines"
+                  :key="mCode"
+                  class="machine-item"
+                >
+                  <span>{{ mi.name }}</span>
                   <button class="remove-btn" @click="removeMachine(gCode, mCode)">x</button>
                 </div>
               </template>
@@ -118,7 +127,7 @@
 import axios from 'axios';
 
 export default {
-  name: "SpecificationParamWindow",
+  name: 'SpecificationParamWindow',
   emits: ['update-condition-data', 'cancel'],
   props: {
     condition: { type: Object, default: () => ({}) },
@@ -128,26 +137,23 @@ export default {
       // condition
       localCondition: {},
 
-      // spec search/pick
-      selectVisible: false,
-      specificationOptions: [],  // [{ code, name }]
-      specSearchKeyword: "",
-      selectedSpecCode: "",
-      selectedSpecName: "",
+      // ★ 新：群組搜尋
+      groupKeyword: '',
+      isSearchingGroups: false,
 
       // machine lists (normalized NEW model everywhere internally)
       // shape: { [groupCode]: { name: <groupName>, machines: { [machineCode]: { name: <machineName> } } } }
       allGroups: {},
       availableGroups: {},
       selectedGroups: {},
-      machinesChecked: {},  // same shape as availableGroups but contains only checked items
+      machinesChecked: {}, // same shape as availableGroups but contains only checked items
 
       // track original in DB to build add/delete payloads correctly
       selectedGroupsInDB: {},
 
       // deltas to send to backend (NEW model)
-      machinesToAdd: {},     // { gCode: { name, machines: { mCode: { name } } } }
-      machinesToDelete: {},  // same
+      machinesToAdd: {}, // { gCode: { name, machines: { mCode: { name } } } }
+      machinesToDelete: {}, // same
 
       // condition parameters UI
       newParameter: '',
@@ -181,9 +187,14 @@ export default {
       Object.entries(newObj || {}).forEach(([gCode, gInfo]) => {
         const machines = {};
         Object.entries(gInfo?.machines || {}).forEach(([mCode, mInfo]) => {
-          machines[(mCode || '').trim()] = { name: (mInfo?.name || mCode || '').trim() };
+          machines[(mCode || '').trim()] = {
+            name: (mInfo?.name || mCode || '').trim(),
+          };
         });
-        out[(gCode || '').trim()] = { name: (gInfo?.name || gCode || '').trim(), machines };
+        out[(gCode || '').trim()] = {
+          name: (gInfo?.name || gCode || '').trim(),
+          machines,
+        };
       });
       return out;
     },
@@ -202,83 +213,73 @@ export default {
     _subtractMachines(obj, toRemove) {
       Object.entries(toRemove || {}).forEach(([gCode, gInfo]) => {
         if (!obj[gCode]) return;
-        Object.keys(gInfo.machines || {}).forEach(mCode => {
+        Object.keys(gInfo.machines || {}).forEach((mCode) => {
           delete obj[gCode].machines[mCode];
         });
         if (!Object.keys(obj[gCode].machines).length) delete obj[gCode];
       });
     },
 
-    // ------------------ Specs ------------------
-    async fetchSpecifications(keyword) {
-      try {
-        const API = import.meta.env.VITE_APP_API_BASE_URL;
-        const { data } = await axios.get(`${API}/mes/specifics`, {
-          params: { keyword, machine: this.machineKeyword }
-        });
-        const specsObj = data?.data?.specifics || {};
-        this.specificationOptions = Object.entries(specsObj).map(([code, v]) => ({
-          code: (code || '').trim(),
-          name: (v?.name || code || '').trim(),
-        }));
-        this.selectVisible = this.specificationOptions.length > 0;
-      } catch (e) {
-        console.error("Specifics fetch error:", e);
-        this.specificationOptions = [];
-        this.selectVisible = false;
+    // ------------------ 機台群組搜尋（關鍵字） ------------------
+    async searchMachineGroups() {
+      const keyword = (this.groupKeyword || '').trim();
+      if (keyword.length < 2) {
+        alert('請至少輸入兩個字的關鍵字再搜尋。');
+        return;
       }
-    },
 
-    async specificationSelect(specCode) {
-      const item = this.specificationOptions.find(x => x.code === specCode);
-      this.selectedSpecCode = specCode || "";
-      this.selectedSpecName = item?.name || specCode || "";
-      await this.fetchGroupMachines(specCode);
-    },
-
-    // ------------------ Machines (available) ------------------
-    async fetchGroupMachines(specCode) {
-      this.availableGroups = {};
+      this.isSearchingGroups = true;
       this.machinesChecked = {};
+      this.availableGroups = {};
       this.allGroups = {};
 
       try {
         const API = import.meta.env.VITE_APP_API_BASE_URL;
-        // /mes/groups-machines (NEW shape) with { specific: <specCode> }
-        const resp = await axios.get(`${API}/mes/groups-machines`, { params: { specific: specCode } });
+        // 從 backend 取得 { groups: { gCode: { name, machines: { mCode: { name } } } } }
+        // 建議在 /mes/groups-machines 上支援 keyword 參數
+        const resp = await axios.get(`${API}/mes/groups-machines`, {
+          params: { keyword },
+        });
         const groupsPayload = resp?.data?.data?.groups || {};
-        // normalize (already new shape; still trim/guard)
-        this.allGroups = this._normalizeNewGroups(groupsPayload);
-      } catch (e) {
-        console.error("groups-machines fetch error:", e);
-        this.allGroups = {};
-      }
 
-      // Build available = all - selected
-      const available = JSON.parse(JSON.stringify(this.allGroups)); // shallow clone
-      this._subtractMachines(available, this.selectedGroups);      // remove already selected
-      this.availableGroups = available;
+        // normalize 成 NEW model
+        this.allGroups = this._normalizeNewGroups(groupsPayload);
+
+        // available = all - 已選
+        const available = JSON.parse(JSON.stringify(this.allGroups));
+        this._subtractMachines(available, this.selectedGroups);
+        this.availableGroups = available;
+      } catch (e) {
+        console.error('machine groups search error:', e);
+        this.allGroups = {};
+        this.availableGroups = {};
+      } finally {
+        this.isSearchingGroups = false;
+      }
     },
 
     // ------------------ Machines (selected in DB) ------------------
     async fetchConditionMachines(condition_id) {
       try {
         const API = import.meta.env.VITE_APP_API_BASE_URL;
-        const resp = await axios.get(`${API}/conditions/get-condition-machines`, { params: { condition_id }});
+        const resp = await axios.get(
+          `${API}/conditions/get-condition-machines`,
+          { params: { condition_id } }
+        );
         const groupsOld = resp?.data?.data?.groups || {};
         // convert OLD shape -> NEW internal shape
         this.selectedGroups = this._normalizeOldGroups(groupsOld);
-        this.selectedGroupsInDB = JSON.parse(JSON.stringify(this.selectedGroups)); // snapshot
+        this.selectedGroupsInDB = JSON.parse(
+          JSON.stringify(this.selectedGroups)
+        ); // snapshot
       } catch (e) {
-        console.error("get-condition-machines error:", e);
+        console.error('get-condition-machines error:', e);
         this.selectedGroups = {};
         this.selectedGroupsInDB = {};
       }
 
-      // Since availableGroups depends on selectedGroups and chosen spec:
-      if (this.selectedSpecCode) {
-        await this.fetchGroupMachines(this.selectedSpecCode);
-      }
+      // ★ 不再自動查工程 -> 機台
+      // 使用者改成輸入群組關鍵字來查
     },
 
     // ------------------ Condition init ------------------
@@ -291,7 +292,7 @@ export default {
         this.localCondition = {
           id: this.condition.id,
           name: this.condition.name,
-          parameters: (this.condition.parameters || []).map(n => n)
+          parameters: (this.condition.parameters || []).map((n) => n),
         };
         await this.fetchConditionMachines(this.condition.id);
       }
@@ -302,11 +303,15 @@ export default {
       return !!this.machinesChecked[gCode]?.machines?.[mCode];
     },
     checkMachine(gCode, mCode, isChecked) {
-      const mName = this.availableGroups[gCode]?.machines?.[mCode]?.name || '';
+      const mName =
+        this.availableGroups[gCode]?.machines?.[mCode]?.name || '';
       if (!mName) return;
 
       if (!this.machinesChecked[gCode]) {
-        this.machinesChecked[gCode] = { name: this.availableGroups[gCode].name, machines: {} };
+        this.machinesChecked[gCode] = {
+          name: this.availableGroups[gCode].name,
+          machines: {},
+        };
       }
       if (isChecked) {
         this.machinesChecked[gCode].machines[mCode] = { name: mName };
@@ -318,15 +323,21 @@ export default {
       }
     },
     isGroupChecked(gCode) {
-      const availCnt = Object.keys(this.availableGroups[gCode]?.machines || {}).length;
-      const checkedCnt = Object.keys(this.machinesChecked[gCode]?.machines || {}).length;
+      const availCnt = Object.keys(
+        this.availableGroups[gCode]?.machines || {}
+      ).length;
+      const checkedCnt = Object.keys(
+        this.machinesChecked[gCode]?.machines || {}
+      ).length;
       return availCnt > 0 && availCnt === checkedCnt;
     },
     checkGroupMachines(gCode, isChecked) {
       if (isChecked) {
         const gi = this.availableGroups[gCode];
         const machines = {};
-        Object.entries(gi?.machines || {}).forEach(([mCode, mi]) => { machines[mCode] = { name: mi.name }});
+        Object.entries(gi?.machines || {}).forEach(([mCode, mi]) => {
+          machines[mCode] = { name: mi.name };
+        });
         this.machinesChecked[gCode] = { name: gi.name, machines };
       } else {
         delete this.machinesChecked[gCode];
@@ -345,7 +356,7 @@ export default {
       const addBuf = JSON.parse(JSON.stringify(this.machinesChecked));
       // prune already in DB
       Object.entries(addBuf).forEach(([gCode, gInfo]) => {
-        Object.keys(gInfo.machines).forEach(mCode => {
+        Object.keys(gInfo.machines).forEach((mCode) => {
           if (this.selectedGroupsInDB[gCode]?.machines?.[mCode]) {
             delete addBuf[gCode].machines[mCode];
           }
@@ -356,12 +367,14 @@ export default {
 
       // remove any to-add from machinesToDelete (undo delete)
       Object.entries(this.machinesToDelete).forEach(([gCode, gInfo]) => {
-        Object.keys(gInfo.machines).forEach(mCode => {
+        Object.keys(gInfo.machines).forEach((mCode) => {
           if (this.machinesChecked[gCode]?.machines?.[mCode]) {
             delete this.machinesToDelete[gCode].machines[mCode];
           }
         });
-        if (!Object.keys(this.machinesToDelete[gCode].machines).length) delete this.machinesToDelete[gCode];
+        if (!Object.keys(this.machinesToDelete[gCode].machines).length) {
+          delete this.machinesToDelete[gCode];
+        }
       });
 
       // remove from available
@@ -373,13 +386,17 @@ export default {
 
     // ------------------ Remove from Selected ------------------
     removeMachine(gCode, mCode) {
-      const mName = this.selectedGroups[gCode]?.machines?.[mCode]?.name || '';
+      const mName =
+        this.selectedGroups[gCode]?.machines?.[mCode]?.name || '';
       if (!mName) return;
 
-      // return to available if present in allGroups (spec scope)
+      // return to available if present in allGroups (本次搜尋結果中才會加入)
       if (this.allGroups[gCode]) {
         if (!this.availableGroups[gCode]) {
-          this.availableGroups[gCode] = { name: this.allGroups[gCode].name, machines: {} };
+          this.availableGroups[gCode] = {
+            name: this.allGroups[gCode].name,
+            machines: {},
+          };
         }
         this.availableGroups[gCode].machines[mCode] = { name: mName };
       }
@@ -387,20 +404,27 @@ export default {
       // delta add: if it was going to be added, cancel that
       if (this.machinesToAdd[gCode]?.machines?.[mCode]) {
         delete this.machinesToAdd[gCode].machines[mCode];
-        if (!Object.keys(this.machinesToAdd[gCode].machines).length) delete this.machinesToAdd[gCode];
+        if (!Object.keys(this.machinesToAdd[gCode].machines).length) {
+          delete this.machinesToAdd[gCode];
+        }
       }
 
       // delta delete: if it exists in DB snapshot, mark delete
       if (this.selectedGroupsInDB[gCode]?.machines?.[mCode]) {
         if (!this.machinesToDelete[gCode]) {
-          this.machinesToDelete[gCode] = { name: this.selectedGroups[gCode].name, machines: {} };
+          this.machinesToDelete[gCode] = {
+            name: this.selectedGroups[gCode].name,
+            machines: {},
+          };
         }
         this.machinesToDelete[gCode].machines[mCode] = { name: mName };
       }
 
       // remove from selected
       delete this.selectedGroups[gCode].machines[mCode];
-      if (!Object.keys(this.selectedGroups[gCode].machines).length) delete this.selectedGroups[gCode];
+      if (!Object.keys(this.selectedGroups[gCode].machines).length) {
+        delete this.selectedGroups[gCode];
+      }
     },
 
     // ------------------ Condition parameters ------------------
@@ -418,11 +442,11 @@ export default {
     // ------------------ Save ------------------
     async saveCondition() {
       if (!this.localCondition.name?.trim()) {
-        alert("條件名稱不能為空。");
+        alert('條件名稱不能為空。');
         return;
       }
-      if ((this.localCondition.parameters || []).some(p => !p.trim())) {
-        alert("條件細項不能包含空值。");
+      if ((this.localCondition.parameters || []).some((p) => !p.trim())) {
+        alert('條件細項不能包含空值。');
         return;
       }
 
@@ -440,15 +464,21 @@ export default {
 
       const conditionNameUpdate =
         this.localCondition.id === -1 ||
-        (this.localCondition.name.trim() !== (this.condition?.name || '').trim());
+        this.localCondition.name.trim() !==
+          (this.condition?.name || '').trim();
 
       const conditionMachinesUpdate =
-        Object.keys(this.machinesToAdd).length > 0 || Object.keys(this.machinesToDelete).length > 0;
+        Object.keys(this.machinesToAdd).length > 0 ||
+        Object.keys(this.machinesToDelete).length > 0;
 
       const conditionParametersUpdate =
         parametersToAdd.length > 0 || parametersToDelete.length > 0;
 
-      if (conditionNameUpdate || conditionMachinesUpdate || conditionParametersUpdate) {
+      if (
+        conditionNameUpdate ||
+        conditionMachinesUpdate ||
+        conditionParametersUpdate
+      ) {
         const formData = new FormData();
         formData.append('condition-id', this.localCondition.id);
         if (conditionNameUpdate) {
@@ -456,25 +486,35 @@ export default {
         }
         if (conditionMachinesUpdate) {
           // send NEW model: { gCode: { name, machines: { mCode: { name } } } }
-          formData.append('condition-machines', JSON.stringify({
-            machinesToAdd: this.machinesToAdd,
-            machinesToDelete: this.machinesToDelete,
-          }));
+          formData.append(
+            'condition-machines',
+            JSON.stringify({
+              machinesToAdd: this.machinesToAdd,
+              machinesToDelete: this.machinesToDelete,
+            })
+          );
         }
         if (conditionParametersUpdate) {
-          formData.append('condition-parameters', JSON.stringify({
-            parametersToAdd, parametersToDelete
-          }));
+          formData.append(
+            'condition-parameters',
+            JSON.stringify({
+              parametersToAdd,
+              parametersToDelete,
+            })
+          );
         }
 
-        console.log("machinesToDelete:", this.machinesToDelete);
+        console.log('machinesToDelete:', this.machinesToDelete);
 
         try {
           const API = import.meta.env.VITE_APP_API_BASE_URL;
-          const resp = await axios.post(`${API}/conditions/update-condition-data`, formData);
-          console.log("update-condition-data:", resp?.data);
+          const resp = await axios.post(
+            `${API}/conditions/update-condition-data`,
+            formData
+          );
+          console.log('update-condition-data:', resp?.data);
         } catch (e) {
-          console.error("saveCondition error:", e);
+          console.error('saveCondition error:', e);
         }
       }
 
@@ -485,9 +525,10 @@ export default {
     closeWindow() {
       this.$emit('cancel');
     },
-  }
+  },
 };
 </script>
+
 
 <style scoped>
 /* 保持原有的樣式 */

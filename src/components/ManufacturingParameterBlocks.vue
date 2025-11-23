@@ -211,7 +211,7 @@ async function fetchGroups() {
     specCodes = [props.specification.code]
   }
 
-  console.log("specCodes: ", specCodes)
+//   console.log("specCodes: ", specCodes)
 
   if (!specCodes.length) {
     specGroupsMap.value = {}

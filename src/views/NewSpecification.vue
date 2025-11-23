@@ -13,16 +13,6 @@
 
     <!-- Steps nav：一樣 sticky + 滾動縮放 -->
     <div class="steps-navigation" :class="{ collapsed: navCollapsed }">
-      <!-- <div
-        v-for="(step, idx) in steps"
-        :key="idx"
-        :class="['step-item', { active: currentStep === idx + 1, completed: currentStep > idx + 1 }]"
-        @click="goToStep(idx + 1)"
-      >
-        <div class="step-circle">{{ idx + 1 }}</div>
-        <div class="step-label">{{ step.label }}</div>
-      </div> -->
-
       <div
         v-for="(step, index) in steps" :key="index" :class="[
           'step-item', stepStatusClass(index), { 'active': currentStep === index + 1, 'completed': currentStep > index + 1 }
@@ -49,12 +39,12 @@
 
               <div class="form-group">
                 <label for="item-type">品目：</label>
-                <input id="item-type" class="window-select" type="text" v-model="form.attribute.itemType" @click="itemsListVisible = !itemsListVisible" readonly/>
+                <input id="item-type" class="window-select" type="text" v-model="form.attribute.itemType" :readonly="true" @click="!isRevision && (itemsListVisible = !itemsListVisible)"/>
               </div>
 
               <div class="form-group">
                 <label for="style-no">式樣NO：</label>
-                <select id="style-no" class="window-select" v-model="form.attribute.styleNo" @change="onSelectStyle">
+                <select id="style-no" class="window-select" v-model="form.attribute.styleNo" @change="onSelectStyle" :disabled="isRevision">
                   <option value="">-- 請先選品目，再選式樣 --</option>
                   <option v-for="st in styleOptions" :key="st.sfhnr" :value="st.sfhnr">{{ st.sfhnr }}</option>
                 </select>
@@ -354,12 +344,20 @@ const goToStep = scrollToStep
 
 // ---------- step 驗證狀態（只先做 Step1, Step2） ----------
 const isStep1Valid = computed(() => {
-  // 版本：可能是 number 或 string，統一轉成 float
-  const versionNum = parseFloat(String(form.documentVersion ?? '0'))
+  // 版本：可能是 string / number，轉成 number
+  const vRaw = String(form.documentVersion ?? '').trim()
+  const vNum = parseFloat(vRaw || '1')
+  const isFirstVersion = !Number.isFinite(vNum) || vNum <= 1
 
-  // Left block 必填欄位
-  const leftFields = [
-    form.documentID,
+  // 是否有選「適用工程」
+  const hasSpecification =
+    Array.isArray(form.attribute.specification) &&
+    form.attribute.specification.length > 0
+
+  if (!hasSpecification) return false
+
+  // 左側必填欄位（不含 documentID）
+  const leftBaseFields = [
     form.documentName,
     form.documentVersion,
     form.attribute.itemType,
@@ -370,18 +368,19 @@ const isStep1Valid = computed(() => {
     form.approver,
   ]
 
-  // 槽：選了機台才算有填
-  const hasSpecification = (Array.isArray(form.attribute.specification) && form.attribute.specification.length > 0)
-
-  // 先檢查左邊欄位 & 機台
-  if (!hasSpecification) return false
-  if (leftFields.some(v => !String(v ?? '').trim())) return false
-
-  // 版本 > 1.0 時，右側「變更理由」「變更要點」也變成必填
-  if (versionNum > 1.0) {
-    if (!String(form.reviseReason ?? '').trim()) return false
-    if (!String(form.revisePoint ?? '').trim()) return false
+  if (leftBaseFields.some(v => !String(v ?? '').trim())) {
+    return false
   }
+
+  // v == 1：documentID 不強制必填，右邊理由/要點也不強制
+  if (isFirstVersion) {
+    return true
+  }
+
+  // v > 1：documentID + 右側欄位都必填
+  if (!String(form.documentID ?? '').trim()) return false
+  if (!String(form.reviseReason ?? '').trim()) return false
+  if (!String(form.revisePoint ?? '').trim()) return false
 
   return true
 })
@@ -390,25 +389,219 @@ const isStep2Valid = computed(() => {
   return String(form.documentPurpose ?? '').trim().length > 0
 })
 
+// Step 3：製作條件規範（DynamicEditorBlock）
+// 有實際使用任一段（標題/內容/檔案/option） → 套驗證
+// 完全沒用到 → 視為不上色（null）
+const isStep3Valid = computed(() => {
+  const { hasUsed, allValid } = evalDynamicBlocks(specBlocks.value || [])
+  if (!hasUsed) return null
+  return allValid
+})
+
+// Step 4：製造參數一覽表（PMS）
+//
+// 規則：
+//  - 完全沒有任何 PMS → null（不上色）
+//  - 至少有一個 block 有 PMS：
+//      * 每列欄位 2~6 必須都是數字且不能為空
+//      * 同一列數值要遞增 / 相等（不能有 a > b 的情況）
+//      * 不同 block 之間，(欄位 2~6 的矩陣) 不可完全相同
+const isStep4Valid = computed(() => {
+  const blocksArr = mcrBlocks.value || []
+  let hasAnyPms = false
+  const signatures = []   // 用來做重複判斷
+
+  // 逐個 block 檢查
+  for (let i = 0; i < blocksArr.length; i++) {
+    const blk = blocksArr[i]
+    const arr = blk?.data?.arrayParameterData || []
+
+    if (!Array.isArray(arr) || arr.length <= 1) {
+      continue // 只有表頭或完全沒資料 → 當沒 PMS
+    }
+
+    // 判斷這個 block 內是否有任一列有填數值（欄 2~6）
+    let blockHasPms = false
+    for (let r = 1; r < arr.length; r++) {
+      const row = arr[r] || []
+      for (let c = 2; c <= 6; c++) {
+        const txt = String(row[c] ?? '').trim()
+        if (txt) {
+          blockHasPms = true
+          break
+        }
+      }
+      if (blockHasPms) break
+    }
+
+    if (!blockHasPms) {
+      continue
+    }
+
+    hasAnyPms = true
+
+    // 內容合法性檢查（欄 2~6）：
+    // - 不能空白
+    // - 必須是數字
+    // - 相鄰欄位 a <= b
+    for (let r = 1; r < arr.length; r++) {
+      const row = arr[r] || []
+      const vals = []
+
+      for (let c = 2; c <= 6; c++) {
+        const txt = String(row[c] ?? '').trim()
+        if (!txt) {
+          return false       // 有空白 → 未填完
+        }
+        const num = Number(txt)
+        if (!Number.isFinite(num)) {
+          return false       // 非數字 → 未填完
+        }
+        vals.push(num)
+      }
+
+      // 檢查遞增性（等於允許）
+      for (let k = 1; k < vals.length; k++) {
+        if (vals[k - 1] > vals[k]) {
+          return false
+        }
+      }
+    }
+
+    // 建立這個 block 的「矩陣簽章」用來做重複判斷
+    const mat = []
+    for (let r = 1; r < arr.length; r++) {
+      const row = arr[r] || []
+      const sub = []
+      for (let c = 2; c <= 6; c++) {
+        sub.push(String(row[c] ?? '').trim())
+      }
+      mat.push(sub)
+    }
+    signatures.push(JSON.stringify(mat))
+  }
+
+  // 完全沒有任何 PMS → 不上色
+  if (!hasAnyPms) {
+    return null
+  }
+
+  // 檢查不同 block 是否有完全相同的矩陣 → 禁止
+  for (let i = 0; i < signatures.length; i++) {
+    for (let j = i + 1; j < signatures.length; j++) {
+      if (signatures[i] === signatures[j]) {
+        return false
+      }
+    }
+  }
+
+  return true
+})
+
+// Step 5：品質與規格內容（DynamicEditorBlock）
+const isStep5Valid = computed(() => {
+  const { hasUsed, allValid } = evalDynamicBlocks(qualityBlocks.value || [])
+  if (!hasUsed) return null
+  return allValid
+})
+
+// Step 6：使用表單
+// - 沒選任何表單 → 不上色
+// - 至少一筆 → OK
+const isStep6Valid = computed(() => {
+  const len = (usedForms.value || []).length
+  if (len === 0) return null
+  return true
+})
+
+// Step 7：其他（DynamicEditorBlock）
+const isStep7Valid = computed(() => {
+  const { hasUsed, allValid } = evalDynamicBlocks(otherBlocks.value || [])
+  if (!hasUsed) return null
+  return allValid
+})
+
+
 const stepStatusClass = (index) => {
   const stepNo = index + 1
 
-  // 只在 stepNo <= currentStep 時顯示紅 / 綠
+  // 只在目前 step 以前才顯示狀態顏色
   if (stepNo > currentStep.value) return ''
 
+  // Step 1：基本屬性（必填）
   if (stepNo === 1) {
-    steps[index].status = isStep1Valid.value ? true : false
-    return isStep1Valid.value ? 'step-ok' : 'step-error'
-  }
-  if (stepNo === 2) {
-    steps[index].status = isStep2Valid.value ? true : false
-    return isStep2Valid.value ? 'step-ok' : 'step-error'
+    const v = isStep1Valid.value
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
   }
 
-  // 其他步驟先不做驗證
+  // Step 2：目的（必填）
+  if (stepNo === 2) {
+    const v = isStep2Valid.value
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // Step 3：製作條件規範（DynamicEditor）
+  if (stepNo === 3) {
+    const v = isStep3Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // Step 4：製造參數一覽表（PMS）
+  if (stepNo === 4) {
+    const v = isStep4Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // Step 5：適用品質與規格內容（DynamicEditor）
+  if (stepNo === 5) {
+    const v = isStep5Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // Step 6：使用表單（有資料 → OK；無資料 → 不上色）
+  if (stepNo === 6) {
+    const v = isStep6Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = true
+    return 'step-ok'
+  }
+
+  // Step 7：其他（DynamicEditor）
+  if (stepNo === 7) {
+    const v = isStep7Valid.value
+    if (v === null) {
+      steps[index].status = true
+      return ''
+    }
+    steps[index].status = v ? true : false
+    return v ? 'step-ok' : 'step-error'
+  }
+
+  // Step 8：文件匯出 → 一律視為 OK（只是輸出頁）
   steps[index].status = true
   return 'step-ok'
 }
+
 
 // ---------- pickers ----------
 const specificsListVisible = ref(false)
@@ -518,6 +711,128 @@ function removeOtherLayer(id)    { otherBlocks.value   = otherBlocks.value  .fil
 function updateSpecLayer(payload)    { const i = specBlocks.value   .findIndex(b=>b.id===payload.id);    if(i!==-1) specBlocks.value[i]    = payload }
 function updateQualityLayer(payload) { const i = qualityBlocks.value.findIndex(b=>b.id===payload.id);    if(i!==-1) qualityBlocks.value[i] = payload }
 function updateOtherLayer(payload)   { const i = otherBlocks.value  .findIndex(b=>b.id===payload.id);    if(i!==-1) otherBlocks.value[i]   = payload }
+
+// ---------- DynamicEditorBlock 驗證 helper ----------
+
+// 把 TipTap JSON 裡所有 text 拉成純文字
+function extractPlainTextFromNode(node) {
+  if (!node || typeof node !== 'object') return ''
+  let out = ''
+  if (typeof node.text === 'string') {
+    out += node.text
+  }
+  if (Array.isArray(node.content)) {
+    node.content.forEach(child => {
+      out += extractPlainTextFromNode(child)
+    })
+  }
+  return out
+}
+
+function extractPlainTextFromDocJson(doc) {
+  if (!doc || typeof doc !== 'object') return ''
+  if (doc.type === 'doc' && Array.isArray(doc.content)) {
+    return doc.content.map(extractPlainTextFromNode).join('').trim()
+  }
+  return extractPlainTextFromNode(doc).trim()
+}
+
+// 有沒有實際「使用」這個 item（標題 / 內容 / 檔案 / option）
+function isDynamicBlockItemUsed(item) {
+  const titleText = extractPlainTextFromDocJson(item.jsonHeader)
+  const contentText = extractPlainTextFromDocJson(item.jsonContent)
+  const hasFiles = Array.isArray(item.files) && item.files.length > 0
+  return !!(
+    titleText ||
+    contentText ||
+    hasFiles ||
+    (item.option && item.option !== 0)
+  )
+}
+
+// 這個 item 有沒有「填寫完畢」
+function isDynamicBlockItemValid(item) {
+  const titleText = extractPlainTextFromDocJson(item.jsonHeader)
+  const hasTitle = titleText.length > 0
+  const contentText = extractPlainTextFromDocJson(item.jsonContent)
+  const hasFiles = Array.isArray(item.files) && item.files.length > 0
+  const used = isDynamicBlockItemUsed(item)
+
+  console.log("titleText: ", titleText)
+  // 👉 只要有一個 item 存在（被建立出來），就要求要有標題
+  //    不再分「有沒有使用」，沒標題就一律視為錯
+  if (!hasTitle) {
+    return false
+  }
+
+  // 下面才是 option 0 / 1 / 2 的細節
+
+  // option 0：純標題 → 只要有標題就 OK
+  if (item.option === 0) {
+    return true
+  }
+
+  // option 1：標題 + 文字/檔案 → 至少要有文字或檔案
+  if (item.option === 1) {
+    return !!(contentText.length || hasFiles)
+  }
+
+  // option 2：標題 + 表格 → 每一列不能整列空白
+  if (item.option === 2) {
+    const doc = item.jsonContent
+    if (!doc || typeof doc !== 'object') return false
+
+    const tables = Array.isArray(doc.content)
+      ? doc.content.filter(n => n.type === 'table')
+      : []
+    if (!tables.length) return false
+
+    const tableNode = tables[0]
+    const rows = Array.isArray(tableNode.content) ? tableNode.content : []
+
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r]
+      const cells = Array.isArray(row.content) ? row.content : []
+      const isHeaderRow = r === 0
+      if (isHeaderRow) continue
+
+      let rowHasContent = false
+      for (const cell of cells) {
+        const cellText = extractPlainTextFromNode(cell).trim()
+        if (cellText) {
+          rowHasContent = true
+          break
+        }
+      }
+      if (!rowHasContent) {
+        return false
+      }
+    }
+    return true
+  }
+
+  return true
+}
+
+// 統一檢查一整個 blocks 陣列
+function evalDynamicBlocks(blocksArr = []) {
+  let hasAnyItem = false
+  let allValid = true
+
+  for (const blk of blocksArr || []) {
+    const items = blk.data || []
+    for (const item of items) {
+      hasAnyItem = true               // 只要有一個 item 就當成「有使用這個 step」
+
+      if (!isDynamicBlockItemValid(item)) {
+        allValid = false
+      }
+    }
+  }
+
+  // hasUsed 改成代表「這個 step 有沒有任何 item」
+  return { hasUsed: hasAnyItem, allValid }
+}
 
 // Helpers to convert DynamicEditor UI blocks → backend “generic blocks”
 const toGenericBlocks = (arr=[], step_type) =>
@@ -669,15 +984,16 @@ function extractFilenameFromDisposition(disposition, fallback = 'document.docx')
 }
 
 async function generateAndDownloadDocx() {
-  if (steps.some(step => !step.status)) {
-    alert('請把內容完成才可下載')
-    return
-  }
+  // if (steps.some(step => !step.status)) {
+  //   alert('請把內容完成才可下載')
+  //   return
+  // }
   
   loading.value = true
   errorMsg.value = ''
   try {
     const payload = {
+      token: draftToken.value,
       attribute: [{...form}],
       content: [...toGenericBlocks(specBlocks.value, 4), ...serializeParamsFromMCR(), ...toGenericBlocks(qualityBlocks.value, 6), ...toGenericBlocks(otherBlocks.value, 7)],
       reference: [
@@ -687,6 +1003,13 @@ async function generateAndDownloadDocx() {
     const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
 
     const res = await axios.post(url, payload, {responseType: 'blob'})
+
+    // 🔸 若後端有回傳 X-Document-ID，就更新到 form
+    const docIdHeader =
+      res.headers['x-document-id'] || res.headers['X-Document-ID']
+    if (docIdHeader) {
+      form.documentID = docIdHeader
+    }
 
     const contentType = res.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     const dispo = res.headers['content-disposition']
@@ -770,6 +1093,10 @@ const saveDraft = async () => {
     isSaving.value = false
   }
 }
+
+const isRevision = computed(() => {
+  return !!String(form.previousDocumentToken || '').trim()
+})
 
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll, { passive: true })
@@ -929,9 +1256,9 @@ defineExpose({ saveDraft })
   color: #fff;
   opacity: 1;
 }
-.step-item.completed {
+/* .step-item.completed {
   background: #e5f1ff;
-}
+} */
 .step-circle {
   width: 24px;
   height: 24px;
@@ -973,9 +1300,7 @@ defineExpose({ saveDraft })
 .form-section {
   padding: 20px 0;
 }
-.content-page {
-  /* 跟 NewInstruction.vue 一致的 layout */
-}
+
 .step-section {
   background-color: #f9f9f9;
   padding: 25px;
