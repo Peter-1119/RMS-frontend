@@ -51,6 +51,7 @@ const props = defineProps({
   token: { type: String, default: '' },
   machineCode: { type: String, default: '' },   // 第一台 MACHINE_CODE
   version: { type: Number, default: 0 },        // ⭐ 父層資料 reload 觸發器
+  allowColor: {type: Boolean, default: true}
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -304,6 +305,7 @@ function maybeAutoLoadPms(code) {
 watch(
   () => props.version,
   async () => {
+    console.log("props version: ", props.version)
     if (!tableEditor.value) return
 
     const model = clone(props.modelValue) || {
@@ -644,7 +646,7 @@ async function handleFile(ev) {
       <span v-if="uploading" class="hint">上傳中...</span>
       <span v-else-if="m.file" class="hint">已選檔</span>
 
-      <div class="menu color">
+      <div v-if="allowColor" class="menu color">
         <div class="font-color blue"  @click="applyColor('blue')"></div>
         <div class="font-color black" @click="applyColor(null)"></div>
       </div>

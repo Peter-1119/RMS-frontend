@@ -4,10 +4,11 @@
             <span class="username">{{ displayedUserdeptDesc }} {{displayedUserName}}</span>
         </div>
         <nav class="menu-items">
-            <details v-for="item in menuItems" :key="item.id" class="menu-item-wrapper">
-                <summary class="menu-item">{{ item.title }}</summary>
-                <router-link v-for="subItem in item.children" :key="subItem.id" class="submenu" :to="subItem.link">{{ subItem.title }}</router-link>
+            <details v-for="item in menuItems" :key="item.id" class="menu-item-wrapper" :open="isGroupActive(item)">
+                <summary class="menu-item" :class="{ active: isGroupActive(item) }">{{ item.title }}</summary>
+                <router-link v-for="subItem in item.children" :key="subItem.id" class="submenu" :class="{ active: isActive(subItem.link) }" :to="subItem.link">{{ subItem.title }}</router-link>
             </details>
+
         </nav>
     </div>
 </template>
@@ -45,6 +46,10 @@ export default {
             ],
         };
     },
+    mounted() {
+        // 一進來就更新一次顯示名稱
+        this.updateUserName();
+    },
     watch: {
         '$route'(to, from){
             this.updateUserName();
@@ -64,6 +69,16 @@ export default {
                 console.log('SideMenu.vue: localStorage 中無使用者名稱，顯示訪客。');
             }
         },
+        isActive(link) {
+            // 如果你的路由都像 '/new-instruction' 這樣可以直接比對 path
+            return this.$route.path === link;
+
+            // 如果想讓像 '/new-instruction?token=xxx' 也算同一個，可以用：
+            // return this.$route.path.startsWith(link);
+        },
+        isGroupActive(group) {
+            return group.children.some(child => this.isActive(child.link));
+        }
     },
 };
 </script>
@@ -87,7 +102,10 @@ export default {
 
 .menu-items { flex-grow: 1; display: flex; flex-direction: column; }
 .menu-item { align-items: center; padding: 15px 20px; cursor: pointer; transition: background-color 0.2s ease;}
+.menu-item.active { background-color: #f1f3f5; font-weight: bold; }
+
 .submenu { display: block; color: #000; text-decoration: none; padding: 10px 20px 10px 40px; }
 .submenu:hover { background-color: #e9ecef;}
-
+.submenu { display: block; color: #000; text-decoration: none; padding: 10px 20px 10px 40px; }
+.submenu.active { background-color: #0d6efd; color: #fff; }
 </style>

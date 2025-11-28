@@ -19,7 +19,7 @@
         ]"
         @click="goToStep(index + 1)"
       >
-        <div class="step-circle">{{ index + 1 }}</div>
+        <div class="step-circle">{{ (step.label == "基本屬性" || step.label == "文件產出") ? "" : index }}</div>
         <div class="step-label">{{ step.label }}</div>
       </div>
     </div>
@@ -71,7 +71,7 @@
 
         <!-- Step 2 目的 -->
         <section :ref="el => (sectionRefs[1].value = el)" class="step-section">
-          <h2>目的</h2>
+          <h2>1. 目的</h2>
           <div class="purpose-group">
             <textarea placeholder="此處將填寫文件的目的相關內容" v-model="form.documentPurpose"></textarea>
           </div>
@@ -79,7 +79,7 @@
 
         <!-- Step 3 製作條件規範 -->
         <section :ref="el => (sectionRefs[2].value = el)" class="step-section">
-          <h2>製作條件規範</h2>
+          <h2>2. 製作條件規範</h2>
           <div class="manufacturing-specification-block">
             <button class="layer-action-btn add" @click="addSpecLayer">新增下一層</button>
           </div>
@@ -88,6 +88,7 @@
             v-for="blk in specBlocks"
             :key="blk.id"
             :block-editors="blk"
+            :allow-color="isRevisionDoc"
             @update-block="updateSpecLayer"
             @delete-block="removeSpecLayer(blk.id)"
           />
@@ -95,19 +96,23 @@
 
         <!-- Step 4 製造參數一覽表 -->
         <section :ref="el => (sectionRefs[3].value = el)" class="step-section">
-          <h2>製造參數一覽表</h2>
+          <h2>3. 製造參數一覽表</h2>
           <ManufacturingParameterBlocks
             v-if="paramsLoaded"
             :data-blocks="mcrBlocks"
             :specification="form.attribute.specification"
             :current-step="currentStep"
+            :document-token="draftToken"
+            :allow-color="isRevisionDoc"
             @update:dataBlocks="mcrBlocks = $event"
-            @save="mcrBlocks = $event"/>
+            @save="mcrBlocks = $event"
+            @machine-group-info="onMachineGroupInfo"
+          />
         </section>
 
         <!-- Step 5 適用品質與規格內容 -->
         <section :ref="el => (sectionRefs[4].value = el)" class="step-section">
-          <h2>適用品質與規格內容</h2>
+          <h2>4. 適用品質與規格內容</h2>
           <div class="quality-specification-block">
             <button class="layer-action-btn add" @click="addQualityLayer">新增下一層</button>
           </div>
@@ -116,6 +121,7 @@
             v-for="blk in qualityBlocks"
             :key="blk.id"
             :block-editors="blk"
+            :allow-color="isRevisionDoc"
             @update-block="updateQualityLayer"
             @delete-block="removeQualityLayer(blk.id)"
           />
@@ -123,7 +129,7 @@
 
         <!-- Step 6 使用表單 -->
         <section :ref="el => (sectionRefs[5].value = el)" class="step-section">
-          <h2>使用表單</h2>
+          <h2>5. 使用表單</h2>
           <div class="used-form">
             <button class="layer-action-btn add" @click="formWindowVisible = true">新增表單</button>
           </div>
@@ -143,6 +149,7 @@
             v-if="formWindowVisible"
             headerName="表單選取"
             :existingForms="usedForms"
+            :allow-color="isRevisionDoc"
             @add-new-form="addUsedForm"
             @close-window="formWindowVisible = false"
           />
@@ -150,7 +157,7 @@
 
         <!-- Step 7 其它 -->
         <section :ref="el => (sectionRefs[6].value = el)" class="step-section">
-          <h2>其它</h2>
+          <h2>6. 其它</h2>
           <div class="other-block"><button class="layer-action-btn add" @click="addOtherLayer">新增下一層</button></div>
           <DynamicEditorBlock v-for="blk in otherBlocks" :key="blk.id" :block-editors="blk" @update-block="updateOtherLayer" @delete-block="removeOtherLayer(blk.id)"/>
         </section>
@@ -187,6 +194,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 
 // UI components
@@ -199,6 +207,7 @@ import WordPreview from '@/components/WordPreview.vue'
 // token & unified docs API
 import { useDraftToken } from '@/composables/useDraftToken'
 import {
+  loadPersonnel,
   initDoc,
   saveAttributes,
   loadAttributes,
@@ -212,6 +221,11 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
 const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specification')
+
+const route = useRoute()
+
+// ⭐ 判斷是不是變版模式
+const isRevisionDoc = computed(() => route.query.mode === 'revision')
 
 // ---------- steps ----------
 const steps = [
@@ -306,11 +320,9 @@ const handleScroll = () => {
 
   currentStep.value = closestIndex + 1
 }
-
 const scrollToTop = () => {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
-
 const scrollToStep = (index) => {
   currentStep.value = index
 
@@ -339,7 +351,6 @@ const scrollToStep = (index) => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
-
 const goToStep = scrollToStep
 
 // ---------- step 驗證狀態（只先做 Step1, Step2） ----------
@@ -384,91 +395,85 @@ const isStep1Valid = computed(() => {
 
   return true
 })
-
 const isStep2Valid = computed(() => {
   return String(form.documentPurpose ?? '').trim().length > 0
 })
-
-// Step 3：製作條件規範（DynamicEditorBlock）
-// 有實際使用任一段（標題/內容/檔案/option） → 套驗證
-// 完全沒用到 → 視為不上色（null）
 const isStep3Valid = computed(() => {
   const { hasUsed, allValid } = evalDynamicBlocks(specBlocks.value || [])
   if (!hasUsed) return null
   return allValid
 })
-
-// Step 4：製造參數一覽表（PMS）
-//
-// 規則：
-//  - 完全沒有任何 PMS → null（不上色）
-//  - 至少有一個 block 有 PMS：
-//      * 每列欄位 2~6 必須都是數字且不能為空
-//      * 同一列數值要遞增 / 相等（不能有 a > b 的情況）
-//      * 不同 block 之間，(欄位 2~6 的矩陣) 不可完全相同
 const isStep4Valid = computed(() => {
+  // 1) 完全沒有機台群組 → 此 Step 不適用，導航不上色
+  if (!hasAnyMachineGroup.value) {
+    return null
+  }
+
   const blocksArr = mcrBlocks.value || []
-  let hasAnyPms = false
-  const signatures = []   // 用來做重複判斷
+  if (!blocksArr.length) {
+    // 有機台群組但一個 block 都沒有（理論上不會發生）→ 當作未填
+    return false
+  }
 
-  // 逐個 block 檢查
-  for (let i = 0; i < blocksArr.length; i++) {
-    const blk = blocksArr[i]
-    const arr = blk?.data?.arrayParameterData || []
+  let hasAnySelection = false        // 有沒有選過「任一」群組/機台
+  let hasAnyPmsTable = false         // 有沒有至少一台真的有 PMS 表
+  const signatures = []
 
-    if (!Array.isArray(arr) || arr.length <= 1) {
-      continue // 只有表頭或完全沒資料 → 當沒 PMS
-    }
+  for (const blk of blocksArr) {
+    const data = blk?.data || {}
+    const meta = data.metadata || {}
+    const arr  = data.arrayParameterData || []
 
-    // 判斷這個 block 內是否有任一列有填數值（欄 2~6）
-    let blockHasPms = false
-    for (let r = 1; r < arr.length; r++) {
-      const row = arr[r] || []
-      for (let c = 2; c <= 6; c++) {
-        const txt = String(row[c] ?? '').trim()
-        if (txt) {
-          blockHasPms = true
-          break
-        }
-      }
-      if (blockHasPms) break
-    }
+    const hasGroup   = !!meta.machineGroup
+    const hasMachine = !!meta.machine
+    const hasProgram =
+      (Array.isArray(meta.programs) && meta.programs.length > 0) ||
+      !!meta.programCode
 
-    if (!blockHasPms) {
+    const hasTableBody = Array.isArray(arr) && arr.length > 1
+
+    const isTotallyUnused =
+      !hasGroup && !hasMachine && !hasProgram && !hasTableBody
+
+    // 🔹 完全沒動過的 block：略過
+    if (isTotallyUnused) {
       continue
     }
 
-    hasAnyPms = true
+    // 走到這裡代表這個 block 有被操作過
+    hasAnySelection = true
 
-    // 內容合法性檢查（欄 2~6）：
-    // - 不能空白
-    // - 必須是數字
-    // - 相鄰欄位 a <= b
+    // ✅ 情境 4：已選群組+機台+程式號碼，但沒有任何 PMS 資料
+    //    → 該機台本來就沒 PMS，「不上色」（當成不需要填資料）
+    if (hasGroup && hasMachine && hasProgram && !hasTableBody) {
+      continue
+    }
+
+    // 🔴 只要有動作，但欄位不完整（群組 / 機台 / 程式 / 表格其中缺一） → 錯
+    if (!hasGroup || !hasMachine || !hasProgram || !hasTableBody) {
+      return false
+    }
+
+    // ⭐ 正常有 PMS 表的 block，開始做數值 / 重複檢查
+    hasAnyPmsTable = true
+
+    // 數值檢查：欄位 2~6 必須是數字、不可遞減
     for (let r = 1; r < arr.length; r++) {
       const row = arr[r] || []
       const vals = []
-
       for (let c = 2; c <= 6; c++) {
         const txt = String(row[c] ?? '').trim()
-        if (!txt) {
-          return false       // 有空白 → 未填完
-        }
+        if (!txt) return false
         const num = Number(txt)
-        if (!Number.isFinite(num)) {
-          return false       // 非數字 → 未填完
-        }
+        if (!Number.isFinite(num)) return false
         vals.push(num)
       }
-
-      // 檢查遞增性（等於允許）
       for (let k = 1; k < vals.length; k++) {
-        if (vals[k - 1] > vals[k]) {
-          return false
-        }
+        if (vals[k - 1] > vals[k]) return false
       }
     }
 
-    // 建立這個 block 的「矩陣簽章」用來做重複判斷
+    // 建立 signature，用來檢查不同 block 是否完全同一組 PMS
     const mat = []
     for (let r = 1; r < arr.length; r++) {
       const row = arr[r] || []
@@ -481,12 +486,17 @@ const isStep4Valid = computed(() => {
     signatures.push(JSON.stringify(mat))
   }
 
-  // 完全沒有任何 PMS → 不上色
-  if (!hasAnyPms) {
+  // 🔴 有機台群組，但一台都沒選 → 必填未填
+  if (!hasAnySelection) {
+    return false
+  }
+
+  // 🔹 有選機台，但全部都是「沒有 PMS 的機台」→ 此 Step 對這份文件不適用 → 不上色
+  if (!hasAnyPmsTable) {
     return null
   }
 
-  // 檢查不同 block 是否有完全相同的矩陣 → 禁止
+  // 檢查不同 block 是否有完全相同的 PMS 表 → 不允許重複
   for (let i = 0; i < signatures.length; i++) {
     for (let j = i + 1; j < signatures.length; j++) {
       if (signatures[i] === signatures[j]) {
@@ -497,31 +507,21 @@ const isStep4Valid = computed(() => {
 
   return true
 })
-
-// Step 5：品質與規格內容（DynamicEditorBlock）
 const isStep5Valid = computed(() => {
   const { hasUsed, allValid } = evalDynamicBlocks(qualityBlocks.value || [])
   if (!hasUsed) return null
   return allValid
 })
-
-// Step 6：使用表單
-// - 沒選任何表單 → 不上色
-// - 至少一筆 → OK
 const isStep6Valid = computed(() => {
   const len = (usedForms.value || []).length
   if (len === 0) return null
   return true
 })
-
-// Step 7：其他（DynamicEditorBlock）
 const isStep7Valid = computed(() => {
   const { hasUsed, allValid } = evalDynamicBlocks(otherBlocks.value || [])
   if (!hasUsed) return null
   return allValid
 })
-
-
 const stepStatusClass = (index) => {
   const stepNo = index + 1
 
@@ -560,9 +560,10 @@ const stepStatusClass = (index) => {
       steps[index].status = true
       return ''
     }
-    steps[index].status = v ? true : false
+    steps[index].status = !!v
     return v ? 'step-ok' : 'step-error'
   }
+
 
   // Step 5：適用品質與規格內容（DynamicEditor）
   if (stepNo === 5) {
@@ -601,13 +602,11 @@ const stepStatusClass = (index) => {
   steps[index].status = true
   return 'step-ok'
 }
-
-
 // ---------- pickers ----------
 const specificsListVisible = ref(false)
 
 function onSelectItemType(payload) {
-  form.attribute.itemType = payload?.matnr || ''
+  form.attribute.itemType = payload || ''
   form.attribute.styleNo = ''
   form.attribute.specification = []
   specificationDisplay.value = ''
@@ -619,7 +618,6 @@ function onSelectItemType(payload) {
   // 依品目抓式樣清單
   loadStylesForItem(form.attribute.itemType)
 }
-
 async function loadStylesForItem(matnr) {
   try {
     const { data } = await axios.get(`${API_BASE_URL}/item/styles`, {
@@ -638,7 +636,6 @@ async function loadStylesForItem(matnr) {
     alert('取得式樣清單失敗')
   }
 }
-
 function getDisplayName(rawName = '') {
   const idx = rawName.indexOf(')')
   if (idx === -1) {
@@ -648,7 +645,6 @@ function getDisplayName(rawName = '') {
   // 取第一個 ')' 後面的全部，順便 trim 掉前後空白
   return rawName.slice(idx + 1).trim()
 }
-
 async function onSelectStyle() {
   const matnr = form.attribute.itemType
   const sfhnr = form.attribute.styleNo
@@ -666,9 +662,7 @@ async function onSelectStyle() {
       return
     }
 
-    const specList = Array.isArray(data.data?.specification)
-      ? data.data.specification
-      : []
+    const specList = Array.isArray(data.data?.specification) ? data.data.specification : []
 
     // 5. form.attribute 中的 specific_xxx → specification 陣列
     form.attribute.specification = specList
@@ -685,7 +679,6 @@ async function onSelectStyle() {
     alert('取得適用工程失敗')
   }
 }
-
 // ---------- dynamic blocks (spec/quality/other) ----------
 let uid = 1
 const makeBlock = (stepType, tier) => ({
@@ -865,6 +858,10 @@ const fromGenericBlocks = (payload, stepType) =>
   }))
 
 // ---------- step 4 — parameters (SPEC_PARAM = 5) ----------
+const hasAnyMachineGroup = ref(true)   // 預設 true，舊資料不會被誤判
+const onMachineGroupInfo = (payload) => {
+  hasAnyMachineGroup.value = !!(payload && payload.hasAnyMachineGroup)
+}
 // serialize params → backend shape for /docs/params/save (step_type = 5)
 function serializeParamsFromMCR() {
   if (mcrBlocks.value.length == 0 || (mcrBlocks.value.length == 1 && !mcrBlocks.value[0].data.jsonParameterContent)){
@@ -880,7 +877,6 @@ function serializeParamsFromMCR() {
     metadata: blk.data?.metadata || null,
   }))
 }
-
 // load backend → fill mcrBlocks that the child understands
 function loadParamsIntoMCR(payload) {
   mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
@@ -926,7 +922,6 @@ watch(currentStep, (val) => {
     generateAndPreviewDocx()
   }
 })
-
 async function generateAndPreviewDocx() {
   previewLoading.value = true
   errorMsg.value = ''
@@ -971,7 +966,6 @@ async function generateAndPreviewDocx() {
     previewLoading.value = false
   }
 }
-
 function extractFilenameFromDisposition(disposition, fallback = 'document.docx') {
   if (!disposition) return fallback
   // RFC 5987: filename*=UTF-8''...
@@ -982,7 +976,6 @@ function extractFilenameFromDisposition(disposition, fallback = 'document.docx')
   if (plain?.[1]) return plain[1]
   return fallback
 }
-
 async function generateAndDownloadDocx() {
   // if (steps.some(step => !step.status)) {
   //   alert('請把內容完成才可下載')
@@ -1093,11 +1086,9 @@ const saveDraft = async () => {
     isSaving.value = false
   }
 }
-
 const isRevision = computed(() => {
   return !!String(form.previousDocumentToken || '').trim()
 })
-
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll, { passive: true })
 
@@ -1110,6 +1101,12 @@ onMounted(async () => {
     form.department = sessionStorage.getItem('loggedInUserdeptName')
     form.author_id = sessionStorage.getItem('loggedInUserNo')
     form.author = sessionStorage.getItem('loggedInUserName')
+
+    const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
+    if (personnel?.success){
+      if (form.confirmer.length == 0) form.confirmer = personnel.data.personnel.confirmer
+      if (form.approver.length == 0) form.approver = personnel.data.personnel.approver
+    }
 
     // 依據品目載入 style options + 顯示 specification
     if (form.attribute.itemType) {

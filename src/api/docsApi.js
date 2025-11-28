@@ -5,6 +5,11 @@ const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
 const http = axios.create({ baseURL: `${API_BASE_URL}/docs` });
 
 /** ---------- Attributes ---------- */
+export async function loadPersonnel(emp_id) {
+    const { data } = await http.get(`/get-personnel`, { params: { emp_id } });
+    return data;
+}
+
 export async function initDoc(document_type = 0) {
   const { data } = await http.post(`/init`, { document_type });
   return data; // {success, token}
@@ -59,4 +64,45 @@ export async function loadReferences(token) {
 export async function clearDocId(token) {
   const { data } = await http.post(`/clear-doc-id`, { token })
   return data  // {success: true}
+}
+
+/** ---------- Manufacturing Parameter Program API ---------- */
+export async function allocateProgramCode(specCode, documentToken) {
+  const body = { specCode, document_token: documentToken };
+  const res = await http.post('/program-codes/allocate', body);
+  // 後端 send_response: { success, message, data }
+  if (!res.data?.success) {
+    throw new Error(res.data?.message || '程式號碼配號失敗');
+  }
+  return res.data.data; // { specCode, programCode, prefix, serial }
+}
+
+export async function releaseProgramCode(programCode) {
+  const body = { programCode };
+  const res = await http.post('/program-codes/release', body);
+  if (!res.data?.success) {
+    throw new Error(res.data?.message || '程式號碼釋放失敗');
+  }
+  return res.data.data; // { programCode }
+}
+
+// 如果之後要用到「刪除草稿時釋放全部程式碼」，可以先準備好
+export async function releaseProgramCodesByDocument(documentToken) {
+  const body = { document_token: documentToken };
+  const res = await http.post('/program-codes/release-by-document', body);
+  if (!res.data?.success) {
+    throw new Error(res.data?.message || '程式號碼釋放失敗');
+  }
+  return res.data.data; // { document_token }
+}
+
+export function copySpecParamFromCode(programCode) {
+  // 對應後端新路徑
+  return http.post('/parameters/copy-spec-source', { program_code: programCode })
+    .then(res => res.data)
+}
+
+export function copyMcrFromCode(payload) {
+  // payload = { program_code: 'RE...', base_machine_code: 'xxxx' }
+  return http.post('/parameters/copy-source', payload).then(res => res.data)  // 回傳 { success, message, data }
 }

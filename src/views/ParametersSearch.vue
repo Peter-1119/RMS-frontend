@@ -5,9 +5,6 @@
     <div class="header-block">
       <div class="header">
         <h1>配方檢索</h1>
-        <button class="home-btn" @click="saveDraft">
-          <img src="@/assets/home-icon.png" alt="回首頁" class="icon" /> 回首頁
-        </button>
       </div>
 
       <div class="header-panel">
@@ -51,6 +48,7 @@
         </div>
 
         <div class="header-right-panel">
+          <button class="btn clear" @click="searchConditionClear">清空</button>
           <button class="btn search" @click="parameterSearch">查詢</button>
         </div>
       </div>
@@ -67,7 +65,6 @@
             <th>適用工程</th>
             <th>機台</th>
             <th>品目</th>
-            <!-- 動態條件欄位 -->
             <th v-for="header in conditionHeaders" :key="header">{{ header }}</th>
             <th>程式代碼</th>
           </tr>
@@ -75,7 +72,7 @@
         <tbody>
           <tr
             v-for="(row, idx) in paginatedResults"
-            :key="row.document_token + '-' + idx"
+            :key="row.document_token + '-' + row.program_code + '-' + idx" 
             :class="{ active: selectedResultIndex === (resultPageStartIndex + idx) }"
             @click="selectResult(resultPageStartIndex + idx, row)"
           >
@@ -83,11 +80,12 @@
               <input type="radio" :checked="selectedResultIndex === (resultPageStartIndex + idx)"/>
             </td>
             <td>{{ row.specific_name }}</td>
-            <!-- ✅ 這裡改成用 form.machine 顯示全名，若沒選就 fallback 到 machine_code -->
-            <td>{{ form.machine || row.machine_code }}</td>
-            <td>{{ row.item_code }}</td>
-            <!-- 各條件實際顯示的參數 -->
-            <td v-for="header in conditionHeaders" :key="header">{{ (row.conditions && row.conditions[header]) || '' }}</td>
+            <td>{{ row.machine_code }}</td> <td>{{ row.item_code }}</td>
+            
+            <td v-for="header in conditionHeaders" :key="header">
+              {{ (row.conditions && row.conditions[header]) || '' }}
+            </td>
+            
             <td>{{ row.program_code }}</td>
           </tr>
         </tbody>
@@ -133,6 +131,8 @@
   <!-- ===== 三個彈窗 ===== -->
   <SpecificListWindow
     v-if="specificsListVisible"
+    :machineCode="form.machineCode"
+    :itemCode = "form.item"
     :machineKeyword="machineKeyword"
     @selectSpecific="getSpecific"
     @cancel="specificsListVisible = false"
@@ -148,6 +148,8 @@
 
   <ItemListWindow
     v-if="itemWindowVisable"
+    :specificCode="form.specificCode"
+    :machineCode="form.machineCode"
     @selectItem="getItemType"
     @cancel="itemWindowVisable = false"
   />
@@ -220,6 +222,35 @@ export default {
     },
   },
   methods: {
+    searchConditionClear() {
+      // 1) 清空基本條件
+      this.form = {
+        specific: '',
+        specificCode: '',
+        machine: '',
+        machineCode: '',
+        item: '',
+        code: '',
+      }
+
+      // 2) 關聯用的 keyword 也清掉
+      this.specificKeyword = ''
+      this.machineKeyword = ''
+
+      // 3) 動態條件：欄位 & 已選值全部清空
+      this.conditions = []
+      this.selectedConditions = {}
+
+      // 4) 查詢結果 & 分頁 & 選取記錄清空
+      this.results = []
+      this.resultPage = 1
+      this.selectedResultIndex = -1
+
+      // 5) 後端給的條件欄位 & 下方參數表清空
+      this.conditionHeadersFromAPI = []
+      this.parameterRows = []
+    },
+
     saveDraft() {
       console.log('TODO: 回首頁')
     },
@@ -253,12 +284,13 @@ export default {
         this.conditions = []
         this.selectedConditions = {}
       }
+      console.log("form: ", this.form)
     },
 
     // ItemListWindow emit: { matnr, ... }
     getItemType(payload) {
       if (payload) {
-        this.form.item = payload.matnr || ''
+        this.form.item = payload || ''
       } else {
         this.form.item = ''
       }
@@ -294,14 +326,18 @@ export default {
     async parameterSearch() {
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ""
+        
+        // 構建 Payload
         const payload = {
-          status: 0,   // ← 開發階段先查草稿，之後正式改成 2
+          status: 2, 
           specific_code: this.form.specificCode || null,
           machine_code:  this.form.machineCode  || null,
           item_code:     this.form.item         || null,
           program_code:  this.form.code         || null,
+          
+          // 處理選中的動態條件
           conditions: Object.entries(this.selectedConditions)
-            .filter(([cid, val]) => val)
+            .filter(([cid, val]) => val) // 過濾掉空值
             .map(([cid, val]) => {
               const cond = this.conditions.find(c => c.id === Number(cid))
               return {
@@ -316,16 +352,16 @@ export default {
 
         const { data } = await axios.post(`${API_BASE_URL}/parameters/search`, payload)
         const res = (data && data.data) || {}
-        console.log("data: ", data)
 
-        // 後端 condition_headers
+        // 更新 Headers (這決定了 Table 中間會出現哪些條件欄位)
+        // 如果使用者選了機台，後端會回傳該機台的所有條件名稱
         this.conditionHeadersFromAPI = res.condition_headers || []
 
-        // 搜尋結果
         this.results = res.items || []
         this.resultPage = 1
         this.selectedResultIndex = -1
         this.parameterRows = []
+
       } catch (e) {
         console.error('parameterSearch error:', e)
         this.results = []
@@ -333,7 +369,6 @@ export default {
         this.conditionHeadersFromAPI = []
       }
     },
-
     // ===== Step4：點一筆配方，載入參數表 =====
     async selectResult(index, row) {
       this.selectedResultIndex = index
@@ -368,9 +403,11 @@ export default {
 .header-block { margin-bottom: 20px; padding: 8px; }
 .header-panel { display: flex; }
 .header-left-panel { width: 90%; }
-.header-right-panel { display: flex; width: 10%; align-items: center; justify-content: center; }
-.header-right-panel .btn { padding: 12px 25px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s ease; }
+.header-right-panel { display: flex; width: 15%; align-items: center; justify-content: center; }
+.header-right-panel .btn { padding: 8px 12px; margin: 4px; font-size: 14px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s ease; }
 .header-right-panel .btn:hover { background-color: #0056b3; }
+.header-right-panel .btn.clear { background-color: #BBBBBB; color: black; }
+.header-right-panel .btn.clear:hover { background-color: #999999; color: black; }
 
 .header { display: flex; justify-content: space-between; border-radius: 5px; margin-bottom: 14px; }
 .header h1 { margin: 0; }
@@ -378,10 +415,11 @@ export default {
 .header img { width: 18px; height: 18px; }
 
 .fundamental-attribute { display: flex; }
-.form-group { margin-right: 12px; align-items: center; }
+.form-group { display: flex; margin-right: 12px; align-items: center; }
+.form-group label { width: 60%; }
 .form-group input,
-.form-group select { padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
-.form-group .window-input { cursor: pointer;}
+.form-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+.form-group .window-input { cursor: pointer; }
 
 .condition-attribute { display: flex; flex-wrap: wrap; }
 .condition-attribute .form-group { display: flex; margin-top: 12px; }

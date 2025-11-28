@@ -6,7 +6,7 @@
                 
                 <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
 
-                <div class="menu color">
+                <div v-if="allowColor" class="menu color">
                     <div class="font-color blue" @click="setGenericColor('blue')"></div>
                     <div class="font-color black" @click="setGenericColor(null)"></div>
                 </div>
@@ -83,6 +83,7 @@ const STATIC_BASE_URL = import.meta.env.VITE_APP_STATIC_BASE_URL || ''
 // ---------- props / emits ----------
 const props = defineProps({
   blockEditors: { type: Object, required: true }, // { step, tier, data:[{option, header, jsonContent, files:[]}, ...] }
+  allowColor: {type: Boolean, default: true}
 })
 const emit = defineEmits(['update-block', 'delete-block'])
 

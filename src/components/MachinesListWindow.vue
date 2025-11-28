@@ -375,22 +375,46 @@ export default {
     applyGroupsPayload(groupsPayload, { filtered = false, preserveActive = false } = {}) {
       let usePayload = groupsPayload || {}
 
-      // If we should preserve the active/baseline group in list (avoid “cleared” effect)
       if (preserveActive && this.activeGroupCode) {
         usePayload = this._unionWithActiveGroup(groupsPayload)
       }
 
-      // build left list tables
       const groups = []
       const groupMachines = {}
+
       Object.entries(usePayload).forEach(([gcode, gval]) => {
-        groups.push({ code: gcode, name: gval?.name ?? gcode })
-        const arr = []
-        Object.entries(gval?.machines || {}).forEach(([mcode, mval]) => {
-          arr.push({ code: mcode, name: mval?.name ?? mcode, building: mval?.building ?? '', spec_code: mval?.spec_code || '', spec_name: mval?.spec_name || ''})
+        const groupName = gval?.name ?? gcode
+        const machinesObj = gval?.machines || {}
+        const machineEntries = Object.entries(machinesObj)
+        const totalInGroup = machineEntries.length   // ★ 該群組機台總數
+
+        groups.push({ code: gcode, name: groupName })
+
+        const arr = machineEntries.map(([mcode, mval]) => {
+          const mv = mval || {}
+          let specs = Array.isArray(mv.specifications) ? mv.specifications : []
+
+          // 做一層 normalize，避免後端有 None 或缺欄位
+          specs = specs
+            .map(s => ({
+              code: (s && s.code) || '',
+              name: (s && s.name) || ((s && s.code) || ''),  // 沒 name 就用 code 當 name
+            }))
+            .filter(s => s.code)  // 沒 code 的就丟掉
+
+          return {
+            code: mcode,
+            name: mv.name ?? mcode,
+            building: mv.building ?? '',
+            specifications: specs,   // ★ 以後統一用這個欄位
+            groupCode: gcode,
+            groupName,
+            groupTotal: totalInGroup,
+          }
         })
         groupMachines[gcode] = arr
       })
+
       groups.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hant'))
 
       this.groups = groups
@@ -577,21 +601,43 @@ export default {
     },
 
     confirmSelection() {
-      const payload = this.selectedCodes.map(code => {
+      // 先拿 keyword 過濾後的 ORIGINAL 母群
+      const origKW = this._kwOrig()
+
+      // 1) 群組總數 summary：讓 parent 知道每個群組真正母群有幾台
+      const groupsSummary = {}
+      this.groups.forEach(g => {
+        const origMachines = origKW?.[g.code]?.machines || {}
+        const total = Object.keys(origMachines).length   // ★ 用 original 的機台數
+        groupsSummary[g.code] = {
+          code: g.code,
+          name: g.name || '',
+          total,
+        }
+      })
+
+      // 2) 被選取的機台清單（每台也知道自己屬於哪個群組）
+      const selected = this.selectedCodes.map(code => {
         const m = this.codeToMachine[code] || {}
+        const specs = Array.isArray(m.specifications) ? m.specifications : []
+
         return {
           code,
           name: m.name || '',
           building: m.building || '',
-          specCode: m.spec_code || m.specCode || '',
-          specName: m.spec_name || m.specName || '',
+          specifications: specs,    // ★ {code,name}[]
+          groupCode: m.groupCode || '',
+          groupName: m.groupName || '',
         }
       })
 
-      this.$emit('select-machine', payload)
+      // 3) 打包成一個 payload 回傳給 parent
+      this.$emit('select-machine', {
+        selected,
+        groupsSummary,
+      })
       this.$emit('cancel')
     },
-
     closeWindow() { this.$emit('cancel') },
   },
 }

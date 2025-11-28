@@ -1,26 +1,31 @@
 <template>
   <div class="blk-wrap">
     <!-- 沒有任何 PMS + 條件 → 禁用按鈕 -->
-    <button class="btn add" @click="addBlock" :disabled="noAnyParams">
-      新增下一層
-    </button>
+    <button class="btn add" @click="addBlock" :disabled="noAnyParams">新增下一層</button>
 
     <div v-for="(b,i) in blocks" :key="b.id" class="blk">
       <div class="blk-hd">
+        <!-- 製程多選 -->
         <div class="spec-select">
           <label>製程：</label>
-          <select v-model="blocks[i].specCode" @change="onSpecChange(i)">
-            <option value="">-- 請選擇製程 --</option>
-            <option
-              v-for="opt in specOptions"
-              :key="opt.code"
-              :value="opt.code"
-            >
-              {{ opt.name || opt.code }}
-            </option>
-          </select>
+          <div class="spec-multi">
+            <div class="spec-multi-trigger" :class="{ 'step-error': isSpecRequired && (!b.programLinks || !b.programLinks.length) }" @click="toggleSpecDropdown(i)">
+              <span v-if="b.programLinks && b.programLinks.length">
+                {{ b.programLinks.map(p => p.specCode).join('、') }}
+              </span>
+              <span v-else class="placeholder">請選擇製程（可多選）</span>
+              <span class="caret">▼</span>
+            </div>
+            <div v-if="openSpecDropdownIndex === i" class="spec-multi-panel">
+              <label v-for="opt in specOptions" :key="opt.code" class="spec-option">
+                <input type="checkbox" :value="opt.code" :checked="isSpecChecked(i, opt.code)" @change="onToggleSpec(i, opt)"/>
+                <span>{{ opt.name || opt.code }}</span>
+              </label>
+            </div>
+          </div>
         </div>
-        <div><b>程式號碼：</b>{{ b.code }}</div>
+
+        <!-- 右邊：複製參數代碼 / block 操作 -->
         <div class="copybox">
           <label>參數代碼：</label>
           <input v-model="copyCode" placeholder="輸入要複製的代碼" />
@@ -32,12 +37,19 @@
         </div>
       </div>
 
-      <!-- ★ 兩邊都沒有資料：只顯示這句 -->
-      <div v-if="noAnyParams" class="hint empty">
-        選擇的機台無任何參數
+      <!-- 被選擇的製程 + 程式號碼 tag -->
+      <div v-if="b.programLinks && b.programLinks.length" class="program-tags">
+        <div v-for="link in b.programLinks" :key="link.programCode || link.specCode" class="program-tag">
+          <span class="tag-spec">{{ link.specName || link.specCode }}</span>
+          <span class="tag-code">{{ link.programCode || '尚未配號' }}</span>
+          <button type="button" class="tag-remove" @click="removeProgram(i, link)" title="移除此製程與程式號碼">✕</button>
+        </div>
       </div>
 
-      <!-- ★ 只要有任一種，就照各自情況顯示 -->
+      <!-- ★ 兩邊都沒有資料：只顯示這句 -->
+      <div v-if="noAnyParams" class="hint empty">選擇的機台無任何參數</div>
+
+      <!-- 下面條件 / PMS table 原樣保留 -->
       <template v-else>
         <!-- ===== 條件表 (Condition) ===== -->
         <div v-if="hasConditions">
@@ -46,35 +58,25 @@
               <button class="btn ghost" @click="addCondRow(i)">新增列</button>
               <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
             </div>
-            <div class="r">
+            <div v-if="allowColor" class="r">
               <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
               <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
             </div>
           </div>
-          <EditorContent
-            v-if="condEditors[i]"
-            :editor="condEditors[i]"
-            class="ed ed-cond"
-          />
+          <EditorContent v-if="condEditors[i]" :editor="condEditors[i]" class="ed ed-cond"/>
         </div>
-        <!-- 沒有條件參數 -->
         <p v-else class="hint empty">此機台無條件參數</p>
 
         <!-- ===== PMS 參數表 (Parameter) ===== -->
         <div v-if="hasPms">
           <div v-if="paramEditors[i]" class="menu right">
-            <div class="r">
+            <div v-if="allowColor" class="r">
               <i class="dot blue" @click="setCellColor(i,'param','#0000ff')"></i>
               <i class="dot black" @click="setCellColor(i,'param','#000000')"></i>
             </div>
           </div>
-          <EditorContent
-            v-if="paramEditors[i]"
-            :editor="paramEditors[i]"
-            class="ed ed-param"
-          />
+          <EditorContent v-if="paramEditors[i]" :editor="paramEditors[i]" class="ed ed-param"/>
         </div>
-        <!-- 沒有 PMS -->
         <p v-else class="hint empty">此機台無PMS資料</p>
       </template>
     </div>
@@ -98,6 +100,8 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { History } from '@tiptap/extension-history'
 import { CellSelection } from 'prosemirror-tables'
 
+import { copyMcrFromCode, allocateProgramCode, releaseProgramCode } from '@/api/docsApi'
+
 /* ===== Props ===== */
 const props = defineProps({
   dataBlocks: { type: Array, default: () => [] },
@@ -105,11 +109,16 @@ const props = defineProps({
   paramTemplate: { type: [Object, Array], default: null },
   currentStep: { type: Number, default: 0 },
 
-  // 新增：這台機台在「製造條件參數一覽表」中是否有 PMS / 條件參數
   hasPms:        { type: Boolean, default: true },
   hasConditions: { type: Boolean, default: true },
   specOptions: { type: Array, default: () => [] },
+
+  // 用來配號，從 NewInstruction 傳進來 draftToken
+  documentToken: { type: String, default: '' },
+  allowColor: {type: Boolean, default: true},
+  baseMachineCode: { type: String, default: '' },
 })
+
 
 const emit = defineEmits(['update:dataBlocks','save'])
 
@@ -196,12 +205,15 @@ const TExt = [
 ]
 
 /* ===== Reactive state ===== */
-const lastExternalDataJson = ref('')   // 記錄上次「外部」給我的 dataBlocks 內容
-const blocks = ref([])          // {id, code, data?}
-const condEditors = ref([])     // Editor[]
-const paramEditors = ref([])    // Editor[]
+const lastExternalDataJson = ref('')
+const blocks = ref([])          // 每個 block：{ id, content_id, client_temp_id, programLinks[], data }
+const condEditors = ref([])
+const paramEditors = ref([])
 const copyCode = ref('')
 let idSeq = 0
+
+// 控制哪一個 block 的「製程下拉」打開
+const openSpecDropdownIndex = ref(null)
 
 const specNameByCode = computed(() => {
   const m = {}
@@ -212,12 +224,180 @@ const specNameByCode = computed(() => {
   return m
 })
 
+const noAnyParams = computed(() => !props.hasPms && !props.hasConditions)
+
+const isSpecRequired = computed(() => {
+  const opts = props.specOptions || []
+  return opts.length > 0   // 有選項就視為必填
+})
+
+
+/* ===== 把父層 dataBlocks 轉成內部結構 ===== */
+function normalizeBlockFromProps(blk, idx) {
+  const meta = (blk.data && blk.data.metadata) || {}
+
+  let programs = []
+  if (Array.isArray(blk.programLinks) && blk.programLinks.length) {
+    programs = blk.programLinks.map(p => ({ ...p }))
+  } else if (Array.isArray(meta.programs) && meta.programs.length) {
+    programs = meta.programs.map(p => ({ ...p }))
+  } else {
+    // 相容舊資料：用舊的 specCode + code 組成一個 program
+    const specCode = blk.specCode || meta.specification?.code || ''
+    const specName = blk.specName || meta.specification?.name || ''
+    const programCode = blk.code || ''
+    if (specCode || programCode) {
+      programs.push({
+        specCode,
+        specName: specName || specCode,
+        programCode,
+      })
+    }
+  }
+
+  const mainSpec =
+    meta.mainSpec ||
+    (programs[0]
+      ? { specCode: programs[0].specCode, specName: programs[0].specName }
+      : null)
+
+  return {
+    id: blk.id ?? idx + 1,
+    content_id: blk.content_id || null,
+    client_temp_id: blk.client_temp_id || `temp-${uuidv1()}`,
+    programLinks: programs,
+    data: {
+      ...(blk.data || {}),
+      metadata: {
+        ...(meta || {}),
+        programs,
+        mainSpec,
+      },
+    },
+  }
+}
+
+/* ===== 製程多選相關 ===== */
+function toggleSpecDropdown(idx) {
+  openSpecDropdownIndex.value = openSpecDropdownIndex.value === idx ? null : idx
+}
+
+function isSpecChecked(blockIdx, specCode) {
+  const blk = blocks.value[blockIdx]
+  if (!blk || !Array.isArray(blk.programLinks)) return false
+  return blk.programLinks.some(p => p.specCode === specCode)
+}
+
+function updateBlockMetadataPrograms(blockIdx) {
+  const blk = blocks.value[blockIdx]
+  if (!blk) return
+  const programs = Array.isArray(blk.programLinks) ? blk.programLinks.slice() : []
+  const mainSpec = programs[0]
+    ? { specCode: programs[0].specCode, specName: programs[0].specName }
+    : null
+
+  blk.data = blk.data || {}
+  blk.data.metadata = {
+    ...(blk.data.metadata || {}),
+    programs,
+    mainSpec,
+  }
+}
+
+// 勾選 / 取消勾選製程 → 呼叫後端 allocate / release
+async function onToggleSpec(blockIdx, opt) {
+  const blk = blocks.value[blockIdx]
+  if (!blk) return
+
+  blk.programLinks = blk.programLinks || []
+  const existsIdx = blk.programLinks.findIndex(p => p.specCode === opt.code)
+
+  const onlyOneSpec = (props.specOptions || []).length === 1
+
+  // ✅ 如果只有一個 specOption，且已經選過，就不允許取消
+  if (onlyOneSpec && existsIdx >= 0) {
+    // 直接忽略這次 change，不釋放、不動資料
+    return
+  }
+
+  // ↓↓↓ 以下保留你原本的邏輯 ↓↓↓
+
+  // 取消勾選 → 釋放程式號碼
+  if (existsIdx >= 0) {
+    const removed = blk.programLinks.splice(existsIdx, 1)[0]
+    if (removed && removed.programCode) {
+      try {
+        await releaseProgramCode(removed.programCode)
+      } catch (e) {
+        console.error('releaseProgramCode failed', e)
+        alert('程式號碼釋放失敗，請稍後再試')
+      }
+    }
+    updateBlockMetadataPrograms(blockIdx)
+    syncToParent()
+    return
+  }
+
+  // 新增勾選 → 配號
+  if (!props.documentToken) {
+    alert('尚未取得草稿代碼，請先儲存或重新整理頁面')
+    return
+  }
+
+  try {
+    const data = await allocateProgramCode(opt.code, props.documentToken)
+    const programCode = data?.programCode || ''
+    if (!programCode) {
+      throw new Error('後端未回傳程式號碼')
+    }
+
+    blk.programLinks.push({
+      specCode: opt.code,
+      specName: opt.name || opt.code,
+      programCode,
+    })
+    updateBlockMetadataPrograms(blockIdx)
+    syncToParent()
+  } catch (e) {
+    console.error('allocateProgramCode failed', e)
+    alert('程式號碼配號失敗，請稍後再試')
+  }
+}
+
+// 點 tag 上的 X → 移除某一個 programLinks（也會釋放程式號）
+async function removeProgram(blockIdx, link) {
+  const blk = blocks.value[blockIdx]
+  if (!blk) return
+
+  if (!confirm(`確定要移除製程「${link.specName || link.specCode}」與程式號碼「${link.programCode || ''}」嗎？`)) {
+    return
+  }
+
+  blk.programLinks = (blk.programLinks || []).filter(
+    p => !(p.specCode === link.specCode && p.programCode === link.programCode)
+  )
+
+  if (link.programCode) {
+    try {
+      await releaseProgramCode(link.programCode)
+    } catch (e) {
+      console.error('releaseProgramCode failed', e)
+      alert('程式號碼釋放失敗，請稍後再試')
+    }
+  }
+
+  updateBlockMetadataPrograms(blockIdx)
+  syncToParent()
+}
+
+/* ===== 製程多選相關 end ===== */
+
 function buildProgramCodeForSpec(specCode, index) {
   const sc = (specCode || '').toString()
   if (!sc) return `XXXX${index + 1}`
 
   const normalized = sc.replace(/-/g, '')   // "R221-01" -> "R22101"
-  const seq = String(index + 1).padStart(2, '0')  // 01, 02, ...
+  const seq = String(index + 1).padStart(3, '0')  // 01, 02, ...
   return `RE${normalized}${seq}`
 }
 
@@ -240,7 +420,6 @@ function onSpecChange(i) {
 
 // Is this a TipTap doc?
 const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
-const noAnyParams = computed(() => !props.hasPms && !props.hasConditions)
 
 // Build condition table TipTap doc from lightweight template:
 // template: Array<{name:string, options:Array<{label,value}>}>
@@ -391,83 +570,237 @@ function makeParamEditor(json, onUpdate) {
   })
 }
 
-/* ===== Public actions (unchanged UI) ===== */
-function addBlock(){
+/* ===== Public actions（新增 / 刪除 / 複製 block） ===== */
+function addBlock() {
   const id = idSeq++
   blocks.value.push({
+    id,
     content_id: null,
     client_temp_id: `temp-${uuidv1()}`,
-    id,
-    code: `XXXX${blocks.value.length + 1}`,  // 先給暫時 code
-    specCode: '',
-    specName: '',
-    data:{},
+    programLinks: [],
+    data: {},
   })
-  nextTick(()=> initEditors(blocks.value.length-1))
+  nextTick(() => initEditors(blocks.value.length - 1))
 }
-function delBlock(i){
-  if (blocks.value.length===1) return alert('至少需要保留一個組合')
+
+async function delBlock(i) {
+  if (blocks.value.length === 1) return alert('至少需要保留一個組合')
   if (!confirm('確定要刪除此組合嗎？')) return
+
+  const blk = blocks.value[i]
+
+  // 2.2 刪除 block 時，釋放所有程式號碼
+  if (blk && Array.isArray(blk.programLinks)) {
+    for (const link of blk.programLinks) {
+      if (!link.programCode) continue
+      try {
+        await releaseProgramCode(link.programCode)
+      } catch (e) {
+        console.error('releaseProgramCode failed', e)
+      }
+    }
+  }
+
   condEditors.value[i]?.destroy()
   paramEditors.value[i]?.destroy()
-  blocks.value.splice(i,1)
-  condEditors.value.splice(i,1)
-  paramEditors.value.splice(i,1)
-
-  // 重新依照每個 block 自己的 specCode + index 重算程式號碼
-  blocks.value = blocks.value.map((b, idx) => ({
-    ...b,
-    code: buildProgramCodeForSpec(b.specCode, idx),
-  }))
+  blocks.value.splice(i, 1)
+  condEditors.value.splice(i, 1)
+  paramEditors.value.splice(i, 1)
 
   nextTick(runAllValidations)
 }
-function duplicateBlock(i){
+
+// 複製 block：先直接 clone 目前的 programLinks（共用同一組程式號碼）
+// 如果你希望「複製時重新配一組新的程式號碼」，可以再改為呼叫 allocateProgramCode
+function duplicateBlock(i) {
   const src = blocks.value[i]
   const id = idSeq++
-  const newIndex = blocks.value.length  // push 後會是最後一筆
 
-  const specCode = src.specCode || ''
-  const specName = src.specName || specNameByCode.value[specCode] || ''
+  const clonedPrograms = (src.programLinks || []).map(p => ({ ...p }))
 
   blocks.value.push({
     id,
-    code: buildProgramCodeForSpec(specCode, newIndex),
-    specCode,
-    specName,
+    content_id: null,
+    client_temp_id: `temp-${uuidv1()}`,
+    programLinks: clonedPrograms,
     data: {
+      ...(src.data || {}),
       jsonConditionContent: condEditors.value[i]?.getJSON() || null,
       jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
+      metadata: {
+        ...(src.data?.metadata || {}),
+        programs: clonedPrograms,
+        mainSpec: clonedPrograms[0]
+          ? { specCode: clonedPrograms[0].specCode, specName: clonedPrograms[0].specName }
+          : null,
+      },
     },
   })
-  nextTick(()=> initEditors(blocks.value.length-1))
+
+  nextTick(() => initEditors(blocks.value.length - 1))
 }
-function copyFromCode(targetIdx){
-  if (!copyCode.value) return alert('請輸入要複製的代碼')
-  const srcIdx = blocks.value.findIndex(b=>b.code===copyCode.value)
-  if (srcIdx<0) return alert('找不到指定的代碼')
 
-  const src = blocks.value[srcIdx]
+/* copyFromCode 邏輯保留，唯一差別是「程式代碼」現在取第一個 programLinks 的 programCode */
+async function copyFromCode(targetIdx) {
+  if (!copyCode.value) {
+    alert('請輸入要複製的代碼')
+    return
+  }
+  const code = copyCode.value.trim()
   const tgt = blocks.value[targetIdx]
-  if (!src || !tgt) return
+  if (!tgt) return
 
-  // 內容複製
-  if (condEditors.value[targetIdx] && condEditors.value[srcIdx]) {
-    condEditors.value[targetIdx].commands.setContent(condEditors.value[srcIdx].getJSON())
+  // ---------------------------------------------------------
+  // 1. 本地搜尋 (Local Search)
+  // ---------------------------------------------------------
+  // 檢查目前編輯器中是否已經有這個 code 的 block
+  const srcIdx = blocks.value.findIndex(b =>
+    Array.isArray(b.programLinks) &&
+    b.programLinks.some(p => p.programCode === code)
+  )
+
+  if (srcIdx >= 0) {
+    // A. 從本地 block 複製
+    const src = blocks.value[srcIdx]
+
+    if (condEditors.value[targetIdx] && condEditors.value[srcIdx]) {
+      condEditors.value[targetIdx].commands.setContent(
+        condEditors.value[srcIdx].getJSON()
+      )
+    }
+    if (paramEditors.value[targetIdx] && paramEditors.value[srcIdx]) {
+      paramEditors.value[targetIdx].commands.setContent(
+        paramEditors.value[srcIdx].getJSON()
+      )
+    }
+
+    // 本地複製時，連同程式號與規格一起套用 (維持既有邏輯)
+    tgt.programLinks = (src.programLinks || []).map(p => ({ ...p }))
+    
+    // 更新 metadata 以便存檔
+    tgt.data = tgt.data || {}
+    tgt.data.metadata = tgt.data.metadata || {}
+    tgt.data.metadata.programs = tgt.programLinks
+    if(tgt.programLinks[0]) {
+        tgt.data.metadata.mainSpec = { 
+            specCode: tgt.programLinks[0].specCode, 
+            specName: tgt.programLinks[0].specName 
+        }
+    }
+
+    runAllValidations()
+    alert(`已從第 ${srcIdx + 1} 個模塊複製內容`)
+    return
   }
-  if (paramEditors.value[targetIdx] && paramEditors.value[srcIdx]) {
-    paramEditors.value[targetIdx].commands.setContent(paramEditors.value[srcIdx].getJSON())
+
+  // ---------------------------------------------------------
+  // 2. 遠端搜尋 (Remote Search)
+  // ---------------------------------------------------------
+  if (!props.baseMachineCode) {
+    alert('請先選擇機台，才能進行跨文件相容性檢查與複製。')
+    return
   }
 
-  // ★ 規格複製
-  tgt.specCode = src.specCode
-  tgt.specName = src.specName || specNameByCode.value[src.specCode] || ''
+  // [Check] 若要產生新號碼，必須要有 documentToken (草稿代碼)
+  if (!props.documentToken) {
+    alert('尚未取得草稿代碼，無法為複製的製程產生新編號，請先儲存草稿。')
+    return
+  }
 
-  // ★ 依 target index 重算程式號碼
-  updateCodeForBlock(targetIdx)
+  try {
+    const resp = await copyMcrFromCode({
+      program_code: code,
+      base_machine_code: props.baseMachineCode,
+    })
 
-  runAllValidations()
-  alert('複製成功')
+    if (!resp || !resp.success) {
+      const msg = resp?.message || resp?.data?.message || '查無可複製的資料或條件不相容'
+      alert(msg)
+      return
+    }
+
+    const data = resp.data || {}
+    const remoteBlocks = data.blocks || {}
+    
+    // 取得回傳資料
+    const condJson = remoteBlocks.cond_json || null
+    const paramJson = remoteBlocks.param_json || null
+    const sourcePrograms = remoteBlocks.source_programs || [] // [New] 取得來源製程
+
+    let copiedCount = 0
+
+    // A. 套用條件表
+    if (condJson && condEditors.value[targetIdx]) {
+      condEditors.value[targetIdx].commands.setContent(condJson)
+      copiedCount++
+    }
+    
+    // B. 套用參數表
+    if (paramJson && paramEditors.value[targetIdx]) {
+      paramEditors.value[targetIdx].commands.setContent(paramJson)
+      copiedCount++
+    }
+
+    // C. [New] 複製製程並重新配號 (Re-allocate Program Codes)
+    if (sourcePrograms.length > 0) {
+      if (confirm(`來源包含 ${sourcePrograms.length} 個製程 (${sourcePrograms.map(p=>p.specName).join(',')})。\n是否要複製這些製程並自動產生新的程式代碼？\n(若選擇「取消」則只複製表格內容)`)) {
+        
+        // 1. 先釋放舊的 (如果有)
+        if (tgt.programLinks && tgt.programLinks.length) {
+          for (const link of tgt.programLinks) {
+            if (link.programCode) {
+                // 這裡選擇 Silent fail，若釋放失敗不卡流程
+                await releaseProgramCode(link.programCode).catch(err => console.error(err))
+            }
+          }
+        }
+        
+        // 清空連結
+        tgt.programLinks = []
+
+        // 2. 為每個來源製程申請新號碼
+        const newLinks = []
+        for (const srcProg of sourcePrograms) {
+            if (!srcProg.specCode) continue
+            try {
+                // 呼叫後端配號 API (針對當前 documentToken)
+                const allocResp = await allocateProgramCode(srcProg.specCode, props.documentToken)
+                const newCode = allocResp.programCode
+                
+                if (newCode) {
+                    newLinks.push({
+                        specCode: srcProg.specCode,
+                        specName: srcProg.specName || srcProg.specCode,
+                        programCode: newCode // 這是新的唯一號碼
+                    })
+                }
+            } catch (err) {
+                console.error(`配號失敗: ${srcProg.specCode}`, err)
+                alert(`製程 ${srcProg.specName} 配號失敗，請稍後手動選擇。`)
+            }
+        }
+
+        // 3. 更新 Block
+        tgt.programLinks = newLinks
+        
+        // 更新 Metadata (mainSpec, programs...)
+        updateBlockMetadataPrograms(targetIdx)
+        copiedCount++
+      }
+    }
+
+    if (copiedCount > 0) {
+      runAllValidations()
+      alert('複製成功！\n包含：表格內容已套用、製程已複製並產生新流水號。')
+    } else {
+      alert('複製來源的內容為空。')
+    }
+
+  } catch (e) {
+    console.error('copyFromCode remote failed', e)
+    const msg = e?.response?.data?.message || e.message || '複製失敗'
+    alert(msg)
+  }
 }
 
 /* ===== Condition table row ops (unchanged logic) ===== */
@@ -771,78 +1104,121 @@ function initEditors(i) {
 }
 
 /* ===== Mount / Unmount ===== */
-onMounted(()=> {
-  if (!props.dataBlocks.length){
-    // 新文件
+// Mount
+onMounted(() => {
+  if (!props.dataBlocks.length) {
     addBlock()
   } else {
-    blocks.value = props.dataBlocks.map((blk,idx)=>({
-      id: blk.id ?? idx + 1,
-      code: blk.code || `XXXX${idx+1}`,
-      content_id: blk.content_id,
-      client_temp_id: blk.client_temp_id,
-      specCode: blk.specCode || blk.data?.metadata?.specification?.code || '',
-      specName: blk.specName || blk.data?.metadata?.specification?.name || '',
-      data: blk.data || {},
-    }))
-    blocks.value.forEach((_,i)=> initEditors(i))
+    blocks.value = props.dataBlocks.map((blk, idx) => normalizeBlockFromProps(blk, idx))
+    blocks.value.forEach((_, i) => initEditors(i))
   }
   nextTick(syncToParent)
   lastExternalDataJson.value = JSON.stringify(props.dataBlocks || [])
 })
 
-
+// Watch dataBlocks（外部載草稿 / 換機台時）
 watch(
   () => props.dataBlocks,
-  (newBlocks) => {
+  async (newBlocks) => {
     const json = JSON.stringify(newBlocks || [])
+    if (json === lastExternalDataJson.value) return
 
-    // ⭐ 如果這次的內容跟 lastExternalDataJson 一樣，多半是自己 emit update:dataBlocks
-    // 父層原封不動丟回來 → 不要重建 editor，避免無限迴圈
-    if (json === lastExternalDataJson.value) {
-      return
+    // 1️⃣ 收集舊 blocks 裡全部的 programCode
+    const oldCodes = new Set()
+    blocks.value.forEach(b => {
+      (b.programLinks || []).forEach(p => {
+        if (p.programCode) oldCodes.add(p.programCode)
+      })
+    })
+
+    // 2️⃣ 收集 newBlocks 裡的 programCode（避免釋放還存在的）
+    const newCodes = new Set()
+    ;(newBlocks || []).forEach(b => {
+      (b.programLinks || []).forEach(p => {
+        if (p.programCode) newCodes.add(p.programCode)
+      })
+    })
+
+    const toRelease = [...oldCodes].filter(c => !newCodes.has(c))
+
+    // 3️⃣ 釋放這些「舊有、但新資料已經沒有」的程式代碼
+    for (const code of toRelease) {
+      try {
+        await releaseProgramCode(code)
+      } catch (e) {
+        console.error('releaseProgramCode on dataBlocks-change failed:', code, e)
+      }
     }
 
-    // === 外部真正有改變（載入草稿 / 換機台） → 全面重建 ===
-
-    // 先把舊 editor 全部 destroy
+    // 4️⃣ 原本 destroy / 重建的流程保留
     condEditors.value.forEach(e => e?.destroy())
     paramEditors.value.forEach(e => e?.destroy())
     condEditors.value = []
     paramEditors.value = []
 
     if (!newBlocks || !newBlocks.length) {
-      // 1) 新機台 / 沒有草稿 → 建一個新的空 block
       blocks.value = []
       addBlock()
     } else {
-      // 2) 有草稿資料 → 依照草稿內容建立 blocks & editors
-      blocks.value = newBlocks.map((blk, idx) => ({
-        id: blk.id ?? idx + 1,
-        code: blk.code || `XXXX${idx + 1}`,
-        content_id: blk.content_id,
-        client_temp_id: blk.client_temp_id,
-        specCode: blk.specCode || blk.data?.metadata?.specification?.code || '',
-        specName: blk.specName || blk.data?.metadata?.specification?.name || '',
-        data: blk.data || {},
-      }))
-
+      blocks.value = newBlocks.map((blk, idx) => normalizeBlockFromProps(blk, idx))
       blocks.value.forEach((_, i) => initEditors(i))
     }
 
     nextTick(runAllValidations)
-
-    // 更新本次外部狀態簽章
     lastExternalDataJson.value = json
   },
   { deep: true }
 )
 
-onBeforeUnmount(()=>{
+watch(
+  () => props.specOptions,
+  async (opts) => {
+    const list = opts || []
+    // ✅ 只有一個選項時才啟動
+    if (list.length !== 1) return
+
+    const only = list[0]
+    if (!only || !only.code) return
+
+    // 沒有 documentToken 不能配號，只先跳過
+    if (!props.documentToken) return
+
+    for (let i = 0; i < blocks.value.length; i++) {
+      const blk = blocks.value[i]
+      if (!blk) continue
+
+      blk.programLinks = blk.programLinks || []
+      const already = blk.programLinks.some(p => p.specCode === only.code)
+      if (already) continue   // 這個 block 已經有了就不用再配
+
+      try {
+        const data = await allocateProgramCode(only.code, props.documentToken)
+        const programCode = data?.programCode || ''
+        if (!programCode) continue
+
+        blk.programLinks.push({
+          specCode: only.code,
+          specName: only.name || only.code,
+          programCode,
+        })
+        updateBlockMetadataPrograms(i)
+      } catch (e) {
+        console.error('auto allocateProgramCode failed', e)
+      }
+    }
+
+    syncToParent()
+  },
+  { immediate: true }
+)
+
+
+// Unmount 時 emit save
+onBeforeUnmount(() => {
   const payload = exportData()
   emit('save', payload)
-  condEditors.value.forEach(e=>e?.destroy())
-  paramEditors.value.forEach(e=>e?.destroy())
+  condEditors.value.forEach(e => e?.destroy())
+  paramEditors.value.forEach(e => e?.destroy())
 })
 
 /* ===== Export to parent ===== */
@@ -859,51 +1235,53 @@ function extractTableArray(ed){
   return out
 }
 
-function exportData(){
-  return blocks.value.map((b,i)=>{
-    const spec = {
-      code: b.specCode || '',
-      name: b.specName || specNameByCode.value[b.specCode] || '',
-    }
+function exportData() {
+  return blocks.value.map((b, i) => {
+    const programs = Array.isArray(b.programLinks) ? b.programLinks.slice() : []
+    const mainSpec = programs[0]
+      ? { specCode: programs[0].specCode, specName: programs[0].specName }
+      : null
+
+    // 為了相容舊欄位，可以把「第一組程式號碼」當作 code / specCode / specName 傳出去
+    const first = programs[0] || {}
 
     return {
       id: b.id,
-      code: b.code,
+      // 相容 legacy 欄位：code / specCode / specName
+      code: first.programCode || '',
+      specCode: first.specCode || '',
+      specName: first.specName || '',
+
       content_id: b.content_id,
       client_temp_id: b.client_temp_id,
-      specCode: spec.code,
-      specName: spec.name,
-      data:{
+      programLinks: programs,
+      data: {
         jsonConditionContent: condEditors.value[i]?.getJSON() || null,
         arrayConditionData:   extractTableArray(condEditors.value[i]),
         jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
         arrayParameterData:   extractTableArray(paramEditors.value[i]),
-        paramHeaderText: b.code,
         metadata: {
           ...(b.data?.metadata || {}),
-          specification: spec,
+          programs,
+          mainSpec,
         },
       },
     }
   })
 }
 
-
 let emitTimer = null
 function syncToParent() {
   clearTimeout(emitTimer)
   emitTimer = setTimeout(() => {
     const payload = exportData()
-    // ⭐ 先把這次要 emit 的內容記錄起來
     lastExternalDataJson.value = JSON.stringify(payload || [])
     emit('update:dataBlocks', payload)
   }, 150)
 }
 
-/* ===== expose (optional) ===== */
 defineExpose({ exportData })
 </script>
-
 
 <style scoped>
 .btn{padding:6px 12px;border:none;border-radius:6px;color:#fff;background:#007bff;cursor:pointer}
@@ -937,7 +1315,59 @@ defineExpose({ exportData })
 .ed :deep(.cell-dropdown:focus){outline:2px solid #2196f3;border-color:#2196f3}
 .ed :deep(td.has-focus){ background-color:#fff7cc; box-shadow: inset 0 0 0 2px #ff9800; }
 
+.ed :deep(col:nth-child(1)) { width: 75%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(2)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(3)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(4)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(5)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(6)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(7)) { width: 100%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(8)) { width: 33%; } /* 槽體/測試點 */
+.ed :deep(col:nth-child(9)) { width: 100%; } /* 槽體/測試點 */
+
 .hint { margin: 6px 0; color: #555; }
 .hint.empty { margin: 8px 0; color: #c62828; font-weight: 600; }
+
+.spec-select { display: flex; align-items: center; gap: 8px; }
+.spec-multi { position: relative; min-width: 260px; }
+.spec-multi-trigger {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  font-size: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.spec-multi-trigger .placeholder { color: #999; }
+.spec-multi-trigger .caret { margin-left: 8px; font-size: 10px; }
+.spec-multi-trigger.step-error { background-color: #ffcdd2;}
+.spec-multi-panel {
+  position: absolute;
+  top: 105%;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow: auto;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  box-shadow: 0 4px 10px rgba(0,0,0,.08);
+  padding: 6px 8px;
+  z-index: 20;
+}
+
+.spec-option { display: flex; align-items: center; gap: 6px; padding: 4px 2px; font-size: 13px; cursor: pointer; }
+.spec-option:hover { background: #f5f8ff; }
+
+.program-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.program-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #eef4ff; border: 1px solid #c3d3ff; font-size: 12px; }
+
+.tag-spec { font-weight: 600; color: #1a3d8f; }
+.tag-code { font-family: monospace; padding: 0 4px; background: #fff; border-radius: 4px; border: 1px dashed #b0c4ff; }
+.tag-remove { border: none; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; color: #888; }
+.tag-remove:hover { color: #c62828; }
 
 </style>

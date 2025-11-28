@@ -13,7 +13,7 @@ export async function getEngineeringProcesses(projectId) {
 
 export async function getUnassignedProcesses({ projectCode, keyword='', page=1, pageSize=20 }) {
   const { data } = await axios.get(
-    `${API}/mes/engineering/${encodeURIComponent(projectCode)}/unassigned-processes`,
+    `${API}/mes/engineering/unassigned-processes`,
     { params: { keyword, page, pageSize } }
   )
   return data?.data || { items: [], total: 0, page, pageSize }

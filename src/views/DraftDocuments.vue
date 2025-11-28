@@ -2,9 +2,6 @@
   <div class="new-instruction-container">
     <div class="header">
       <h1>草稿匣</h1>
-      <button @click="$router.push('/home');" class="back-btn">
-        <img src="@/assets/home-icon.png" alt="首頁" class="icon"> 回首頁
-      </button>
     </div>
 
     <div class="form-section">
@@ -177,7 +174,7 @@ export default {
   border-radius: 10px;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
-.header { display: flex; justify-content: space-between; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
+.header { display: flex; justify-content: space-between; margin-bottom: 20px; }
 .header h1 { margin: 0; font-size: 28px; color: #333; }
 
 .back-btn, .save-btn {
@@ -195,11 +192,43 @@ export default {
 .back-btn:hover { background-color: #5a6268; }
 .back-btn .icon { width: 18px; height: 18px; margin-right: 8px; filter: invert(100%); }
 
-.form-section { padding: 20px 0; }
+.document-table { 
+  border-collapse: collapse;
+  width: 100%;
+  border: none;
 
-.document-table { border-collapse: collapse; border: none; width: 100%; }
-.document-table th, .document-table td { border: none; padding: 10px 20px; text-align: left; }
-.document-table .btn { width: 40px; height: 40px; margin: 0px; padding: 8px 8px; border: none; border-radius: 5px; cursor: pointer; }
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.document-table th { 
+  border: 1px solid #e0e0e0; 
+  padding: 12px 20px; 
+  text-align: center; 
+  
+  background-color: #f0f2f5;
+  color: #333333;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.document-table td { border: 1px solid #e0e0e0; padding: 12px 20px; text-align: center; color: #555555; }
+.document-table td:first-child { text-align: left; }
+
+/* 斑馬線效果 (可選，但強烈建議) */
+.document-table tbody tr:nth-child(even) { background-color: #fafafa; }
+.document-table tbody tr:hover { background-color: #e6f7ff; transition: background-color 0.3s ease; }
+.document-table .btn { 
+  width: 30px; 
+  height: 30px; 
+  margin: 0px; 
+  padding: 2px; 
+  border: none; 
+  border-radius: 5px; 
+  cursor: pointer; 
+  background-color: transparent; /* 讓按鈕背景透明化，更融入表格 */
+  transition: background-color 0.2s;
+}
+.document-table .btn:hover {background-color: rgba(0, 0, 0, 0.05); }
 .document-table .icon { width: 100%; height: 100%; background-color: none; }
 
 </style>

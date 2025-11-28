@@ -217,7 +217,8 @@ async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
   try {
-    const processIds = selected.value.map(x => x.id) // spec_code list
+    const processIds = selected.value.map(x => ({code: x.specCode, desc: x.specName}))
+    // const processIds = selected.value.map(x => x.id) // spec_code list
     await addProcessesToProject({ projectCode: form.value.projectCode.trim(), processIds })
     emit('saved')
   } finally {

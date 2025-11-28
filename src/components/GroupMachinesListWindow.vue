@@ -222,11 +222,12 @@ export default {
       try {
         this.loading = true
         const API = import.meta.env.VITE_APP_API_BASE_URL || ''
-        const params = {}
+        const params = {remove_spec_info: true}
         if (this.keyword)      params.keyword  = this.keyword
         if (this.specificCode) params.specific = this.specificCode  // 對應後端 groups_machines(specific=...)
         if (this.itemCode)     params.item     = this.itemCode      // 若後端有支援品目過濾就用
 
+        console.log("params: ", params)
         const { data } = await axios.get(`${API}/mes/groups-machines`, { params })
         const rawGroups = data?.data?.groups || {}
 

@@ -3,16 +3,7 @@
     <div class="header">
       <h1>已退回</h1>
       <div class="right">
-        <input
-          v-model="keyword"
-          type="text"
-          placeholder="搜尋名稱/編號/退回者/理由"
-          class="search-input"
-          @input="onKeywordInput"
-        />
-        <button class="back-btn" @click="$router.push('/home')">
-          <img src="@/assets/home-icon.png" alt="首頁" class="icon" /> 回首頁
-        </button>
+        <input v-model="keyword" type="text" placeholder="搜尋名稱/編號/退回者/理由" class="search-input" @input="onKeywordInput"/>
       </div>
     </div>
 
@@ -225,10 +216,7 @@ export default {
 .back-btn { background:#6c757d; color:#fff; border:none; padding:10px 14px; border-radius:6px; cursor:pointer; display:flex; align-items:center; }
 .back-btn .icon { width:18px; height:18px; margin-right:8px; filter: invert(100%); }
 
-.rejected-documents-table { width: 100%; border-collapse: collapse; }
-.rejected-documents-table th, .rejected-documents-table td { border: none; padding: 10px 20px; text-align: left; }
-.rejected-documents-table .btn { width: 40px; height: 40px; background-color: #9e99a0; border: none; padding: 8px; border-radius: 5px; cursor: pointer; }
-.rejected-documents-table .icon { width: 100%; height: 100%; }
+
 .reason-cell .reason-text { display:inline-block; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .pager { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
@@ -245,5 +233,44 @@ export default {
   text-decoration: underline;
 }
 .doc-name .doc-link:hover { color: #0b4bb3; }
+
+.rejected-documents-table { 
+  border-collapse: collapse;
+  width: 100%;
+  border: none;
+
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.rejected-documents-table th { 
+  border: 1px solid #e0e0e0; 
+  padding: 12px 20px; 
+  text-align: center; 
+  
+  background-color: #f0f2f5;
+  color: #333333;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.rejected-documents-table td { border: 1px solid #e0e0e0; padding: 12px 20px; text-align: center; color: #555555; }
+.rejected-documents-table td:nth-child(3) { text-align: left; }
+
+/* 斑馬線效果 (可選，但強烈建議) */
+.rejected-documents-table tbody tr:nth-child(even) { background-color: #fafafa; }
+.rejected-documents-table tbody tr:hover { background-color: #e6f7ff; transition: background-color 0.3s ease; }
+.rejected-documents-table .btn { 
+  width: 30px; 
+  height: 30px; 
+  margin: 0px; 
+  padding: 2px; 
+  border: none; 
+  border-radius: 5px; 
+  cursor: pointer; 
+  background-color: transparent; /* 讓按鈕背景透明化，更融入表格 */
+  transition: background-color 0.2s;
+}
+.rejected-documents-table .btn:hover {background-color: rgba(0, 0, 0, 0.05); }
+.rejected-documents-table .icon { width: 100%; height: 100%; background-color: none; }
 
 </style>

@@ -18,7 +18,7 @@
         ]"
         @click="goToStep(index + 1)"
       >
-        <div class="step-circle">{{ index + 1 }}</div>
+        <div class="step-circle">{{ (step.label == "基本屬性" || step.label == "文件產出") ? "" : index }}</div>
         <div class="step-label">{{ step.label }}</div>
       </div>
     </div>
@@ -37,7 +37,7 @@
               <div class="form-group"><label for="doc-version">文件版本：</label><input type="text" id="doc-version" v-model="form.documentVersion" readonly/></div>
               <div class="form-group">
                 <label for="apply-project">適用工程：</label>
-                <select v-model="form.attribute.applyProject" :disabled="!!form.previousDocumentToken">
+                <select v-model="form.attribute.applyProject" :disabled="!!form.previousDocumentToken" @change = applyProjectChange>
                   <option value="">-- 請選擇適用工程 --</option>
                   <option v-for="p in projectList" :key="p.id" :value="p.projectName">{{ p.projectName }}</option>
                 </select>
@@ -73,7 +73,7 @@
 
         <!-- Step 2 -->
         <section :ref="el => sectionRefs[1].value = el" class="step-section">
-          <h2>目的</h2>
+          <h2>1. 目的</h2>
           <div class="purpose-group">
             <textarea v-model="form.documentPurpose" placeholder="此處將填寫文件的目的相關內容。"></textarea>
           </div>
@@ -81,30 +81,32 @@
 
         <!-- Step 3 -->
         <section :ref="el => sectionRefs[2].value = el" class="step-section">
-          <h2>製造流程</h2>
+          <h2>2. 製造流程</h2>
           <ProcessFlowBlock
             v-model="processFlowData"
             :cols="9"
             :token="draftToken"
             :machineCode="firstMachineCode"
-            :version="flowVersion" 
+            :version="flowVersion"
+            :allow-color="isRevisionDoc"
           />
         </section>
 
         <!-- Step 4 -->
         <section :ref="el => sectionRefs[3].value = el" class="step-section">
-          <h2>管理條件</h2>
+          <h2>3. 管理條件</h2>
           <!-- 原本 Step 4 的內容搬進來 -->
-          <!-- ... ManagementSpecificBlock & DynamicEditorBlock ... -->
           <div class="Management">
             <button class="layer-action-btn add" @click="addManagementLayer">新增下一層</button>
           </div>
           
           <div class="management-combination-block">
             <ManagementSpecificBlock
+              ref="managementSpecificBlockRef"
               :machines="form.attribute.machines"
               :managementBlock="managementSpecific"
               :has-pms="hasPmsForStep3"
+              :allow-color="isRevisionDoc"
               @update-table-data="updateManagementTableData"
             />
           </div>
@@ -113,6 +115,7 @@
               v-for="blk in managementBlocks"
               :key="blk.id"
               :block-editors="blk"
+              :allow-color="isRevisionDoc"
               @update-block="updateManagementBlockData"
               @delete-block="removeManagementLayer"
             />
@@ -121,7 +124,7 @@
 
         <!-- Step 5 -->
         <section :ref="el => sectionRefs[4].value = el" class="step-section">
-          <h2>製造條件參數一覽表</h2>
+          <h2>4. 製造條件參數一覽表</h2>
           <ManufacturingConditionRuleBlocks
             :data-blocks="mcrBlocks"
             :cond-template="condTemplate"
@@ -130,6 +133,9 @@
             :has-pms="hasPmsForMcr"
             :has-conditions="hasCondForMcr"
             :spec-options="specOptionsForMcr"
+            :document-token="draftToken"
+            :allow-color="isRevisionDoc"
+            :base-machine-code="baseMachineCode"
             @update:dataBlocks="mcrBlocks = $event"
             @save="mcrBlocks = $event"
           />
@@ -137,7 +143,7 @@
 
         <!-- Step 6 -->
         <section :ref="el => sectionRefs[5].value = el" class="step-section">
-          <h2>異常處置</h2>
+          <h2>5. 異常處置</h2>
           <!-- 原本 Step 6 的 DynamicEditorBlock 區塊 -->
           <div class="Exception">
             <button class="layer-action-btn add" @click="addExceptionLayer">新增下一層</button>
@@ -147,6 +153,7 @@
             v-for="blockContent in exceptionBlocks"
             :key="blockContent.id"
             :blockEditors="blockContent"
+            :allow-color="isRevisionDoc"
             @delete-block="removeExceptionLayer(blockContent.id)"
             @update-block="updateExceptionBlockData"
           ></DynamicEditorBlock>
@@ -154,7 +161,7 @@
 
         <!-- Step 7 -->
         <section :ref="el => sectionRefs[6].value = el" class="step-section">
-          <h2>相關文件</h2>
+          <h2>6. 相關文件</h2>
           <!-- 原本 Step 7 的 DocSearchWindow 區塊 -->
           <div class="relative-document">
             <button class="layer-action-btn add" @click="docWindowVisible=true">新增文件</button>
@@ -181,7 +188,7 @@
 
         <!-- Step 8 -->
         <section :ref="el => sectionRefs[7].value = el" class="step-section">
-          <h2>使用表單</h2>
+          <h2>7. 使用表單</h2>
           <!-- 原本 Step 8 的 FormSearchWindow 區塊 -->
           <div class="used-form">
             <button class="layer-action-btn add" @click="formWindowVisible=true">新增表單</button>
@@ -233,24 +240,17 @@
   </div>
   <!-- 右側浮動工具列 -->
   <div class="floating-tools">
-    <button class="tool-btn" @click="$router.push('/home')" title="回首頁">
-      <!-- 這裡放 icon，暫時用字 -->
-      ⌂
-    </button>
-    <button class="tool-btn" @click="scrollToTop" title="回到最上層">
-      ↑
-    </button>
-    <button class="tool-btn" @click="saveDraft" :disabled="isSaving" title="儲存草稿">
-      💾
-    </button>
+    <button class="tool-btn" @click="$router.push('/home')" title="回首頁">⌂</button>
+    <button class="tool-btn" @click="scrollToTop" title="回到最上層">↑</button>
+    <button class="tool-btn" @click="saveDraft" :disabled="isSaving" title="儲存草稿">💾</button>
   </div>
 
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
-
 import axios from 'axios'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 
 import ProjectListWindow from '@/components/ProjectListWindow.vue'
 import MachinesListWindow from '@/components/MachinesListWindow.vue'
@@ -263,10 +263,15 @@ import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import PdfPreview from '@/components/PdfPreview.vue'
 import WordPreview from '@/components/WordPreview.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
-import { initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
+import { loadPersonnel, initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
+
+const route = useRoute()
+
+// ⭐ 判斷是不是變版模式
+const isRevisionDoc = computed(() => route.query.mode === 'revision')
 
 // --- ensure we have a server-side token row ---
 const ensureDraftToken = async () => {
@@ -475,12 +480,8 @@ const isStep4Valid = computed(() => {
   }
 
   let ok = true
-  if (pmsStatus !== null) {
-    ok = ok && pmsStatus
-  }
-  if (hasDynamic) {
-    ok = ok && areDynamicBlocksValid(managementBlocks.value)
-  }
+  if (pmsStatus !== null) { ok = ok && pmsStatus }
+  if (hasDynamic) { ok = ok && areDynamicBlocksValid(managementBlocks.value) }
   return ok
 })
 
@@ -506,8 +507,19 @@ const isStep5Valid = computed(() => {
 
   let ok = true
 
+  // 🔸 [新增] 每個 block 都要至少選一個 specification / programLinks
+  for (const b of blocksArr) {
+    const hasPrograms =
+      (Array.isArray(b.programLinks) && b.programLinks.length > 0) ||
+      (b.specCode && String(b.specCode).trim() !== '')
+    if (!hasPrograms) {
+      ok = false
+      break
+    }
+  }
+
   // ---- 条件 table 檢查 ----
-  if (hasCond) {
+  if (ok && hasCond) {
     for (const b of blocksArr) {
       const v = isConditionTableValidForBlock(b)
       if (v === false) {
@@ -536,6 +548,7 @@ const isStep5Valid = computed(() => {
 
   return ok
 })
+
 
 // Step 6：異常處置（DynamicEditorBlock）
 // - 沒有任一層 exceptionBlocks → 視為 N/A（不上色）
@@ -642,7 +655,7 @@ const stepStatusClass = (index) => {
 // ---------- basic form ----------
 let itemID = 0
 const projectList = ref([]);
-let inputMachines = ref([]);
+const inputMachines = ref('');
 const form = reactive({
   documentType: 0,
   documentID: '',
@@ -664,13 +677,34 @@ const form = reactive({
 // ---------- popups ----------
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
+function applyProjectChange(event) {
+  form.attribute.machines = []
+  inputMachines.value = ""
+  processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+  flowVersion.value++;
+
+  managementSpecific.value = {
+    ...managementSpecific.value,
+    data: { jsonContent: null, arrayData: [] }
+  }
+
+  hasPmsForStep3.value = false
+  hasPmsForMcr.value  = false
+  hasCondForMcr.value = false
+  paramTemplate.value = null
+  condTemplate.value  = null
+  mcrBlocks.value     = []
+}
 const getProject = val => { if (val) form.attribute.applyProject = val }
-const getMachines = async (val) => {
-  form.attribute.machines = val || []
-  console.log("form attribute machines: ", form.attribute.machines)
+const groupSummary = ref({})  // groupCode -> { code, name, total }
+const getMachines = async (payload) => {
+  const machines = payload?.selected || []
+  groupSummary.value = payload?.groupsSummary || {}
+
+  form.attribute.machines = machines
 
   // 顯示在 input 內的機台名稱
-  inputMachines.value = (val || []).map(machine => machine.name).join(', ')
+  inputMachines.value = machines.map(m => m.name).join(', ')
 
   // 取得「新的第一台機台代碼」
   let newFirstCode = ''
@@ -682,8 +716,6 @@ const getMachines = async (val) => {
   // ⚠️ 這裡是關鍵：
   // 若「機台真的有變」（包括從空 -> 有機台），重置 Step3 的流程資料
   if (newFirstCode !== lastMachineCodeForProcessFlow.value) {
-    // console.log('[Step3] machine changed for process flow:', lastMachineCodeForProcessFlow.value, '→', newFirstCode)
-
     // 重置流程資料成「完全空」，讓 ProcessFlowBlock 重新掛載時判定為「新狀態」→ 自動用 PMS 帶入
     processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null }
 
@@ -697,19 +729,16 @@ const getMachines = async (val) => {
   }
 
   // ---------- 以下維持你原本 Step4 / Step5 的 PMS / MCR ----------
-  if (Array.isArray(val) && val.length > 0) {
-    const code = val[0].code
+  if (Array.isArray(machines) && machines.length > 0) {
+    const code = machines[0].code
 
-    // 先處理 Step4 的 PMS（你原本就有）
+    // 先處理 Step4 的 PMS
     await loadPmsTemplate(code)
 
-    // ⭐ 再來：先把 Step5 要用的 template & flag 準備好
+    // 再處理 Step5 的 template & flag
     await loadMcrTemplates(code)
-    // loadMcrTemplates 會設定：
-    //   hasPmsForMcr.value, hasCondForMcr.value
-    //   paramTemplate.value, condTemplate.value
 
-    // ⭐ 最後一步才清掉 mcrBlocks 讓子元件重建 Editor
+    // 最後清空 mcrBlocks 讓子元件重建 Editor
     mcrBlocks.value = []
   } else {
     // 沒選機台 → 完全清空
@@ -724,7 +753,217 @@ const getMachines = async (val) => {
     condTemplate.value  = null
     mcrBlocks.value     = []
   }
+  // ★ 根據所選機台自動更新文件名稱
+  updateDocumentNameByMachines()
+}
+const baseMachineCode = computed(() => {
+  const ms = form.attribute.machines || []
+  if (!ms.length) return ''
+  const m0 = ms[0]
+  return m0.machineCode || m0.MACHINE_CODE || m0.code || ''
+})
 
+// --------- 機台命名工具 ---------
+// 棟別前綴：K#4F -> K#，A#1F -> A#
+function extractBuildingPrefix(building) {
+  if (!building) return ''
+  const idx = building.indexOf('#')
+  if (idx === -1) return building
+  return building.slice(0, idx + 1)
+}
+
+// 把數字字串陣列（例如 ['01','02','04']）壓成 ['01~02','04']
+function compressNumberRanges(numStrs) {
+  if (!numStrs.length) return []
+  const arr = Array.from(new Set(numStrs)).map(s => ({
+    s,
+    n: parseInt(s, 10),
+  })).sort((a, b) => a.n - b.n)
+
+  const segments = []
+  let start = arr[0]
+  let prev = arr[0]
+
+  for (let i = 1; i < arr.length; i++) {
+    const cur = arr[i]
+    if (cur.n === prev.n + 1) {
+      prev = cur
+    } else {
+      if (start.n === prev.n) segments.push(start.s)
+      else segments.push(`${start.s}~${prev.s}`)
+      start = cur
+      prev = cur
+    }
+  }
+
+  if (start) {
+    if (start.n === prev.n) segments.push(start.s)
+    else segments.push(`${start.s}~${prev.s}`)
+  }
+  return segments
+}
+// 拿掉 "(L23A05)" 這種 code prefix，只留下後面的機台名稱
+const CODE_PREFIX_RE = /^\s*\([^)]*\)\s*(.*)$/
+function stripCodePrefix(raw) {
+  if (!raw) return ''
+  const m = raw.match(CODE_PREFIX_RE)
+  return (m ? m[1] : raw).trim()
+}
+
+/**
+ * 單一群組命名：
+ *   groupName: 這個群組名稱（例如 "RTR 乾膜前處理線"）
+ *   machines:  該群組被選取的機台陣列（都屬於同一 groupCode）
+ *   groupTotal: 這個群組母群台數（來自 groupsSummary）
+ */
+function buildGroupMachineName(groupName, machines, groupTotal) {
+  if (!machines.length) return ''
+
+  // === 3.2 / 3.3：整群被選 → 直接用「去掉前綴 code」的群組名稱 ===
+  const cleanGroupName = stripCodePrefix(groupName || '')
+  if (groupTotal && machines.length >= groupTotal) {
+    return cleanGroupName || stripCodePrefix(machines[0].name)
+  }
+
+  // --- 3.4.x：部分選 → 先解析每一台，再依 prefix 拆成多個 cluster 各自合併 ---
+
+  const parsed = machines.map(m => {
+    const raw = m.name || ''
+    // e.g. "(L23A05)蝕刻線-03-A" -> "蝕刻線-03-A"
+    const base = stripCodePrefix(raw)
+    const parts = base.split('-').map(p => p.trim()).filter(Boolean)
+
+    let prefix = base
+    let num = null
+    let suffix = null
+
+    if (parts.length >= 3) {
+      prefix = parts.slice(0, -2).join('-')   // "蝕刻線-03-A" -> "蝕刻線"
+      num = parts[parts.length - 2]           // "03"
+      suffix = parts[parts.length - 1]        // "A"
+    } else if (parts.length === 2) {
+      prefix = parts[0]
+      if (/^\d+/.test(parts[1])) num = parts[1]
+      else suffix = parts[1]
+    }
+
+    return { raw, base, prefix, num, suffix }
+  })
+
+  // 如果有任何一台完全拆不出 num/suffix，就直接平列「去 prefix 後的名字」
+  if (parsed.some(p => !p.num && !p.suffix)) {
+    const uniq = Array.from(new Set(parsed.map(p => p.base)))
+    return uniq.join('、')
+  }
+
+  // 依 prefix 分 cluster，例如：
+  //   cluster1: prefix="蝕刻線" → 01-A, 02-A, 03-A
+  //   cluster2: prefix="RTR 蝕刻線" → 04-A
+  const clusters = new Map()
+  parsed.forEach(p => {
+    if (!clusters.has(p.prefix)) clusters.set(p.prefix, [])
+    clusters.get(p.prefix).push(p)
+  })
+
+  function buildForPrefix(basePrefix, list) {
+    // num -> suffixSet
+    const suffixSetByNum = new Map()
+    list.forEach(p => {
+      const key = p.num || ''
+      if (!suffixSetByNum.has(key)) suffixSetByNum.set(key, new Set())
+      suffixSetByNum.get(key).add(p.suffix || '')
+    })
+
+    const allNums = Array.from(suffixSetByNum.keys())
+    const sizes = Array.from(suffixSetByNum.values()).map(s => s.size)
+    const maxSuffixCnt = sizes.length ? Math.max(...sizes) : 0
+
+    const segments = []
+
+    // fullNums: suffix 數量達到 max 的 num（例如 01 同時有 A/B）
+    const fullNums = allNums.filter(num => {
+      const size = suffixSetByNum.get(num)?.size || 0
+      return size >= 2 && size === maxSuffixCnt
+    })
+    const partialNums = allNums.filter(num => !fullNums.includes(num))
+
+    // 3.4.1 / 3.4.3：01-A + 01-B → "01"，多個 full num → "01、02"
+    if (fullNums.length) {
+      fullNums.sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+      segments.push(fullNums.join('、'))
+    }
+
+    // 3.4.4 / 3.4.5：對 partial num 做 01~03 / 01~02、04
+    const bySuffix = new Map()
+    list.forEach(p => {
+      if (!partialNums.includes(p.num)) return
+      const sfx = p.suffix || ''
+      if (!bySuffix.has(sfx)) bySuffix.set(sfx, [])
+      bySuffix.get(sfx).push(p.num)
+    })
+
+    Array.from(bySuffix.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([sfx, nums]) => {
+        const segNums = compressNumberRanges(nums)
+        const segStr = segNums
+          .map(seg => (sfx ? `${seg}-${sfx}` : seg))
+          .join('、')
+        if (segStr) segments.push(segStr)
+      })
+
+    const tail = segments.join('、')
+    return tail ? `${basePrefix}-${tail}` : basePrefix
+  }
+
+  // 每個 prefix cluster 都跑一次 buildForPrefix，最後用 "、" 接起來
+  const allSegments = []
+  for (const [prefix, list] of clusters.entries()) {
+    allSegments.push(buildForPrefix(prefix, list))
+  }
+
+  return allSegments.join('、')
+}
+function updateDocumentNameByMachines() {
+  const machines = form.attribute.machines || []
+  if (!machines.length) return
+
+  // 1) buildings set
+  const buildingSet = new Set()
+  machines.forEach(m => {
+    const prefix = extractBuildingPrefix(m.building)
+    if (prefix) buildingSet.add(prefix)
+  })
+  const buildings = Array.from(buildingSet).sort().join('')
+
+  // 2) 依 group 分組
+  const byGroup = new Map() // groupCode -> { groupName, machines: [] }
+  machines.forEach(m => {
+    const gcode = m.groupCode || '__NO_GROUP__'
+    if (!byGroup.has(gcode)) {
+      byGroup.set(gcode, {
+        groupName: m.groupName || '',
+        machines: [],
+      })
+    }
+    byGroup.get(gcode).machines.push(m)
+  })
+
+  // 3) 對每個群組跑 buildGroupMachineName
+  const perGroupNames = []
+  for (const [gcode, { groupName, machines: groupMachines }] of byGroup.entries()) {
+    const summary = groupSummary.value[gcode] || {}
+    const total = summary.total || 0
+    perGroupNames.push(
+      buildGroupMachineName(groupName, groupMachines, total)
+    )
+  }
+
+  perGroupNames.sort()
+  const machineNameRule = perGroupNames.join('、')
+
+  const suffix = '製造條件指示書'
+  form.documentName = `${buildings}_${machineNameRule}_${suffix}`
 }
 
 // ---------- process (step 3) ----------
@@ -880,6 +1119,7 @@ function loadProcessFlowFromBlocks(resp) {
 }
 
 // ---------- 管理條件 (step 4) ----------
+const managementSpecificBlockRef = ref(null)
 const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
 const hasPmsForStep3  = ref(false)   // Step 3 生產基本條件 PMS
 
@@ -895,8 +1135,6 @@ const loadPmsTemplate = async (machineCode) => {
     const { data } = await axios.get(`${API}/mes/pms/machine-parameters`, {
       params: { machine_id: machineCode },
     })
-
-    console.log("hasPmsForStep3: ", hasPmsForStep3.value)
     
     hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false
     
@@ -936,7 +1174,6 @@ const updateManagementBlockData = payload => {
   const idx = managementBlocks.value.findIndex(b => b.id === payload.id)
   if (idx !== -1) managementBlocks.value[idx] = payload
 }
-
 const serializeManagementToBlocks = () => {
   // shape expected by /docs/blocks/save:
   // [{ tier, data:[ {option, jsonHeader, jsonContent, files} ] }, ...]
@@ -971,7 +1208,6 @@ const serializeManagementToBlocks = () => {
   })
   return out
 }
-
 const loadManagementFromBlocks = (payload) => {
   // payload.blocks: [{ tier, data:[...] }]
   // Rebuild your two UIs: first row as “specific” (if table), others as dynamic.
@@ -1019,38 +1255,60 @@ function extractPlainTextFromNode(node) {
   }
   return out
 }
-
 // 支援 string / doc JSON
 function extractPlainTextFromDocJson(doc) {
   if (!doc) return ''
   if (typeof doc === 'string') return doc.trim()
   return extractPlainTextFromNode(doc).trim()
 }
-
 /** Step4-1: PMS 表格是否有效
  *  - 沒有 PMS（hasPmsForStep3 = false 或 arrayData 太少）→ 回傳 null（代表「不適用」）
  *  - 有 PMS：每列第 3~7 欄都要「非空 & 數字」才算 valid
  */
 function isPmsTableValid() {
+  // 這台機本來就沒有 PMS → 不適用
   if (!hasPmsForStep3.value) return null
 
-  const arr = managementSpecific.value?.data?.arrayData
-  if (!Array.isArray(arr) || arr.length <= 1) {
-    // 只有表頭或完全沒資料 → 視為沒有 PMS
-    return null
+  const doc = managementSpecific.value?.data?.jsonContent
+  if (!doc || typeof doc !== 'object') {
+    // 有 PMS 的機台，但還沒打開/編輯過管理條件 → 視為沒填
+    return false
   }
 
-  // 從第 2 列開始檢查（index 1 起）
-  for (let r = 1; r < arr.length; r++) {
-    const row = arr[r] || []
-    // 第 3~7 欄（index 3 ~ 7）
+  // 找第一個 table
+  const tables = Array.isArray(doc.content)
+    ? doc.content.filter(n => n.type === 'table')
+    : []
+  if (!tables.length) {
+    // 有 PMS 設定但內容不是 table → 視為沒填完
+    return false
+  }
+
+  const tableNode = tables[0]
+  const rows = Array.isArray(tableNode.content) ? tableNode.content : []
+
+  // 至少要有表頭 + 1 列
+  if (rows.length <= 1) {
+    return false
+  }
+
+  // 從第 2 列（index 1）開始檢查
+  for (let r = 1; r < rows.length; r++) {
+    const rowNode = rows[r]
+    const cells = Array.isArray(rowNode.content) ? rowNode.content : []
+
+    // 欄位 index 對應： 0 "項次", 1 "槽體", 2 "管理項目", 3 "規格下限(OOS-)", 4 "操作下限(OOC-)," 5 "設定值", 6 "操作上限(OOC+)", 7 "規格上限(OOS+)", 8 "單位"
     for (let c = 3; c <= 7; c++) {
-      const raw = (row[c] ?? '').toString().trim()
-      if (!raw) return false        // empty
+      const cellNode = cells[c]
+      if (!cellNode) return false
+
+      const raw = extractPlainTextFromNode(cellNode).trim()
+      if (!raw) return false                     // 空白 → 未填完
       const num = Number(raw)
-      if (!Number.isFinite(num)) return false  // invalid number
+      if (!Number.isFinite(num)) return false   // 不是數字 → 無效
     }
   }
+
   return true
 }
 
@@ -1114,8 +1372,6 @@ function isDynamicBlockItemValid(item) {
 
   return true
 }
-
-
 /** Step4-3: 所有 DynamicEditorBlock 是否都有效 */
 function areDynamicBlocksValid(blocksArr) {
   const blocks = blocksArr || []
@@ -1203,38 +1459,32 @@ const loadMcrTemplates = async (machineCode) => {
     condTemplate.value = null
   }
 }
-
 const specOptionsForMcr = computed(() => {
   const machines = form.attribute?.machines || []
-  const map = new Map()
+  const map = new Map()  // code -> name
 
   machines.forEach(m => {
-    const code = m.specCode || m.spec_code
-    if (!code) return
-    const name = m.specName || m.spec_name || code
-    if (!map.has(code)) {
-      map.set(code, name)
-    }
+    const specs = Array.isArray(m.specifications) ? m.specifications : []
+    specs.forEach(spec => {
+      if (!spec || !spec.code) return
+      const code = spec.code
+      const name = spec.name || spec.code
+      if (!map.has(code)) {
+        map.set(code, name)
+      }
+    })
   })
 
-  // 給子元件用：[{code, name}]
+  // 給子元件用：[{ code, name }]
   return Array.from(map, ([code, name]) => ({ code, name }))
 })
 
 // ---------- Step5 驗證用 helper ----------
-
 // 保險轉成 2D array
 function normalize2DArray(arr) {
   if (!Array.isArray(arr)) return []
   return arr.map(row => (Array.isArray(row) ? row : []))
 }
-
-/**
- * 單一 block 的條件 table 是否填寫完畢
- * 規則：
- *  - 只在 hasCondForMcr = true 時才檢查
- *  - 除第一列(row=0)與第一行(col=0)外，其餘都要有選項（非空字串）
- */
 function isConditionTableValidForBlock(block) {
   if (!hasCondForMcr.value) return null
 
@@ -1259,12 +1509,6 @@ function isConditionTableValidForBlock(block) {
   }
   return true
 }
-
-/**
- * Condition table 是否有重複列（跨所有 block）
- *  - 忽略 header row
- *  - key = 這一列「除第一欄外」的值
- */
 function hasConditionDuplicates(blocksArr) {
   const seen = new Map()   // key -> [{blockIdx,rowIndex}, ...]
 
@@ -1290,16 +1534,6 @@ function hasConditionDuplicates(blocksArr) {
   }
   return false
 }
-
-/**
- * 單一 block 的 PMS table 是否填寫完畢
- * 規則：
- *  - 只在 hasPmsForMcr = true 時才檢查
- *  - 每一列（從 row=1 起）第 2~6 欄必須：
- *      - 非空
- *      - 可轉成數字
- *  - 同列內數值須維持「非遞減」（a > b 就視為錯）
- */
 function isParamTableValidForBlock(block) {
   if (!hasPmsForMcr.value) return null
 
@@ -1335,14 +1569,6 @@ function isParamTableValidForBlock(block) {
 
   return true
 }
-
-/**
- * PMS table 是否有重複（跨 block）
- *  - 參照 getParamMatrix / runParamDuplicateValidation：
- *    sig = 每個 block 的 matrix(JSON.stringify)，其中
- *      row: r>=1
- *      col: 2~6
- */
 function hasParamTableDuplicates(blocksArr) {
   const sigs = []
 
@@ -1369,60 +1595,79 @@ function hasParamTableDuplicates(blocksArr) {
   return false
 }
 
-// NEW — send both parameter & condition for each tier
+// NEW — send both parameter & condition for each tier + programLinks
 const serializeMCRToParams = () => {
   if (!hasPmsForMcr.value && !hasCondForMcr.value)
     return []
 
   return (mcrBlocks.value || []).map((blk, i) => {
-    const specCode = blk.specCode || blk.data?.metadata?.specification?.code || ''
-    const specName = blk.specName || blk.data?.metadata?.specification?.name || ''
+    const programs = Array.isArray(blk.programLinks) ? blk.programLinks : Array.isArray(blk.data?.metadata?.programs) ? blk.data.metadata.programs : []
+    const mainSpec = blk.data?.metadata?.mainSpec || (programs[0] ? { specCode: programs[0].specCode, specName: programs[0].specName } : null)
 
     return {
       step_type: 2,
       tier_no: i + 1,
-      code: blk.code || `XXXX${i + 1}`,
       jsonParameterContent: blk.data?.jsonParameterContent || null,
       arrayParameterData:   blk.data?.arrayParameterData   || [],
       jsonConditionContent: blk.data?.jsonConditionContent || null,
       arrayConditionData:   blk.data?.arrayConditionData   || [],
+
       metadata: {
         ...(blk.data?.metadata || {}),
-        specification: {
-          code: specCode,
-          name: specName,
-        },
+        programs,
+        mainSpec,
       },
     }
   })
 }
-
-// NEW — rebuild the exact structure you render
+// NEW — rebuild the exact structure you render（含 programLinks）
 const loadMCRFromParams = (payload) => {
   mcrBlocks.value = (payload.blocks || []).map((b, i) => {
-    const spec = b.metadata?.specification || {}
+    const meta = b.metadata || {}
+
+    let programs = []
+    if (Array.isArray(meta.programs) && meta.programs.length) {
+      programs = meta.programs.map(p => ({ ...p }))
+    } else if (b.code) {
+      // 相容舊資料：metadata.specification + code → 一組 program
+      const spec = meta.specification || {}
+      if (spec.code || b.code) {
+        programs.push({
+          specCode: spec.code || '',
+          specName: spec.name || spec.code || '',
+          programCode: b.code,
+        })
+      }
+    }
+
+    const mainSpec =
+      meta.mainSpec ||
+      (programs[0]
+        ? { specCode: programs[0].specCode, specName: programs[0].specName }
+        : null)
+
     return {
       id: b.id ?? i + 1,
-      code: b.code || `XXXX${i + 1}`,
-      specCode: spec.code || '',
-      specName: spec.name || '',
+      // 相容舊欄位：保留 code / specCode / specName 但實際上用不到
+      code: programs[0]?.programCode || b.code || '',
+      specCode: programs[0]?.specCode || meta.specification?.code || '',
+      specName: programs[0]?.specName || meta.specification?.name || '',
+
+      programLinks: programs,
       data: {
         jsonParameterContent: b.jsonParameterContent || null,
         arrayParameterData:   b.arrayParameterData   || [],
         jsonConditionContent: b.jsonConditionContent || null,
         arrayConditionData:   b.arrayConditionData   || [],
         metadata: {
-          ...(b.metadata || {}),
-          specification: {
-            code: spec.code || '',
-            name: spec.name || '',
-          },
+          ...meta,
+          programs,
+          mainSpec,
         },
       },
     }
   })
 }
-
 // ---------- 異常處置 (step 6) ----------
 const exceptionBlocks = ref([])
 const addExceptionLayer = () => {
@@ -1508,7 +1753,6 @@ watch(currentStep, (val) => {
     fetchPreviewDocx()
   }
 })
-
 watch(
   () => form.attribute.applyProject,
   async (newVal, oldVal) => {
@@ -1536,8 +1780,6 @@ watch(
     }
   }
 )
-
-
 async function fetchPreviewDocx() {
   previewLoading.value = true
   errorMsg.value = ''
@@ -1598,17 +1840,6 @@ async function fetchPreviewDocx() {
   }
 }
 
-function extractFilenameFromDisposition(disposition, fallback = 'document.docx') {
-  if (!disposition) return fallback
-  // RFC 5987: filename*=UTF-8''...
-  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)
-  if (star?.[1]) return decodeURIComponent(star[1])
-  // Plain filename="..."
-  const plain = /filename\s*=\s*"?([^\";]+)"?/i.exec(disposition)
-  if (plain?.[1]) return plain[1]
-  return fallback
-}
-
 async function generateAndDownloadDocx() {
   // if (steps.some(step => !step.status)) {
   //   alert('請把內容完成才可下載')
@@ -1629,7 +1860,6 @@ async function generateAndDownloadDocx() {
     }
     const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
 
-    console.log("payload: ", payload)
     const res = await axios.post(url, payload, { responseType: 'blob' })
 
     // 🔸 從 header 拿回 docID，塞回 form，讓文管編號顯示出來
@@ -1645,7 +1875,13 @@ async function generateAndDownloadDocx() {
     const urlBlob = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = urlBlob
-    a.download = `${form.documentName || form.documentID || 'document'}.docx`
+
+    // 把版本號固定成一位小數
+    const versionStr = Number(form.documentVersion ?? 1).toFixed(1)
+
+    // 如果你想要「文件名 + 版本」，中間要不要加底線看你習慣：
+    a.download = `${form.documentName || 'document'}${versionStr}.docx`
+
     a.click()
     URL.revokeObjectURL(urlBlob)
   } catch (e) {
@@ -1672,6 +1908,12 @@ const saveDraft = async () => {
   const t = await ensureDraftToken()
   if (!t) return
   try {
+    // 🔸 0) 先讓 child 把 editor 內容全部 flush 回來
+    await nextTick() // 確保最新一筆輸入已經寫進 ProseMirror state
+    if (managementSpecificBlockRef.value?.flushNow) {
+      managementSpecificBlockRef.value.flushNow()
+    }
+
     // 1) attributes
     const a = await saveAttributes(t, form)
     if (!a?.success) return alert(a?.message || '屬性儲存失敗')
@@ -1706,6 +1948,7 @@ const saveDraft = async () => {
 
 // ---------- Load on mount ----------
 onMounted(async () => {
+  console.log("isRevisionDoc: ", isRevisionDoc.value)
   try {
     const url = `${API_BASE_URL}/mes/engineering`
     const projects = await axios.get(`${API_BASE_URL}/mes/engineering`, {params: { pageSize: 40 }})
@@ -1718,6 +1961,7 @@ onMounted(async () => {
   const t = await ensureDraftToken()
   if (!t) return
   try {
+
     // 1) attributes
     const a = await loadAttributes(t)
     if (a?.success) Object.assign(form, a.form || {})
@@ -1730,9 +1974,16 @@ onMounted(async () => {
         hasCondForMcr.value = true
         hasPmsForMcr.value = true
         hasPmsForStep3.value = true
+        updateDocumentNameByMachines()
     }
     else {
       form.attribute.machines = [];
+    }
+
+    const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
+    if (personnel?.success){
+      if (form.confirmer.length == 0) form.confirmer = personnel.data.personnel.confirmer
+      if (form.approver.length == 0) form.approver = personnel.data.personnel.approver
     }
 
     // 🚩 在這裡初始化「流程目前綁的機台」
@@ -1891,12 +2142,15 @@ onMounted(async () => {
   color: #000000;
 }
 
-/* 如果你希望只是圈圈變色，也可以額外寫：
-.step-item.step-error .step-circle { background-color: #e74c3c; color: #fff; }
-.step-item.step-ok .step-circle { background-color: #27ae60; color: #fff; }
-*/
-
-
+.step-section h2 {
+  font-size: 22px;
+  color: #333;
+  margin-top: 0;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #007bff;
+  display: inline-block;
+}
 
 .fundamental-attribute-block { display: flex; border: unset; padding: 0px; }
 .fundamental-attribute-block .attribute { display: flex; flex-direction: column; width: 100%; }

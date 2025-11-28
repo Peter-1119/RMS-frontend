@@ -3,7 +3,7 @@
     <div class="management-header-block">
       <label>{{ managementBlock.step }}.{{ managementBlock.tier }} 生產基本條件</label>
       <div class="management-operation-block">
-        <div class="menu color">
+        <div v-if="allowColor" class="menu color">
           <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
           <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
         </div>
@@ -98,6 +98,7 @@ export default {
         machines: { type: Array, required: true },
         managementBlock: { type: Object, required: true },
         hasPms: { type: Boolean, default: true },
+        allowColor: {type: Boolean, default: true}
     },
     data() {
         return {
@@ -105,14 +106,19 @@ export default {
             editor: null,
             hasUserEdited: false,      // 使用者是否改過
             lastExternalJson: null,    // 上一次「外部載入」的 jsonContent 簽章
+            validateTimer: null,   // 驗證用 timeout
+            syncTimer: null,       // 同步 parent 用 timeout
+            dirtyRows: new Set(),  // 被改過的 row index
         }
-
     },
     mounted() {
       this.initOrReloadFromProps(true)
     },
 
     beforeUnmount() {
+        if (this.validateTimer) clearTimeout(this.validateTimer)
+        if (this.syncTimer) clearTimeout(this.syncTimer)
+        this.exportTableData(this.editor)
         if (this.editor) this.editor.destroy();
     },
     computed: {
@@ -187,8 +193,26 @@ export default {
                         paste: (view, event) => this.handlePaste(view, event),   // ⭐ 新增這行
                     }},
                     onUpdate: ({ editor }) => {
-                    this.validateTableContent(editor)
-                    this.exportTableData(editor)   // 這裡會 emit 給父層
+                        // 1️⃣ 不要每次都立即 export / validate
+
+                        // 先標記目前 row 是 dirty
+                        this.markCurrentRowDirty(editor)
+
+                        // 2️⃣ 驗證：120ms 後只檢查 dirtyRows
+                        if (this.validateTimer) clearTimeout(this.validateTimer)
+                        this.validateTimer = setTimeout(() => {
+                            const rows = Array.from(this.dirtyRows)
+                            if (rows.length) {
+                                this.validateTableContent(editor, rows)
+                                this.dirtyRows.clear()
+                            }
+                        }, 200)   // 你可以調 150~300，看順手程度
+
+                        // 3️⃣ 同步 parent：比較慢一點沒關係
+                        if (this.syncTimer) clearTimeout(this.syncTimer)
+                        this.syncTimer = setTimeout(() => {
+                            this.exportTableData(editor)
+                        }, 500)   // 0.5s 內沒有再打字，就同步一次
                     },
                 })
                 this.validateTableContent(this.editor)
@@ -198,6 +222,14 @@ export default {
                 this.validateTableContent(this.editor)
             }
         },
+        markCurrentRowDirty(editor) {
+            if (!editor) return
+            const rowIndex = this.rowFocusCheck()
+            if (rowIndex > 0) {
+                this.dirtyRows.add(rowIndex)
+            }
+        },
+
         handleKeydown(view, event) {
             if (event.key !== 'Enter') return false
 
@@ -208,12 +240,12 @@ export default {
             let cellNode = null
             let cellDepth = -1
             for (let d = $from.depth; d > 0; d--) {
-            const node = $from.node(d)
-            if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
-                cellNode = node
-                cellDepth = d
-                break
-            }
+                const node = $from.node(d)
+                if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+                    cellNode = node
+                    cellDepth = d
+                    break
+                }
             }
             if (!cellNode || cellDepth < 0) return false
 
@@ -227,37 +259,25 @@ export default {
 
             // 取得 rowIndex
             tableNode.content.forEach((row, _offset, index) => {
-            if (row === rowNode) {
-                rowIndex = index
-            }
+                if (row === rowNode) {
+                    rowIndex = index
+                }
             })
 
             // 取得 colIndex
             rowNode.content.forEach((cell, _offset, index) => {
-            if (cell === cellNode) {
-                colIndex = index
-            }
+                if (cell === cellNode) {
+                    colIndex = index
+                }
             })
 
             if (rowIndex < 0 || colIndex < 0) return false
-
-            // 欄位 index 對應 initialTableData：
-            // 0 "項次"
-            // 1 "槽體"
-            // 2 "管理項目"
-            // 3 "規格下限(OOS-)"
-            // 4 "操作下限(OOC-)"
-            // 5 "設定值"
-            // 6 "操作上限(OOC+)"
-            // 7 "規格上限(OOS+)"
-            // 8 "單位"
-            // ...
             const blockedCols = [3, 4, 5, 6, 7]
 
             // 如果是在需要鎖 Enter 的那些欄位，就擋掉
             if (blockedCols.includes(colIndex)) {
-            event.preventDefault()
-            return true       // 告訴 ProseMirror：這個事件已經處理完了
+                event.preventDefault()
+                return true       // 告訴 ProseMirror：這個事件已經處理完了
             }
 
             return false
@@ -296,7 +316,6 @@ export default {
 
             return false
         },
-
         handlePaste(view, event) {
             const { state, dispatch } = view
             const sel = state.selection
@@ -436,61 +455,107 @@ export default {
             event.preventDefault()
             return true
         },
-
-        validateTableContent(editor) {
+        validateTableContent(editor, rowsToCheck = null) {
             if (!editor) return
-            const tr = editor.state.tr;
-            let changes = false;
-            
-            // 1. 獲取表格節點
-            const tableNode = editor.state.doc.content.firstChild;
-            if (!tableNode || tableNode.type.name !== 'table') return;
 
-            for (let rowIndex = 0; rowIndex < tableNode.content.childCount; rowIndex++) {
-                const rowNode = tableNode.content.child(rowIndex);
-                const cells = rowNode.content;
+            const { state } = editor
+            const tableNode = state.doc.content.firstChild
+            if (!tableNode || tableNode.type.name !== 'table') return
 
-                let rowPos = 1;
-                for (let i = 0; i < rowIndex; i++) {
-                    rowPos += tableNode.content.child(i).nodeSize;
+            let tr = state.tr
+            let changed = false
+
+            const rowCount = tableNode.content.childCount
+            let rowPos = 1 // 第一列 row 的起始位置（table node 之後）
+
+            const rowsSet = rowsToCheck ? new Set(rowsToCheck) : null
+
+            for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+                const rowNode = tableNode.content.child(rowIndex)
+                const cells = rowNode.content
+
+                // 表頭列跳過
+                if (rowIndex === 0) {
+                    rowPos += rowNode.nodeSize
+                    continue
                 }
 
-                if (rowIndex == 0) continue;
-
-                let cellPos = [rowPos + 1];
-                for (let index = 0; index < cells.content.length - 1; index++) {
-                    cellPos.push(cellPos[index] + cells.child(index).nodeSize);
+                // 有指定要檢查的 rows，而且這列不在裡面 → 跳過
+                if (rowsSet && !rowsSet.has(rowIndex)) {
+                    rowPos += rowNode.nodeSize
+                    continue
                 }
 
-                const values = [];
-                const valueStatus = [];
+                // 計算這一列每個 cell 的起始 pos
+                const cellPos = []
+                let pos = rowPos + 1
+                for (let i = 0; i < cells.childCount; i++) {
+                    cellPos.push(pos)
+                    pos += cells.child(i).nodeSize
+                }
 
-                for (let index = 3; index < 8; index++) {
-                    const valueText = extractText(cells.child(index));
-                    if (valueText.length > 0) {
-                        const value = Number(valueText);
-                        const valid = (!isNaN(value)) ? "valid" : "invalid";
-                        valueStatus.push(valid);
-                        values.push(!isNaN(value) ? value : null);
+                const values = []
+                const valueStatus = []
+
+                // 3~7 欄：數值欄
+                for (let col = 3; col <= 7; col++) {
+                    const cellNode = cells.child(col)
+                    const txt = extractText(cellNode)
+                    if (!txt) {
+                        valueStatus.push('empty')
+                        values.push(null)
                     } else {
-                        valueStatus.push("empty");
-                        values.push(null);
+                        const num = Number(txt)
+                        if (!Number.isFinite(num)) {
+                            valueStatus.push('invalid')
+                            values.push(null)
+                        } else {
+                            valueStatus.push('valid')
+                            values.push(num)
+                        }
                     }
                 }
 
-                const statusCheck = (status) => { return (status == "valid" || status == "error") }
-                for (let index = 1; index < 5; index++) {
-                    if (statusCheck(valueStatus[index - 1]) && statusCheck(valueStatus[index]) && (values[index - 1] > values[index])) {
-                        valueStatus[index - 1] = "error"
-                        valueStatus[index] = "error"
+                // 8~12 欄：只看有沒有填
+                // for (let col = 8; col <= 12; col++) {
+                //     const cellNode = cells.child(col)
+                //     const txt = extractText(cellNode)
+                //     valueStatus.push(txt ? 'valid' : 'empty')
+                // }
+
+                const statusCheck = (s) => (s === 'valid' || s === 'error')
+                for (let i = 1; i < 5; i++) {
+                    const a = values[i - 1]
+                    const b = values[i]
+                    if (a != null && b != null && statusCheck(valueStatus[i - 1]) && statusCheck(valueStatus[i]) && a > b) {
+                        valueStatus[i - 1] = 'error'
+                        valueStatus[i] = 'error'
                     }
                 }
+                
+                for (let offset = 0; offset < 5; offset++) {
+                    const colIndex = 3 + offset
+                    const cellNode = cells.child(colIndex)
+                    const newClass = 'value-' + valueStatus[offset]
 
-                for (let index = 0; index < 5; index++) {
-                    tr.setNodeMarkup(cellPos[index + 3], null, { ...rowNode.attrs, class: "value-" + valueStatus[index] });
+                    if (cellNode.attrs.class === newClass) continue
+
+                    const newAttrs = { ...cellNode.attrs, class: newClass }
+                    tr = tr.setNodeMarkup(
+                        cellPos[colIndex],
+                        cellNode.type,
+                        newAttrs,
+                        cellNode.marks
+                    )
+                    changed = true
                 }
+
+                rowPos += rowNode.nodeSize
             }
-            editor.view.dispatch(tr);
+
+            if (changed) {
+                editor.view.dispatch(tr)
+            }
         },
         getInitialTableContent(data) {
             let table = { type: "table", content: [] };
@@ -565,6 +630,26 @@ export default {
 
             this.updateTable();
         },
+        flushNow() {
+            if (!this.editor) return
+
+            // 把未執行的 timer 清掉，避免重複跑
+            if (this.validateTimer) {
+                clearTimeout(this.validateTimer)
+                this.validateTimer = null
+            }
+            if (this.syncTimer) {
+                clearTimeout(this.syncTimer)
+                this.syncTimer = null
+            }
+
+            // 直接全表驗證一次（不傳 rows => 全掃）
+            this.validateTableContent(this.editor)
+
+            // 直接把 arrayData + jsonContent 同步給 parent
+            this.exportTableData(this.editor)
+        },
+
         updateTable() {
             if (!this.editor) return
             const { state, view } = this.editor;
@@ -678,22 +763,20 @@ export default {
 .editor-content :deep(p) { margin: 0px; }
 .editor-content :deep(th), .editor-content :deep(td) { text-align: center; }
 
-.management-tiptap-editor :deep(col:nth-child(1)) { width: 5%; } /* 項次 */
-.management-tiptap-editor :deep(col:nth-child(2)) { width: 10%; } /* 槽體/測試點 */
-.management-tiptap-editor :deep(col:nth-child(3)) { width: 12.5%; }
+.management-tiptap-editor :deep(col:nth-child(1)) { width: 50%; } /* 項次 */
+.management-tiptap-editor :deep(col:nth-child(2)) { width: 75%; } /* 槽體/測試點 */
+.management-tiptap-editor :deep(col:nth-child(3)) { width: 100%; }
 .management-tiptap-editor :deep(col:nth-child(4)), 
 .management-tiptap-editor :deep(col:nth-child(5)),
 .management-tiptap-editor :deep(col:nth-child(6)),
 .management-tiptap-editor :deep(col:nth-child(7)),
-.management-tiptap-editor :deep(col:nth-child(8)) { width: 6.5%; } 
+.management-tiptap-editor :deep(col:nth-child(8)) { width: 75%; } 
 
-.management-tiptap-editor :deep(col:nth-child(9)) { width: 5%; } /* 單位 */
-/* .management-tiptap-editor :deep(col:nth-child(10)) { width: 5%; } 參數下放 */
-.management-tiptap-editor :deep(col:nth-child(11)) { width: 6.5%; } /* 檢查頻率 */
-.management-tiptap-editor :deep(col:nth-child(12)) { width: 6.5%; } /* 檢查方式 */
-.management-tiptap-editor :deep(col:nth-child(13)) { width: 6.5%; } /* 檢驗人員 */
-.management-tiptap-editor :deep(col:nth-child(14)) { width: 9%; } /* 記錄 */
-.management-tiptap-editor :deep(col:nth-child(15)) { width: 15%; } /* 備註/參考指示書 */
+.management-tiptap-editor :deep(col:nth-child(9)) { width: 100%; } /* 檢查頻率 */
+.management-tiptap-editor :deep(col:nth-child(10)) { width: 50%; } /* 檢查方式 */
+.management-tiptap-editor :deep(col:nth-child(11)) { width: 50%; } /* 檢驗人員 */
+.management-tiptap-editor :deep(col:nth-child(12)) { width: 100%; } /* 記錄 */
+.management-tiptap-editor :deep(col:nth-child(13)) { width: 100%; } /* 備註/參考指示書 */
 
 .editor-content :deep(td.selectedCell),
 .editor-content :deep(th.selectedCell) {

@@ -12,9 +12,7 @@
           <button class="btn-search" @click="requestItemsFromAPI(keyword)">搜尋</button>
         </div>
 
-        <p v-if="warningText" style="color: red; margin-top: 8px;">
-          {{ warningText }}
-        </p>
+        <p v-if="warningText" style="color: red; margin-top: 8px;">{{ warningText }}</p>
 
         <table class="item_table" v-if="filterItems.length">
           <thead>
@@ -24,9 +22,9 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in paginatedItemsInfos" :key="p.matnr">
+            <tr v-for="p in paginatedItemsInfos" :key="p">
               <td><input type="radio" :value="p" v-model="selectedItem" /></td>
-              <td>{{ p.matnr }}</td>
+              <td>{{ p }}</td>
             </tr>
           </tbody>
         </table>
@@ -83,6 +81,9 @@ export default {
       return this.filterItems.slice(start, end);
     },
   },
+  mounted() {
+    this.requestItemsFromAPI("")
+  },
   watch: {
     currentPage(val) {
       if (val < 1) this.currentPage = 1;
@@ -97,7 +98,7 @@ export default {
       this.filterItems = [];
       this.currentPage = 1;
 
-      if (!keyword || keyword.length === 0) {
+      if (this.specificCode.length ==0 && this.machineCode.length == 0 && keyword.length === 0) {
         this.warningText = "請輸入關鍵字";
         return;
       }
@@ -117,9 +118,7 @@ export default {
           return;
         }
 
-        this.items = Array.isArray(response.data.data?.items)
-          ? response.data.data.items
-          : [];
+        this.items = Array.isArray(response.data.data?.items) ? response.data.data.items : [];
 
         this.filterItems = this.items;
         if (!this.filterItems.length) {
@@ -137,11 +136,6 @@ export default {
       if (this.currentPage < this.totalPage) this.currentPage += 1;
     },
     selectItem() {
-      if (!this.selectedItem) {
-        this.warningText = "請先選擇一個品目";
-        return;
-      }
-
       this.$emit("selectItem", this.selectedItem);
       this.$emit("cancel");
     },
@@ -165,7 +159,7 @@ export default {
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 1001;
 }
-.dialog { background-color: white; width: 50%; border-radius: 8px; box-shadow: 0 4px 6px; padding: 0; overflow: hidden; }
+.dialog { background-color: white; width: 40%; border-radius: 8px; box-shadow: 0 4px 6px; padding: 0; overflow: hidden; }
 
 .header,
 .footer { display: flex; justify-content: space-between; width: 100%; margin: 0; padding: 8px 20px; align-items: center; box-sizing: border-box; }

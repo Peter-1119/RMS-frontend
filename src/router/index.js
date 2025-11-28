@@ -1,6 +1,7 @@
+// router/index.js
 import { createRouter, createWebHistory } from 'vue-router';
 import HomeView from '@/views/HomeView.vue';
-import NewInstruction from '@/views/NewInstruction.vue'; // 新增的組件
+import NewInstruction from '@/views/NewInstruction.vue';
 import InstructionChangePage from '@/views/InstructionChangePage.vue';
 import LoginPage from '@/components/LoginPage.vue';
 import SearchPage from '@/views/SearchPage.vue';
@@ -15,48 +16,47 @@ import SpecificationViewPage from '@/views/SpecificationViewPage.vue';
 import DocxPreviewPage from '@/views/DocxPreviewPage.vue'
 
 const routes = [
-  {path: '/',                       redirect: '/login',},
-  {path: '/login',                  name: 'Login',                  component: LoginPage},
-  {path: '/home',                   name: 'home-alias',             component: HomeView,                    meta: { requiresAuth: true }},
-  {path: '/Specification',          name: 'Specification',          component: SpecificationParamPage,      meta: { requiresAuth: true }},
-  {path: '/new-instruction',        name: 'new-instruction',        component: NewInstruction,              meta: { requiresAuth: true }},
-  {path: '/instruction-change',     name: 'instruction-change',     component: InstructionChangePage,       meta: { requiresAuth: true }},
-  {path: "/new-specification",      name: "new-specification",      component: NewSpecification,            meta: { requiresAyth: true }},
-  {path: '/specification-change',   name: 'specification-change',   component: SpecificationChangePage,     meta: { requiresAuth: true }},
-  {path: '/SearchPage',             name: 'SearchPage',             component: SearchPage,                  meta: { requiresAuth: true }},
-  {path: '/DraftDocuments',         name: 'DraftDocuments',         component: DraftDocuments,              meta: { requiresAuth: true }},
-  {path: '/SubmittedDocuments',     name: 'SubmittedDocuments',     component: SubmittedDocuments,          meta: { requiresAuth: true }},
-  {path: '/RejectedDocuments',      name: 'RejectedDocuments',      component: RejectedDocuments,           meta: { requiresAuth: true }},
-  {path: '/ParametersSearch',       name: 'ParametersSearch',       component: ParametersSearch,            meta: { requiresAuth: true }},
-  {path: '/project-specification',  name: 'SpecificationViewPage',  component: SpecificationViewPage,       meta: { requiresAuth: true }},
-  {path: '/docs/preview/:token',    name: 'docx-preview',           component: DocxPreviewPage,                                             props: true},
-  {path: '/docs/preview/:token',    name: 'docx-preview',           component: DocxPreviewPage,             meta: { hideChrome: true },     props: true},
+  { path: '/',                       redirect: '/login' },
+
+  // 不進 tab、也不需要 chrome
+  { path: '/login',                  name: 'Login', component: LoginPage, meta: { hideChrome: true, title: '登入' } },
+
+  // 會出現在 tab 的頁面（有 requiresAuth）
+  { path: '/home',                   name: 'home-alias',            component: HomeView,               meta: { requiresAuth: true, title: '首頁', noTab: true } },
+  { path: '/Specification',          name: 'Specification',         component: SpecificationParamPage, meta: { requiresAuth: true, title: '規則一覽表' } },
+  { path: '/new-instruction',        name: 'new-instruction',       component: NewInstruction,         meta: { requiresAuth: true, title: '製造條件指示書-新建' } },
+  { path: '/instruction-change',     name: 'instruction-change',    component: InstructionChangePage,  meta: { requiresAuth: true, title: '製造條件指示書-變版' } },
+  { path: "/new-specification",      name: "new-specification",     component: NewSpecification,       meta: { requiresAuth: true, title: '製造式樣書-新建' } },
+  { path: '/specification-change',   name: 'specification-change',  component: SpecificationChangePage,meta: { requiresAuth: true, title: '製造式樣書-變版' } },
+  { path: '/SearchPage',             name: 'SearchPage',            component: SearchPage,             meta: { requiresAuth: true, title: '文件檢索' } },
+  { path: '/DraftDocuments',         name: 'DraftDocuments',        component: DraftDocuments,         meta: { requiresAuth: true, title: '草稿匣' } },
+  { path: '/SubmittedDocuments',     name: 'SubmittedDocuments',    component: SubmittedDocuments,     meta: { requiresAuth: true, title: '已送審' } },
+  { path: '/RejectedDocuments',      name: 'RejectedDocuments',     component: RejectedDocuments,      meta: { requiresAuth: true, title: '已退回' } },
+  { path: '/ParametersSearch',       name: 'ParametersSearch',      component: ParametersSearch,       meta: { requiresAuth: true, title: '配方檢索' } },
+  { path: '/project-specification',  name: 'SpecificationViewPage', component: SpecificationViewPage,  meta: { requiresAuth: true, title: '適用工程一覽表' } },
+
+  // 預覽畫面：隱藏 chrome + 不放進 tab
+  { path: '/docs/preview/:token',    name: 'docx-preview',          component: DocxPreviewPage,        meta: { hideChrome: true, title: '文件預覽' }, props: true },
 ];
 
-// ---- add this small helper at the top (file scope) ----
-
 const router = createRouter({
-  // 保持使用 import.meta.env.BASE_URL
   history: createWebHistory(import.meta.env.BASE_URL),
   routes
 });
 
-// 假設您有一個全局物件來儲存用戶狀態
+// --- 後面你的 beforeEach 原樣貼回，只要放在這裡就好 ---
 window.userGlobalData = {
   loggedInUserName: '訪客',
   loggedInUserdeptDesc:'您沒有部門',
-  isAuthenticated: false // 新增一個標誌來明確表示是否已認證
+  isAuthenticated: false
 };
 
 function isReloadNavigation() {
-  // Modern browsers
   const nav = performance.getEntriesByType?.('navigation')?.[0]
   return nav ? nav.type === 'reload' : performance.navigation?.type === 1
 }
 
-// *** 全局前置守衛 ***
 router.beforeEach((to, from, next) => {
-  // 1) auth bookkeeping
   const userName = sessionStorage.getItem('loggedInUserName')
   const deptDesc = sessionStorage.getItem('loggedInUserdeptDesc')
   if (userName) {
@@ -69,14 +69,12 @@ router.beforeEach((to, from, next) => {
     window.userGlobalData.isAuthenticated = false
   }
 
-  // 2) auth decision
   if (to.meta.requiresAuth && !window.userGlobalData.isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
     return
   }
 
-  // 3) token lifecycle
-  // leaving new-instruction → clear
+  // token lifecycle 一樣保留
   if (from?.name === 'new-instruction' && to?.name !== 'new-instruction') {
     localStorage.removeItem('rms:draft:new-instruction')
   }
@@ -85,19 +83,15 @@ router.beforeEach((to, from, next) => {
     localStorage.removeItem('rms:draft:new-specification')
   }
 
-  // entering new-instruction WITHOUT ?token
   if (to?.name === 'new-instruction' && !to.query.token) {
     if (!isReloadNavigation()) {
-      // a normal click (not F5) → start fresh
       localStorage.removeItem('rms:draft:new-instruction')
-      next() // let it proceed
+      next()
       return
     }
-    // reload → keep whatever’s in URL/localStorage
   }
 
   next()
 })
-
 
 export default router;
