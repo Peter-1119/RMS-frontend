@@ -1451,7 +1451,6 @@ const loadMcrTemplates = async (machineCode) => {
     }))
 
     condTemplate.value = condTemplateArr.length ? condTemplateArr : null
-
   } catch (e) {
     console.error('loadMcrTemplates error:', e)
     // 出錯就回到預設模板

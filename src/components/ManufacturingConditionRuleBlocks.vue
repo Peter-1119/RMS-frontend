@@ -1171,6 +1171,42 @@ watch(
 )
 
 watch(
+  () => ({
+    hasPms: props.hasPms,
+    hasConditions: props.hasConditions,
+    condTemplate: props.condTemplate,
+    paramTemplate: props.paramTemplate,
+  }),
+  () => {
+    // hasPms / hasConditions 從 false -> true 或 template 準備好時，
+    // 幫現有的 blocks 補上 Editor
+    blocks.value.forEach((b, i) => {
+      if (props.hasConditions && !condEditors.value[i]) {
+        condEditors.value[i] = makeCondEditor(
+          b.data?.jsonConditionContent || null,
+          () => {
+            runCondValidation()
+          }
+        )
+      }
+
+      if (props.hasPms && !paramEditors.value[i]) {
+        paramEditors.value[i] = makeParamEditor(
+          b.data?.jsonParameterContent || null,
+          ({ editor }) => {
+            runParamValueValidation(editor)
+            runParamDuplicateValidation()
+          }
+        )
+      }
+    })
+
+    nextTick(runAllValidations)
+  },
+  { immediate: false }
+)
+
+watch(
   () => props.specOptions,
   async (opts) => {
     const list = opts || []
