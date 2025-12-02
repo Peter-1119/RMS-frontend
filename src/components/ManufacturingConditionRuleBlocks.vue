@@ -10,9 +10,7 @@
           <label>製程：</label>
           <div class="spec-multi">
             <div class="spec-multi-trigger" :class="{ 'step-error': isSpecRequired && (!b.programLinks || !b.programLinks.length) }" @click="toggleSpecDropdown(i)">
-              <span v-if="b.programLinks && b.programLinks.length">
-                {{ b.programLinks.map(p => p.specCode).join('、') }}
-              </span>
+              <span v-if="b.programLinks && b.programLinks.length">{{ b.programLinks.map(p => p.specCode).join('、') }}</span>
               <span v-else class="placeholder">請選擇製程（可多選）</span>
               <span class="caret">▼</span>
             </div>
@@ -217,7 +215,7 @@ const openSpecDropdownIndex = ref(null)
 
 const specNameByCode = computed(() => {
   const m = {}
-  ;(props.specOptions || []).forEach(o => {
+  (props.specOptions || []).forEach(o => {
     if (!o?.code) return
     m[o.code] = o.name || o.code
   })
@@ -236,46 +234,25 @@ const isSpecRequired = computed(() => {
 function normalizeBlockFromProps(blk, idx) {
   const meta = (blk.data && blk.data.metadata) || {}
 
-  let programs = []
-  if (Array.isArray(blk.programLinks) && blk.programLinks.length) {
-    programs = blk.programLinks.map(p => ({ ...p }))
-  } else if (Array.isArray(meta.programs) && meta.programs.length) {
-    programs = meta.programs.map(p => ({ ...p }))
-  } else {
-    // 相容舊資料：用舊的 specCode + code 組成一個 program
-    const specCode = blk.specCode || meta.specification?.code || ''
-    const specName = blk.specName || meta.specification?.name || ''
-    const programCode = blk.code || ''
-    if (specCode || programCode) {
-      programs.push({
-        specCode,
-        specName: specName || specCode,
-        programCode,
-      })
-    }
-  }
-
-  const mainSpec =
-    meta.mainSpec ||
-    (programs[0]
-      ? { specCode: programs[0].specCode, specName: programs[0].specName }
-      : null)
+  // 從 metadata.programs 還原本地的 programLinks
+  const programs = Array.isArray(meta.programs) ? meta.programs.map(p => ({ ...p })) : []
 
   return {
     id: blk.id ?? idx + 1,
     content_id: blk.content_id || null,
     client_temp_id: blk.client_temp_id || `temp-${uuidv1()}`,
+    // 這個只在前端用，不存 DB
     programLinks: programs,
     data: {
       ...(blk.data || {}),
       metadata: {
         ...(meta || {}),
-        programs,
-        mainSpec,
+        programs, // 確保 metadata.programs 一致
       },
     },
   }
 }
+
 
 /* ===== 製程多選相關 ===== */
 function toggleSpecDropdown(idx) {
@@ -291,18 +268,17 @@ function isSpecChecked(blockIdx, specCode) {
 function updateBlockMetadataPrograms(blockIdx) {
   const blk = blocks.value[blockIdx]
   if (!blk) return
-  const programs = Array.isArray(blk.programLinks) ? blk.programLinks.slice() : []
-  const mainSpec = programs[0]
-    ? { specCode: programs[0].specCode, specName: programs[0].specName }
-    : null
+
+  // 從本地 programLinks 複製一份乾淨的 array 放進 metadata
+  const programs = Array.isArray(blk.programLinks) ? blk.programLinks.map(p => ({ ...p })) : []
 
   blk.data = blk.data || {}
   blk.data.metadata = {
     ...(blk.data.metadata || {}),
-    programs,
-    mainSpec,
+    programs,   // ✅ 只存 programs，不存 mainSpec
   }
 }
+
 
 // 勾選 / 取消勾選製程 → 呼叫後端 allocate / release
 async function onToggleSpec(blockIdx, opt) {
@@ -319,8 +295,6 @@ async function onToggleSpec(blockIdx, opt) {
     // 直接忽略這次 change，不釋放、不動資料
     return
   }
-
-  // ↓↓↓ 以下保留你原本的邏輯 ↓↓↓
 
   // 取消勾選 → 釋放程式號碼
   if (existsIdx >= 0) {
@@ -616,23 +590,21 @@ function duplicateBlock(i) {
   const src = blocks.value[i]
   const id = idSeq++
 
+  // ✅ 完整 clone 一份製程 + 程式號
   const clonedPrograms = (src.programLinks || []).map(p => ({ ...p }))
 
   blocks.value.push({
     id,
     content_id: null,
     client_temp_id: `temp-${uuidv1()}`,
-    programLinks: clonedPrograms,
+    programLinks: clonedPrograms, // 本地顯示用
     data: {
       ...(src.data || {}),
       jsonConditionContent: condEditors.value[i]?.getJSON() || null,
       jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
       metadata: {
         ...(src.data?.metadata || {}),
-        programs: clonedPrograms,
-        mainSpec: clonedPrograms[0]
-          ? { specCode: clonedPrograms[0].specCode, specName: clonedPrograms[0].specName }
-          : null,
+        programs: clonedPrograms,  // ✅ 寫回 metadata
       },
     },
   })
@@ -673,22 +645,13 @@ async function copyFromCode(targetIdx) {
         paramEditors.value[srcIdx].getJSON()
       )
     }
-
-    // 本地複製時，連同程式號與規格一起套用 (維持既有邏輯)
-    tgt.programLinks = (src.programLinks || []).map(p => ({ ...p }))
     
     // 更新 metadata 以便存檔
     tgt.data = tgt.data || {}
     tgt.data.metadata = tgt.data.metadata || {}
-    tgt.data.metadata.programs = tgt.programLinks
-    if(tgt.programLinks[0]) {
-        tgt.data.metadata.mainSpec = { 
-            specCode: tgt.programLinks[0].specCode, 
-            specName: tgt.programLinks[0].specName 
-        }
-    }
 
     runAllValidations()
+    syncToParent()
     alert(`已從第 ${srcIdx + 1} 個模塊複製內容`)
     return
   }
@@ -761,23 +724,23 @@ async function copyFromCode(targetIdx) {
         // 2. 為每個來源製程申請新號碼
         const newLinks = []
         for (const srcProg of sourcePrograms) {
-            if (!srcProg.specCode) continue
-            try {
-                // 呼叫後端配號 API (針對當前 documentToken)
-                const allocResp = await allocateProgramCode(srcProg.specCode, props.documentToken)
-                const newCode = allocResp.programCode
-                
-                if (newCode) {
-                    newLinks.push({
-                        specCode: srcProg.specCode,
-                        specName: srcProg.specName || srcProg.specCode,
-                        programCode: newCode // 這是新的唯一號碼
-                    })
-                }
-            } catch (err) {
-                console.error(`配號失敗: ${srcProg.specCode}`, err)
-                alert(`製程 ${srcProg.specName} 配號失敗，請稍後手動選擇。`)
+          if (!srcProg.specCode) continue
+          try {
+            // 呼叫後端配號 API (針對當前 documentToken)
+            const allocResp = await allocateProgramCode(srcProg.specCode, props.documentToken)
+            const newCode = allocResp.programCode
+            
+            if (newCode) {
+              newLinks.push({
+                specCode: srcProg.specCode,
+                specName: srcProg.specName || srcProg.specCode,
+                programCode: newCode // 這是新的唯一號碼
+              })
             }
+          } catch (err) {
+            console.error(`配號失敗: ${srcProg.specCode}`, err)
+            alert(`製程 ${srcProg.specName} 配號失敗，請稍後手動選擇。`)
+          }
         }
 
         // 3. 更新 Block
@@ -791,6 +754,7 @@ async function copyFromCode(targetIdx) {
 
     if (copiedCount > 0) {
       runAllValidations()
+      syncToParent()
       alert('複製成功！\n包含：表格內容已套用、製程已複製並產生新流水號。')
     } else {
       alert('複製來源的內容為空。')
@@ -1134,7 +1098,14 @@ watch(
     // 2️⃣ 收集 newBlocks 裡的 programCode（避免釋放還存在的）
     const newCodes = new Set()
     ;(newBlocks || []).forEach(b => {
-      (b.programLinks || []).forEach(p => {
+      const metaPrograms =
+        b.data && b.data.metadata && Array.isArray(b.data.metadata.programs)
+          ? b.data.metadata.programs
+          : []
+      const localPrograms = Array.isArray(b.programLinks) ? b.programLinks : []
+
+      const all = [...metaPrograms, ...localPrograms]
+      all.forEach(p => {
         if (p.programCode) newCodes.add(p.programCode)
       })
     })
@@ -1273,34 +1244,17 @@ function extractTableArray(ed){
 
 function exportData() {
   return blocks.value.map((b, i) => {
-    const programs = Array.isArray(b.programLinks) ? b.programLinks.slice() : []
-    const mainSpec = programs[0]
-      ? { specCode: programs[0].specCode, specName: programs[0].specName }
-      : null
-
-    // 為了相容舊欄位，可以把「第一組程式號碼」當作 code / specCode / specName 傳出去
-    const first = programs[0] || {}
-
     return {
       id: b.id,
-      // 相容 legacy 欄位：code / specCode / specName
-      code: first.programCode || '',
-      specCode: first.specCode || '',
-      specName: first.specName || '',
-
       content_id: b.content_id,
       client_temp_id: b.client_temp_id,
-      programLinks: programs,
+      // ✅ 不再輸出 programLinks，真正要存的在 metadata.programs
       data: {
         jsonConditionContent: condEditors.value[i]?.getJSON() || null,
         arrayConditionData:   extractTableArray(condEditors.value[i]),
         jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
         arrayParameterData:   extractTableArray(paramEditors.value[i]),
-        metadata: {
-          ...(b.data?.metadata || {}),
-          programs,
-          mainSpec,
-        },
+        metadata: b.data?.metadata || {},
       },
     }
   })
@@ -1311,6 +1265,7 @@ function syncToParent() {
   clearTimeout(emitTimer)
   emitTimer = setTimeout(() => {
     const payload = exportData()
+    console.log("sync to parent")
     lastExternalDataJson.value = JSON.stringify(payload || [])
     emit('update:dataBlocks', payload)
   }, 150)

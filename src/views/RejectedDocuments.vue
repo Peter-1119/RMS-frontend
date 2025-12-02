@@ -92,25 +92,6 @@ export default {
     },
   },
   methods: {
-    // openPopup(url) {
-    //   // Open immediately to avoid popup blockers
-    //   const specs = [
-    //     'popup=1',           // hint only; many browsers ignore
-    //     'noopener',
-    //     'resizable=yes',
-    //     'scrollbars=yes',
-    //     'width=1200',
-    //     'height=800',
-    //     'left=100',
-    //     'top=60',
-    //     'toolbar=no',
-    //     'location=no',
-    //     'status=no',
-    //     'menubar=no'
-    //   ].join(',');
-
-    //   window.open(url, '_blank', specs);
-    // },
     formatDate(iso) {
       if (!iso) return ''
       try {
@@ -158,11 +139,20 @@ export default {
       if (!item || !item.documentToken) return
 
       const token = encodeURIComponent(item.documentToken)
+      const rmsId = item.rmsId
 
-      // base 要帶上 BASE_URL（例如 /rms/ 之類），不要加 #
-      const base = window.location.origin + (import.meta.env.BASE_URL || '/')
-      // 這裡直接接 docs/preview/...
-      const url = `${base}docs/preview/${token}`
+      // 和 SubmittedDocuments.vue 一樣，透過 router + DocxPreviewPage
+      const routeLocation = this.$router.resolve({
+        name: 'docx-preview',
+        params: { token },
+        query: {
+          mode: 'snapshot',   // ★ 一樣用 snapshot 模式
+          rms_id: rmsId || '',
+        },
+      })
+
+      const url = window.location.origin + (import.meta.env.BASE_URL || '/') + routeLocation.fullPath.replace(/^\//, '')
+      console.log('[RejectedDocuments] open snapshot preview:', url)
 
       const features = [
         'noopener',
@@ -173,9 +163,9 @@ export default {
         'scrollbars=yes'
       ].join(',')
 
-      // 用固定名字，之後再點別的文件會重用同一個預覽視窗
       window.open(url, 'docxPreviewWindow', features)
     },
+
     changePage(p) {
       if (p < 1 || p > this.totalPages) return
       this.page = p
@@ -184,7 +174,14 @@ export default {
     performSearch(item) {
       if (!item) return
       const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
-      this.$router.push({ name: routeName, query: { token: item.documentToken } })
+      this.$router.push({
+        name: routeName,
+        query: {
+          token: item.documentToken,
+          mode: 'rejected',          // ★ from Rejected
+          rms_id: item.rmsId || '',  // ★ 同樣指定 RMS 單
+        }
+      })
     },
     onKeywordInput() {
       clearTimeout(this.__kwTimer)

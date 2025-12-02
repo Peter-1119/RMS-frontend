@@ -86,8 +86,6 @@ export default {
       this.loading = true
       this.errorMsg = ''
       try {
-        // console.log("API_BASE_URL: ", API_BASE_URL)
-        // console.log("API_BASE_URL: ", API_BASE_URL)
         const res = await axios.get(`${API_BASE_URL}/docs/drafts`, {
           params: {
             user_id: this.effectiveUserId,

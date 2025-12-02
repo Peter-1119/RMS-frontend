@@ -60,6 +60,47 @@ export async function loadReferences(token) {
   return data; // {success, documents, forms}
 }
 
+/** ---------- Batch draft APIs ---------- */
+export async function saveDraftAll(token, { form, blockRequests = [], paramRequests = [], references = {} }) {
+  const payload = { token, form, blockRequests, paramRequests, references }
+  const { data } = await http.post('/draft/save-all', payload)
+  return data   // { success, token, issueTime, form }
+}
+
+export async function loadDraftAll(token, { blocks = [], params = [], attrs = true, refs = true } = {}) {
+  const query = {}
+  if (attrs === false) query.attrs = 0
+  if (refs === false) query.refs = 0
+  if (blocks && blocks.length) query.blocks = blocks.join(',')
+  if (params && params.length) query.params = params.join(',')
+
+  const { data } = await http.get(`/${encodeURIComponent(token)}/draft-all`, { params: query })
+  return data   // 結構見上面後端註解
+}
+
+// ⭐ 新增：抓 snapshot 的版本
+export async function loadSnapshotDraftAll(
+  token,
+  { blocks = [], params = [], attrs = true, refs = true, rms_id = '' } = {},
+) {
+  const search = new URLSearchParams()
+  if (!attrs) search.set('attrs', '0')
+  if (!refs) search.set('refs', '0')
+  if (blocks.length) search.set('blocks', blocks.join(','))
+  if (params.length) search.set('params', params.join(','))
+  if (rms_id) search.set('rms_id', rms_id)
+
+  const url = `${API_BASE_URL}/docs/${token}/snapshot-draft-all?${search.toString()}`
+  const { data } = await axios.get(url)
+  return data
+}
+
+// 如果你原本有 loadRejectedSnapshotDraftAll，可以直接變成 wrapper：
+export function loadRejectedSnapshotDraftAll(token, options = {}) {
+  return loadSnapshotDraftAll(token, options)
+}
+
+
 // docsApi.js
 export async function clearDocId(token) {
   const { data } = await http.post(`/clear-doc-id`, { token })

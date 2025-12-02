@@ -107,3 +107,4 @@ export async function getAllDocuments({
     pageSize: data?.pageSize ?? pageSize,
   }
 }
+

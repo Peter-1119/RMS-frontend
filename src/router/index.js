@@ -23,17 +23,17 @@ const routes = [
 
   // 會出現在 tab 的頁面（有 requiresAuth）
   { path: '/home',                   name: 'home-alias',            component: HomeView,               meta: { requiresAuth: true, title: '首頁', noTab: true } },
-  { path: '/Specification',          name: 'Specification',         component: SpecificationParamPage, meta: { requiresAuth: true, title: '規則一覽表' } },
-  { path: '/new-instruction',        name: 'new-instruction',       component: NewInstruction,         meta: { requiresAuth: true, title: '製造條件指示書-新建' } },
+  { path: '/Specification',          name: 'Specification',         component: SpecificationParamPage, meta: { requiresAuth: true, title: '規則一覽表', keepAlive: true, } },
+  { path: '/new-instruction',        name: 'new-instruction',       component: NewInstruction,         meta: { requiresAuth: true, title: '製造條件指示書-新建', keepAlive: true, } },
   { path: '/instruction-change',     name: 'instruction-change',    component: InstructionChangePage,  meta: { requiresAuth: true, title: '製造條件指示書-變版' } },
-  { path: "/new-specification",      name: "new-specification",     component: NewSpecification,       meta: { requiresAuth: true, title: '製造式樣書-新建' } },
+  { path: "/new-specification",      name: "new-specification",     component: NewSpecification,       meta: { requiresAuth: true, title: '製造式樣書-新建', keepAlive: true, } },
   { path: '/specification-change',   name: 'specification-change',  component: SpecificationChangePage,meta: { requiresAuth: true, title: '製造式樣書-變版' } },
-  { path: '/SearchPage',             name: 'SearchPage',            component: SearchPage,             meta: { requiresAuth: true, title: '文件檢索' } },
+  { path: '/SearchPage',             name: 'SearchPage',            component: SearchPage,             meta: { requiresAuth: true, title: '文件檢索', keepAlive: true, } },
   { path: '/DraftDocuments',         name: 'DraftDocuments',        component: DraftDocuments,         meta: { requiresAuth: true, title: '草稿匣' } },
   { path: '/SubmittedDocuments',     name: 'SubmittedDocuments',    component: SubmittedDocuments,     meta: { requiresAuth: true, title: '已送審' } },
   { path: '/RejectedDocuments',      name: 'RejectedDocuments',     component: RejectedDocuments,      meta: { requiresAuth: true, title: '已退回' } },
-  { path: '/ParametersSearch',       name: 'ParametersSearch',      component: ParametersSearch,       meta: { requiresAuth: true, title: '配方檢索' } },
-  { path: '/project-specification',  name: 'SpecificationViewPage', component: SpecificationViewPage,  meta: { requiresAuth: true, title: '適用工程一覽表' } },
+  { path: '/ParametersSearch',       name: 'ParametersSearch',      component: ParametersSearch,       meta: { requiresAuth: true, title: '配方檢索', keepAlive: true, } },
+  { path: '/project-specification',  name: 'SpecificationViewPage', component: SpecificationViewPage,  meta: { requiresAuth: true, title: '適用工程一覽表', keepAlive: true, } },
 
   // 預覽畫面：隱藏 chrome + 不放進 tab
   { path: '/docs/preview/:token',    name: 'docx-preview',          component: DocxPreviewPage,        meta: { hideChrome: true, title: '文件預覽' }, props: true },

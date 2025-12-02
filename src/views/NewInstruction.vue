@@ -263,12 +263,17 @@ import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import PdfPreview from '@/components/PdfPreview.vue'
 import WordPreview from '@/components/WordPreview.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
-import { loadPersonnel, initDoc, saveAttributes, loadAttributes, saveBlocks, loadBlocks, saveParams, loadParams, saveReferences, loadReferences } from '@/api/docsApi'
+import { loadPersonnel, initDoc, saveDraftAll, loadDraftAll, loadSnapshotDraftAll } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
 const route = useRoute()
+
+const mode = computed(() => route.query.mode || '')
+const isRejectedDoc = computed(() => mode.value === 'rejected')
+const isSubmittedDoc = computed(() => mode.value === 'submitted')
+const rmsId = computed(() => route.query.rms_id || '')
 
 // ⭐ 判斷是不是變版模式
 const isRevisionDoc = computed(() => route.query.mode === 'revision')
@@ -279,7 +284,7 @@ const ensureDraftToken = async () => {
   try {
     const res = await initDoc(0)
     if (res?.success && res.token) {
-      setToken(res.token)
+      setToken(res.token, { updateUrl: false })
       return res.token
     }
     throw new Error(res?.message || 'init failed')
@@ -305,7 +310,6 @@ const steps = [
 ]
 
 const flowVersion = ref(0)   // 專門給 Step3 流程用的 reload 版本號
-
 
 // 一頁式 section refs（只需要前 8 章節）
 const sectionRefs = Array.from({ length: 8 }, () => ref(null))
@@ -391,7 +395,6 @@ const scrollToStep = (index) => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
-
 const goToStep = scrollToStep
 
 // ---------- step 驗證狀態（只先做 Step1, Step2） ----------
@@ -427,11 +430,9 @@ const isStep1Valid = computed(() => {
 
   return true
 })
-
 const isStep2Valid = computed(() => {
   return String(form.documentPurpose ?? '').trim().length > 0
 })
-
 const isStep3Valid = computed(() => {
   const pf = processFlowData.value || {}
 
@@ -467,7 +468,6 @@ const isStep3Valid = computed(() => {
   // 其他未知模式 → 視為沒填
   return false
 })
-
 const isStep4Valid = computed(() => {
   const pmsStatus = isPmsTableValid()      // true / false / null
   const hasDynamic = (managementBlocks.value || []).length > 0
@@ -484,14 +484,6 @@ const isStep4Valid = computed(() => {
   if (hasDynamic) { ok = ok && areDynamicBlocksValid(managementBlocks.value) }
   return ok
 })
-
-/**
- * Step 5 是否「填寫完」
- * 回傳：
- *  - true  → 填寫完畢
- *  - false → 有該填沒填 / 有錯誤 / 有重複
- *  - null  → N/A（沒有 PMS & 沒有條件 table，不上色）
- */
 const isStep5Valid = computed(() => {
   const hasCond = hasCondForMcr.value
   const hasPms  = hasPmsForMcr.value
@@ -510,7 +502,7 @@ const isStep5Valid = computed(() => {
   // 🔸 [新增] 每個 block 都要至少選一個 specification / programLinks
   for (const b of blocksArr) {
     const hasPrograms =
-      (Array.isArray(b.programLinks) && b.programLinks.length > 0) ||
+      (Array.isArray(b.data?.metadata.programs) && b.data?.metadata.programs.length > 0) ||
       (b.specCode && String(b.specCode).trim() !== '')
     if (!hasPrograms) {
       ok = false
@@ -548,33 +540,18 @@ const isStep5Valid = computed(() => {
 
   return ok
 })
-
-
-// Step 6：異常處置（DynamicEditorBlock）
-// - 沒有任一層 exceptionBlocks → 視為 N/A（不上色）
-// - 有層級 → 套用 DynamicEditor 的 title / content 規則
 const isStep6Valid = computed(() => {
   const blocksArr = exceptionBlocks.value || []
   if (!blocksArr.length) return null   // 不要求一定要寫異常處置
 
   return areDynamicBlocksValid(blocksArr)
 })
-
-// Step 7：相關文件
-// - 沒選任何文件 → 不上色
-// - 至少有一筆 → OK
 const isStep7Valid = computed(() => {
   return (relativeDocuments.value || []).length > 0 ? true : null
 })
-
-// Step 8：使用表單
-// - 沒選表單 → 不上色
-// - 至少一筆 → OK
 const isStep8Valid = computed(() => {
   return (usedForms.value || []).length > 0 ? true : null
 })
-
-
 const stepStatusClass = (index) => {
   const stepNo = index + 1
 
@@ -1061,7 +1038,6 @@ function serializeProcessFlowToBlocks(pf) {
     }]
   }]
 }
-
 // from blocks (for load)
 function loadProcessFlowFromBlocks(resp) {
   const firstTier = (resp?.blocks || [])[0]
@@ -1394,24 +1370,6 @@ const condTemplate  = ref(null)   // tiptap JSON for condition table
 const hasPmsForMcr   = ref(false)   // 此機台 PMS（製造條件一覽表用）是否有資料
 const hasCondForMcr  = ref(false)   // 此機台 條件參數 是否有資料
 
-const OPTS = [
-  {name: "銅電式樣", options: [{label:'全鍍',value:'full_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'局部銅電鍍',value:'partial_copper_plating'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'}]},
-  {name: "製品式樣", options: [{label:'雙面板',value:'double_sided'},{label:'多層板外層',value:'mlb_outer'},{label:'雙面板無鍍銅品',value:'double_sided_no_plating'},{label:'多層板內外層',value:'mlb_inner_outer'},{label:'多層板內外層局部銅電鍍品',value:'mlb_inner_outer_partial'},{label:'無鍍銅品',value:'no_plating'},{label:'多層板',value:'mlb'},{label:'多層板外層線路',value:'mlb_outer_circuit'},{label:'多層板外層局部銅電鍍品',value:'mlb_outer_partial'},{label:'全板銅電鍍品',value:'full_board_plating'},{label:'局部銅電鍍品',value:'partial_plating'},{label:'多層板內層',value:'mlb_inner'},{label:'單面板',value:'single_sided'},{label:'FP品目',value:'fp_item'},{label:'單面板雙面銅材無鍍銅',value:'single_sided_double_copper_no_plating'}]},
-  {name: "流程", options: [{label:'RTR',value:'rtr'},{label:'RTS',value:'rts'},{label:'SBS',value:'sbs'}]},
-  {name: "原銅厚度", options: [{label:'1',value:'1'},{label:'1/2',value:'1/2'},{label:'1/3',value:'1/3'},{label:'1/4',value:'1/4'}]},
-  {name: "鍍銅厚度", options: [{label:'8',value:'8'},{label:'10',value:'10'},{label:'12',value:'12'},{label:'14',value:'14'},{label:'15',value:'15'},{label:'18',value:'18'}]},
-  {name: "銅材種類", options: [{label:'ED銅',value:'ed_copper'},{label:'非HA銅',value:'non_ha_copper'},{label:'HA銅',value:'ha_copper'},{label:'LCP材',value:'lcp_material'},{label:'LCP',value:'lcp'}]},
-  {name: "乾膜種類", options: [{label:'ADC-301',value:'adc_301'},{label:'FF-1030',value:'ff_1030'},{label:'HS-930',value:'hs_930'},{label:'HW-630',value:'hw_630'},{label:'AQ-209A',value:'aq_209a'},{label:'HY-920',value:'hy_920'},{label:'ADW-401',value:'adw_401'},{label:'H-9540',value:'h_9540'},{label:'FF-1040',value:'ff_1040'},{label:'FF-1020',value:'ff_1020'},{label:'AQ-1558',value:'aq_1558'}]},
-]
-const PARAM_ROWS = [
-  ['槽體','管理項目','規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)','單位','參數下放','說明'],
-  ['熱水洗1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['熱水洗1','溫度','','','','','','℃','Y',''],
-  ['剝膜1','氫氧化鈉NaOH','','','','','','%','Y',''],
-  ['剝膜1','噴壓','','','','','','kgf/cm2','Y',''],
-  ['剝膜1','作業溫度','','','','','','℃','Y','']
-]
-
 const loadMcrTemplates = async (machineCode) => {
   if (!machineCode) {
     paramTemplate.value = null
@@ -1600,8 +1558,10 @@ const serializeMCRToParams = () => {
     return []
 
   return (mcrBlocks.value || []).map((blk, i) => {
-    const programs = Array.isArray(blk.programLinks) ? blk.programLinks : Array.isArray(blk.data?.metadata?.programs) ? blk.data.metadata.programs : []
-    const mainSpec = blk.data?.metadata?.mainSpec || (programs[0] ? { specCode: programs[0].specCode, specName: programs[0].specName } : null)
+    // 優先用 metadata.programs，沒有的話退回 blk.programLinks
+    const meta = blk.data?.metadata || {}
+    const programsFromMeta = Array.isArray(meta.programs) ? meta.programs : []
+    const programs = programsFromMeta.length ? programsFromMeta : (Array.isArray(blk.programLinks) ? blk.programLinks : [])
 
     return {
       step_type: 2,
@@ -1610,11 +1570,9 @@ const serializeMCRToParams = () => {
       arrayParameterData:   blk.data?.arrayParameterData   || [],
       jsonConditionContent: blk.data?.jsonConditionContent || null,
       arrayConditionData:   blk.data?.arrayConditionData   || [],
-
       metadata: {
-        ...(blk.data?.metadata || {}),
-        programs,
-        mainSpec,
+        ...meta,
+        programs,   // ✅ 這裡只存 programs，不存 mainSpec
       },
     }
   })
@@ -1622,51 +1580,30 @@ const serializeMCRToParams = () => {
 // NEW — rebuild the exact structure you render（含 programLinks）
 const loadMCRFromParams = (payload) => {
   mcrBlocks.value = (payload.blocks || []).map((b, i) => {
-    const meta = b.metadata || {}
+    const rawMeta = b.metadata || {}
 
-    let programs = []
-    if (Array.isArray(meta.programs) && meta.programs.length) {
-      programs = meta.programs.map(p => ({ ...p }))
-    } else if (b.code) {
-      // 相容舊資料：metadata.specification + code → 一組 program
-      const spec = meta.specification || {}
-      if (spec.code || b.code) {
-        programs.push({
-          specCode: spec.code || '',
-          specName: spec.name || spec.code || '',
-          programCode: b.code,
-        })
-      }
-    }
+    // 把舊資料 mainSpec 丟掉（如果有的話）
+    const { mainSpec, ...metaWithoutMainSpec } = rawMeta
 
-    const mainSpec =
-      meta.mainSpec ||
-      (programs[0]
-        ? { specCode: programs[0].specCode, specName: programs[0].specName }
-        : null)
+    const programs = Array.isArray(metaWithoutMainSpec.programs) ? metaWithoutMainSpec.programs.map(p => ({ ...p })) : []
 
     return {
       id: b.id ?? i + 1,
-      // 相容舊欄位：保留 code / specCode / specName 但實際上用不到
-      code: programs[0]?.programCode || b.code || '',
-      specCode: programs[0]?.specCode || meta.specification?.code || '',
-      specName: programs[0]?.specName || meta.specification?.name || '',
-
-      programLinks: programs,
+      // 這裡不再用 code/specCode/specName，全部交給 programs
       data: {
         jsonParameterContent: b.jsonParameterContent || null,
         arrayParameterData:   b.arrayParameterData   || [],
         jsonConditionContent: b.jsonConditionContent || null,
         arrayConditionData:   b.arrayConditionData   || [],
         metadata: {
-          ...meta,
-          programs,
-          mainSpec,
+          ...metaWithoutMainSpec,
+          programs,   // ✅ 唯一來源
         },
       },
     }
   })
 }
+
 // ---------- 異常處置 (step 6) ----------
 const exceptionBlocks = ref([])
 const addExceptionLayer = () => {
@@ -1683,7 +1620,6 @@ const updateExceptionBlockData = payload => {
   const idx = exceptionBlocks.value.findIndex(b => b.id === payload.id)
   if (idx !== -1) exceptionBlocks.value[idx] = payload
 }
-
 const serializeExceptionsToBlocks = () => {
   return (exceptionBlocks.value || [])
     .sort((a,b) => (a.tier||0) - (b.tier||0))
@@ -1698,7 +1634,6 @@ const serializeExceptionsToBlocks = () => {
       }))
     }))
 }
-
 const loadExceptionsFromBlocks = (payload) => {
   exceptionBlocks.value = (payload.blocks || []).map((blk, i) => ({
     id: i + 1,
@@ -1838,36 +1773,92 @@ async function fetchPreviewDocx() {
     previewLoading.value = false
   }
 }
+function extractErrorMessage(e, fallback = '文件產出失敗，請稍後再試') {
+  console.error('generate word error:', e)
 
+  let msg = fallback
+
+  const resp = e?.response
+  if (resp) {
+    const ct = (resp.headers?.['content-type'] || '').toLowerCase()
+
+    // axios 設了 responseType: 'blob'，後端 JSON 會被包成 Blob
+    if (resp.data instanceof Blob) {
+      // 這裡不能用 sync，要在呼叫端 await
+      return resp.data.text().then((text) => {
+        let parsedMsg = text || fallback
+
+        // 嘗試當 JSON parse，再抓 message
+        try {
+          const obj = JSON.parse(text)
+          if (obj && typeof obj === 'object' && obj.message) {
+            parsedMsg = String(obj.message)
+          }
+        } catch {
+          // 不是 JSON 就維持原本 text
+        }
+
+        // 如果含有 ORA-01031，替換成比較友善的說明
+        if (parsedMsg.includes('ORA-01031')) {
+          parsedMsg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
+        }
+
+        // 把 \n 換成真正換行（如果你之後改成 <pre> 或 white-space: pre-wrap 會生效）
+        return parsedMsg.replace(/\\n/g, '\n')
+      })
+    }
+
+    // 如果不是 Blob（例如後端沒包成 Blob）
+    if (resp.data && typeof resp.data === 'object' && 'message' in resp.data) {
+      msg = String(resp.data.message)
+    }
+  }
+
+  return Promise.resolve(msg)
+}
 async function generateAndDownloadDocx() {
-  // if (steps.some(step => !step.status)) {
-  //   alert('請把內容完成才可下載')
-  //   return
-  // }
+  if (steps.some(step => !step.status)) {
+    alert('請把內容完成才可下載')
+    return
+  }
 
   loading.value = true
   errorMsg.value = ''
   try {
     const payload = {
       token: draftToken.value,
-      attribute: [{...form}],
-      content: [...serializeProcessFlowToBlocks(processFlowData.value), ...serializeManagementToBlocks(), ...serializeMCRToParams(), ...serializeExceptionsToBlocks()],
-      reference: [
-        ...(relativeDocuments.value || []).map(d => ({referenceType: 0, referenceDocumentID: d.docId, referenceDocumentName: d.docName})),
-        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      attribute: [{ ...form }],
+      content: [
+        ...serializeProcessFlowToBlocks(processFlowData.value),
+        ...serializeManagementToBlocks(),
+        ...serializeMCRToParams(),
+        ...serializeExceptionsToBlocks()
       ],
+      reference: [
+        ...(relativeDocuments.value || []).map(d => ({
+          referenceType: 0,
+          referenceDocumentID: d.docId,
+          referenceDocumentName: d.docName
+        })),
+        ...(usedForms.value || []).map(f => ({
+          referenceType: 1,
+          referenceDocumentID: f.formId,
+          referenceDocumentName: f.formName
+        }))
+      ]
     }
-    const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
+    // 👇 先強制儲存草稿，確保 DB 狀態 = 當下畫面
+    await saveDraft()
+
+    const url = `${API_BASE_URL}/docs/generate/word`
 
     const res = await axios.post(url, payload, { responseType: 'blob' })
 
-    // 🔸 從 header 拿回 docID，塞回 form，讓文管編號顯示出來
     const docIdFromHeader = res.headers['x-document-id']
     if (docIdFromHeader) {
       form.documentID = docIdFromHeader
     }
 
-    // 以下是原本下載 blob 的程式碼
     const blob = new Blob([res.data], {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     })
@@ -1875,25 +1866,43 @@ async function generateAndDownloadDocx() {
     const a = document.createElement('a')
     a.href = urlBlob
 
-    // 把版本號固定成一位小數
     const versionStr = Number(form.documentVersion ?? 1).toFixed(1)
-
-    // 如果你想要「文件名 + 版本」，中間要不要加底線看你習慣：
     a.download = `${form.documentName || 'document'}${versionStr}.docx`
 
     a.click()
     URL.revokeObjectURL(urlBlob)
   } catch (e) {
     console.error(e)
+
     if (e?.response?.data instanceof Blob) {
       try {
-        const t = await e.response.data.text()
-        errorMsg.value = t || e.message || 'download error'
+        const text = await e.response.data.text()
+        let msg = text || e.message || '文件產出失敗，請稍後再試'
+
+        // 嘗試 parse JSON 抓 message
+        try {
+          const obj = JSON.parse(text)
+          if (obj && typeof obj === 'object' && obj.message) {
+            msg = String(obj.message)
+          }
+        } catch {
+          // 不是 JSON 就維持原樣
+        }
+
+        if (msg.includes('ORA-01031')) {
+          msg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
+        }
+
+        errorMsg.value = msg.replace(/\\n/g, '\n')
       } catch {
-        errorMsg.value = e?.message || 'download error'
+        errorMsg.value = e?.message || '文件產出失敗，請稍後再試'
       }
     } else {
-      errorMsg.value = e?.message || 'download error'
+      const msg =
+        e?.response?.data?.message ||
+        e?.message ||
+        '文件產出失敗，請稍後再試'
+      errorMsg.value = msg
     }
   } finally {
     loading.value = false
@@ -1902,140 +1911,205 @@ async function generateAndDownloadDocx() {
 
 // ---------- saving ----------
 const isSaving = ref(false)
+const applyLoadedData = async (snapshot, { isSnapshot }) => {
+  // 1) attributes
+  if (snapshot.attributes?.success) {
+    Object.assign(form, snapshot.attributes.form || {})
+  }
 
+  // 如果是 snapshot，你可以考慮「不覆蓋作者、部門」或標記 read-only
+  if (!isSnapshot) {
+    form.department = sessionStorage.getItem('loggedInUserdeptName')
+    form.author_id = sessionStorage.getItem('loggedInUserNo')
+    form.author = sessionStorage.getItem('loggedInUserName')
+  }
+
+  // 機台 / personnel etc... 都照你原本邏輯即可
+  // 顯示在 input 內的機台名稱
+  if (form.attribute.machines && form.attribute.machines.length > 0){
+      inputMachines.value = form.attribute.machines.map(machine => machine.name).join(", ")
+      hasCondForMcr.value = true
+      hasPmsForMcr.value = true
+      hasPmsForStep3.value = true
+      updateDocumentNameByMachines()
+  }
+  else {
+    form.attribute.machines = [];
+  }
+
+  const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
+  if (personnel?.success){
+    if (form.confirmer.length == 0) form.confirmer = personnel.data.personnel.confirmer
+    if (form.approver.length == 0) form.approver = personnel.data.personnel.approver
+  }
+
+  // 2) process flow
+  const pfResp = snapshot.blocks?.['0']
+  if (pfResp?.success) {
+    processFlowData.value = loadProcessFlowFromBlocks(pfResp)
+  }
+
+  // 3) management
+  const mgResp = snapshot.blocks?.['1']
+  if (mgResp?.success) {
+    loadManagementFromBlocks(mgResp)
+  }
+
+  // 4) MCR params
+  const mpResp = snapshot.params?.['2']
+  if (mpResp?.success && (mpResp.blocks || []).length > 0) {
+    loadMCRFromParams(mpResp)
+  } else if (!isSnapshot) {
+    // 草稿沒有舊資料時才載 template，snapshot 情境就保持原樣
+    const machines = form.attribute?.machines || []
+    if (machines.length > 0) {
+      const code = machines[0].machineCode || machines[0].MACHINE_CODE || machines[0].code || ''
+      if (code) {
+        await loadMcrTemplates(code)
+        mcrBlocks.value = []
+      }
+    }
+  }
+
+  // 5) exceptions
+  const exResp = snapshot.blocks?.['3']
+  if (exResp?.success) {
+    loadExceptionsFromBlocks(exResp)
+  }
+
+  // 6) references
+  const r = snapshot.references
+  if (r?.success) {
+    let nextId = 1
+    relativeDocuments.value = (r.documents || []).map(d => ({ id: nextId++, docId: d.docId, docName: d.docName }))
+    usedForms.value = (r.forms || []).map(f => ({ id: nextId++, formId: f.formId, formName: f.formName }))
+  }
+
+  flowVersion.value++
+}
 const saveDraft = async () => {
-  const t = await ensureDraftToken()
-  if (!t) return
+  let t
+  if (isRejectedDoc.value) {
+    // 🔸 退簽模式：直接拿 URL 上的 token，覆蓋「這份文件目前的草稿」
+    t = route.query.token
+    if (!t) {
+      alert('缺少文件代碼，無法儲存草稿')
+      return
+    }
+
+    // 建議順便把 composable 的 token 一起對齊，避免之後其他地方還抓舊 token
+    setToken(t, { updateUrl: false })
+
+    // （可選）給使用者一個確認
+    if (!window.confirm('現在儲存會以「退回版本」內容覆蓋目前草稿，確定要這樣做嗎？')) {
+      return
+    }
+  } else {
+    // 🔹 一般情況：沿用原本 ensureDraftToken 流程（新建/既有草稿）
+    t = await ensureDraftToken()
+    if (!t) return
+  }
+
   try {
-    // 🔸 0) 先讓 child 把 editor 內容全部 flush 回來
-    await nextTick() // 確保最新一筆輸入已經寫進 ProseMirror state
+    await nextTick()
     if (managementSpecificBlockRef.value?.flushNow) {
       managementSpecificBlockRef.value.flushNow()
     }
 
-    // 1) attributes
-    const a = await saveAttributes(t, form)
-    if (!a?.success) return alert(a?.message || '屬性儲存失敗')
-
+    // 仍然使用你原本的 serialize 函式
     const pfBlocks = serializeProcessFlowToBlocks(processFlowData.value)
-    await saveBlocks(t, 0, pfBlocks)  // step_type = 0
-
-    // 3) management → generic blocks (step_type = 1)
     const mgmtBlocks = serializeManagementToBlocks()
-    await saveBlocks(t, 1, mgmtBlocks)
-
-    // 4) MCR parameters
     const paramsPayload = serializeMCRToParams()
-    await saveParams(t, paramsPayload, 2) // step_type=2
-
-    // 5) exceptions → generic blocks (step_type = 3)
     const excBlocks = serializeExceptionsToBlocks()
-    await saveBlocks(t, 3, excBlocks)
 
-    // 6) references
-    await saveReferences(t, {
+    const references = {
       documents: (relativeDocuments.value || []).map(d => ({ docId: d.docId, docName: d.docName })),
       forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })),
+    }
+
+    const result = await saveDraftAll(t, {
+      form,
+      blockRequests: [
+        { step_type: 0, blocks: pfBlocks },
+        { step_type: 1, blocks: mgmtBlocks },
+        { step_type: 3, blocks: excBlocks },
+      ],
+      paramRequests: [
+        { step_type: 2, blocks: paramsPayload },
+      ],
+      references,
     })
 
-    alert(`草稿已儲存(時間：${a.issueTime || ''})`)
+    if (!result?.success) {
+      return alert(result?.message || '儲存草稿失敗')
+    }
+    alert(`草稿已儲存(時間：${result.issueTime || ''})`)
   } catch (e) {
-    console.error(e)
-    alert('儲存草稿失敗')
+    const status = e?.response?.status
+    if (status === 409) {
+      console.error(e)
+      alert('此文件已被簽核，因此停用儲存功能')
+    } else {
+      console.error(e)
+      alert('儲存草稿失敗')
+    }
   }
 }
-
-// ---------- Load on mount ----------
 onMounted(async () => {
-  console.log("isRevisionDoc: ", isRevisionDoc.value)
+  console.log(
+    'mode:', mode.value,
+    'isSubmittedDoc:', isSubmittedDoc.value,
+    'isRejectedDoc:', isRejectedDoc.value,
+  )
+
   try {
-    const url = `${API_BASE_URL}/mes/engineering`
-    const projects = await axios.get(`${API_BASE_URL}/mes/engineering`, {params: { pageSize: 40 }})
+    // 先載入工程清單（原本邏輯）
+    const projects = await axios.get(`${API_BASE_URL}/mes/engineering`, {
+      params: { pageSize: 40 },
+    })
     projectList.value = projects.data.data.items || []
-  }
-  catch (e) {
+  } catch (e) {
     alert('載入適用工程失敗')
   }
 
-  const t = await ensureDraftToken()
-  if (!t) return
   try {
-
-    // 1) attributes
-    const a = await loadAttributes(t)
-    if (a?.success) Object.assign(form, a.form || {})
-    form.department = sessionStorage.getItem('loggedInUserdeptName')
-    form.author_id = sessionStorage.getItem('loggedInUserNo')
-    form.author = sessionStorage.getItem('loggedInUserName')
-    // 顯示在 input 內的機台名稱
-    if (form.attribute.machines && form.attribute.machines.length > 0){
-        inputMachines.value = form.attribute.machines.map(machine => machine.name).join(", ")
-        hasCondForMcr.value = true
-        hasPmsForMcr.value = true
-        hasPmsForStep3.value = true
-        updateDocumentNameByMachines()
-    }
-    else {
-      form.attribute.machines = [];
-    }
-
-    const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
-    if (personnel?.success){
-      if (form.confirmer.length == 0) form.confirmer = personnel.data.personnel.confirmer
-      if (form.approver.length == 0) form.approver = personnel.data.personnel.approver
-    }
-
-    // 🚩 在這裡初始化「流程目前綁的機台」
-    const machines = form.attribute?.machines || []
-    if (Array.isArray(machines) && machines.length > 0) {
-      const m0 = machines[0]
-      lastMachineCodeForProcessFlow.value = m0.machineCode || m0.MACHINE_CODE || m0.code || ''
+    let t
+    if (isSubmittedDoc.value || isRejectedDoc.value) {
+      // ★ 來自 submitted / rejected → 一律用 URL 上的 token
+      t = route.query.token
     } else {
-      lastMachineCodeForProcessFlow.value = ''
+      // ★ 一般模式 → 確保有 draft token
+      t = await ensureDraftToken()
     }
 
-    // 2) process flow (only if you add GET in backend)
-    const pfResp = await loadBlocks(t, 0)
-    if (pfResp?.success) processFlowData.value = loadProcessFlowFromBlocks(pfResp)
+    if (!t) return
 
-    // 3) management
-    const mg = await loadBlocks(t, 1) // step_type=1
-    if (mg?.success) loadManagementFromBlocks(mg)
-
-    // 4) MCR
-    const mp = await loadParams(t, 2)
-    if (mp?.success && (mp.blocks || []).length > 0) {
-      loadMCRFromParams(mp)           // 有資料 → 用使用者最後版本
+    if (isSubmittedDoc.value || isRejectedDoc.value) {
+      // ★ snapshot 模式：只吃快照資料
+      const snapshot = await loadSnapshotDraftAll(t, {
+        blocks: [0, 1, 3],
+        params: [2],
+        attrs: true,
+        refs: true,
+        rms_id: rmsId.value,
+      })
+      await applyLoadedData(snapshot, { isSnapshot: true })
     } else {
-      // 沒有任何 Step5 草稿 & 有機台 → 用 MCR template 初始化
-      const machines = form.attribute?.machines || []
-      if (machines.length > 0) {
-        const code = machines[0].machineCode || machines[0].MACHINE_CODE || machines[0].code || ''
-        if (code) {
-          await loadMcrTemplates(code)
-          mcrBlocks.value = []        // 讓子元件用 template 畫初始表格
-        }
-      }
+      // ★ 正常草稿模式：直接從現行 DB 讀
+      const snapshot = await loadDraftAll(t, {
+        blocks: [0, 1, 3],
+        params: [2],
+        attrs: true,
+        refs: true,
+      })
+      await applyLoadedData(snapshot, { isSnapshot: false })
     }
-
-    // 5) exceptions
-    const ex = await loadBlocks(t, 3)
-    if (ex?.success) loadExceptionsFromBlocks(ex)
-
-    // 6) references
-    const r = await loadReferences(t)
-    if (r?.success) {
-      let nextId = 1
-      relativeDocuments.value = (r.documents || []).map(d => ({ id: nextId++, docId: d.docId, docName: d.docName }))
-      usedForms.value = (r.forms || []).map(f => ({ id: nextId++, formId: f.formId, formName: f.formName }))
-    }
-
-    flowVersion.value++
   } catch (e) {
     console.error(e)
     alert('載入草稿失敗')
   }
 })
+
 </script>
 
 <style scoped>

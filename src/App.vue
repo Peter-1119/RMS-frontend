@@ -22,7 +22,8 @@
         <div class="content-container">
           <!-- ✅ 分頁列：只在非 hideChrome 的頁面顯示 -->
           <div v-if="!$route.meta.hideChrome && tabs.length" class="tab-bar">
-            <div v-for="(tab, idx) in tabs" :key="tab.fullPath" class="tab-item" :class="{ active: tab.fullPath === activeTabFullPath }" @click="activateTab(tab)">
+            <div v-for="(tab, idx) in tabs" :key="tab.key" class="tab-item" :class="{ active: tab.fullPath === activeTabFullPath }" @click="activateTab(tab)">
+            <!-- <div v-for="(tab, idx) in tabs" :key="tab.fullPath" class="tab-item" :class="{ active: tab.fullPath === activeTabFullPath }" @click="activateTab(tab)"> -->
               <span class="tab-title">{{ tab.title }}</span>
               <button v-if="tab.closable" class="tab-close" @click.stop="closeTab(tab, idx)">✕</button>
             </div>
@@ -32,8 +33,9 @@
           <router-view v-slot="{ Component, route }">
             <!-- 對有 tab 的頁面啟用 keep-alive，其餘照常顯示 -->
             <keep-alive>
-              <component :is="Component" :key="route.fullPath" />
+              <component :is="Component" :key="route.fullPath" v-if="route.meta.keepAlive" />
             </keep-alive>
+            <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive" />
           </router-view>
         </div>
       </div>
@@ -118,56 +120,42 @@ export default {
     },
 
     // === 分頁核心邏輯 ==================================
-    /**
-     * 每次 route 變更時呼叫：
-     * - 如果該 route 需要 tab（requiresAuth 且非 hideChrome）→ 新增/啟用 tab
-     * - 否則不處理 tab（例如 login, preview）
-     */
     syncTabsWithRoute(route) {
-      // 🚫 這些 route 不要用 tabs：
-      // - hideChrome（例如 login、預覽）
-      // - 不需要 auth
-      // - 明確標記 noTab（例如首頁）
       if (route.meta.hideChrome || !route.meta.requiresAuth || route.meta.noTab) {
-        // 這時候不要新增 / 切換 tab，只是把「目前啟用的 tab」清掉
         this.activeTabFullPath = '';
         return;
       }
 
       const fullPath = route.fullPath;
-      const exist = this.tabs.find(t => t.fullPath === fullPath);
+      const key = route.name || fullPath;   // 👈 tab 的「識別 key」
+
+      const exist = this.tabs.find(t => t.key === key);
 
       if (exist) {
-        this.activeTabFullPath = exist.fullPath;
+        // 👇 同一個頁面（例如 new-instruction），只更新 fullPath（讓點 tab 時會帶上最新的 token）
+        exist.fullPath = fullPath;
+        this.activeTabFullPath = fullPath;
         return;
       }
 
       const title = route.meta.title || route.name || route.path;
-      const closable = route.name !== 'home-alias'; // 現在其實不會加到 tabs，不過留著也沒差
+      const closable = route.name !== 'home-alias';
 
       this.tabs.push({
+        key,
         fullPath,
         path: route.path,
         name: route.name,
         title,
-        closable
+        closable,
       });
       this.activeTabFullPath = fullPath;
     },
 
-    /**
-     * 點擊 tab → 導航到該 tab 所在 route
-     */
     activateTab(tab) {
       if (tab.fullPath === this.$route.fullPath) return;
       this.$router.push(tab.fullPath);
     },
-
-    /**
-     * 關閉 tab：
-     * - 從陣列移除
-     * - 如果關閉的是當前 tab → 自動切到左邊一個，或右邊一個，最後 fallback 到 /home
-     */
     closeTab(tab, index) {
       const isActive = (tab.fullPath === this.activeTabFullPath);
       this.tabs.splice(index, 1);

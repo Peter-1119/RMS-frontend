@@ -193,30 +193,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 
-// UI components
 import DynamicEditorBlock from '@/components/DynamicEditorBlock.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import ItemListWindow from '@/components/ItemListWindow.vue'
 import ManufacturingParameterBlocks from '@/components/ManufacturingParameterBlocks.vue'
 import WordPreview from '@/components/WordPreview.vue'
 
-// token & unified docs API
 import { useDraftToken } from '@/composables/useDraftToken'
 import {
   loadPersonnel,
   initDoc,
-  saveAttributes,
-  loadAttributes,
-  saveBlocks,
-  loadBlocks,
-  saveParams,
-  loadParams,
-  saveReferences,
-  loadReferences,
+  saveDraftAll,
+  loadDraftAll,
+  loadSnapshotDraftAll,
 } from '@/api/docsApi'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
@@ -224,8 +217,29 @@ const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specificati
 
 const route = useRoute()
 
-// ⭐ 判斷是不是變版模式
+// ─── 模式判斷 ──────────────────────────────
 const isRevisionDoc = computed(() => route.query.mode === 'revision')
+
+// 從哪裡來：submitted / rejected / ''
+const fromSource = computed(() => String(route.query.source || '').trim())  // submitted / rejected / ''
+const rmsId = computed(() => String(route.query.rms_id || '').trim())
+const routeToken = computed(() => String(route.query.token || '').trim())
+
+// 只要有 rms_id，就視為「snapshot 進來」
+// （也就是從 SubmittedDocuments / RejectedDocuments 點進來）
+const isSnapshotView = computed(() => !!rmsId.value)
+
+// 你可以用來在 template 顯示警告 Banner：「此畫面來自已送件/退簽快照，儲存會覆蓋最新草稿」
+const snapshotWarningMessage = computed(() => {
+  if (!isSnapshotView.value) return ''
+  if (fromSource.value === 'rejected') {
+    return '目前為退簽版本快照，儲存將以此內容覆蓋最新草稿。'
+  }
+  if (fromSource.value === 'submitted') {
+    return '目前為已送簽版本快照，儲存將以此內容覆蓋最新草稿。'
+  }
+  return '目前為歷史快照檢視，儲存將以此內容覆蓋最新草稿。'
+})
 
 // ---------- steps ----------
 const steps = [
@@ -279,10 +293,6 @@ const qualityBlocks = ref([])
 const otherBlocks = ref([])
 const usedForms = ref([])
 const formWindowVisible = ref(false)
-
-const loading = ref(false)
-const errorMsg = ref('')
-const isSaving = ref(false)
 
 // ---------- nav / scroll ----------
 
@@ -426,14 +436,11 @@ const isStep4Valid = computed(() => {
 
     const hasGroup   = !!meta.machineGroup
     const hasMachine = !!meta.machine
-    const hasProgram =
-      (Array.isArray(meta.programs) && meta.programs.length > 0) ||
-      !!meta.programCode
+    const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0) || !!meta.programCode
 
     const hasTableBody = Array.isArray(arr) && arr.length > 1
 
-    const isTotallyUnused =
-      !hasGroup && !hasMachine && !hasProgram && !hasTableBody
+    const isTotallyUnused = !hasGroup && !hasMachine && !hasProgram && !hasTableBody
 
     // 🔹 完全沒動過的 block：略過
     if (isTotallyUnused) {
@@ -560,10 +567,9 @@ const stepStatusClass = (index) => {
       steps[index].status = true
       return ''
     }
-    steps[index].status = !!v
+    steps[index].status = v ? true : false
     return v ? 'step-ok' : 'step-error'
   }
-
 
   // Step 5：適用品質與規格內容（DynamicEditor）
   if (stepNo === 5) {
@@ -829,18 +835,16 @@ function evalDynamicBlocks(blocksArr = []) {
 
 // Helpers to convert DynamicEditor UI blocks → backend “generic blocks”
 const toGenericBlocks = (arr=[], step_type) =>
-  (arr || [])
-    .sort((a,b)=>(a.tier||0)-(b.tier||0))
-    .map(blk => ({
-      step_type,
-      tier: blk.tier,
-      data: (blk.data || []).map(it => ({
-        option: it.option ?? 0,
-        jsonHeader: it.jsonHeader || null,
-        jsonContent: it.jsonContent || null,
-        files: Array.isArray(it.files) ? it.files : []
-      }))
+  (arr || []).sort((a,b)=>(a.tier||0)-(b.tier||0)).map(blk => ({
+    step_type,
+    tier: blk.tier,
+    data: (blk.data || []).map(it => ({
+      option: it.option ?? 0,
+      jsonHeader: it.jsonHeader || null,
+      jsonContent: it.jsonContent || null,
+      files: Array.isArray(it.files) ? it.files : []
     }))
+  }))
 
 const fromGenericBlocks = (payload, stepType) =>
   (payload.blocks || []).map((blk, i) => ({
@@ -867,7 +871,6 @@ function serializeParamsFromMCR() {
   if (mcrBlocks.value.length == 0 || (mcrBlocks.value.length == 1 && !mcrBlocks.value[0].data.jsonParameterContent)){
     return []
   }
-  console.log("mcrBlocks.value: ", mcrBlocks.value)
   return (mcrBlocks.value || []).map((blk, i) => ({
     step_type: 5,
     tier_no: i + 1,
@@ -897,11 +900,31 @@ const addUsedForm = ({ formId, formName }) => { usedForms.value.push({ id: usedF
 const removeUsedForm = (id) => { usedForms.value = usedForms.value.filter(x => x.id !== id) }
 
 // ---------- token bootstrap (document_type = 1) ----------
+// 規則：
+//   - snapshotView：使用 URL 上的 token（同一份文件），覆蓋原草稿
+//   - 一般模式：用 initDoc(1) 建立 / 取得草稿 token
 const ensureDraftToken = async () => {
+  // Snapshot 模式：一定要用 URL 上的 token
+  if (isSnapshotView.value) {
+    const t = routeToken.value
+    if (!t) {
+      alert('缺少文件代碼 (token)，無法載入快照')
+      return null
+    }
+    setToken(t, { updateUrl: false })
+    return t
+  }
+
+  // 一般情況：如同原本邏輯
   if (draftToken.value) return draftToken.value
+
   try {
-    const res = await initDoc(1)   // specification doc
-    if (res?.success && res.token) { setToken(res.token); return res.token }
+    // doc_type = 1 → 製造式樣書
+    const res = await initDoc(1)
+    if (res?.success && res.token) {
+      setToken(res.token, { updateUrl: false })
+      return res.token
+    }
     throw new Error(res?.message || 'init failed')
   } catch (e) {
     console.error('docs/init failed:', e)
@@ -910,23 +933,53 @@ const ensureDraftToken = async () => {
   }
 }
 
-// ---------- 文件產出 (step 8) — skipped per your request ----------
+// ---------- 文件產出 (step 8) ----------
+const loading  = ref(false)
+const errorMsg = ref('')
+
 const docxSrc = ref('')          // blob URL 給 <WordPreview />
 const previewLoading = ref(false)
-let lastDocxUrl = null           // 記錄舊的 URL 以便 revoke
-const captureId = ref('')
+let lastDocxUrl = null
 
 watch(currentStep, (val) => {
-  // 進到「文件匯出」就自動產生最新 Word 預覽
   if (val === 8) {
     generateAndPreviewDocx()
   }
 })
+
 async function generateAndPreviewDocx() {
   previewLoading.value = true
   errorMsg.value = ''
+
   try {
+    const t = await ensureDraftToken()
+    if (!t) throw new Error('缺少 document token，無法預覽')
+
+    // ★ Snapshot 來的 → 用 snapshot payload 產 Word
+    if (isSnapshotView.value) {
+      const url = `${API_BASE_URL}/docs/preview/${encodeURIComponent(t)}${
+        rmsId.value ? `?rms_id=${encodeURIComponent(rmsId.value)}` : ''
+      }`
+      const res = await axios.get(url, { responseType: 'blob' })
+
+      const blob = new Blob([res.data], {
+        type:
+          res.headers['content-type'] ||
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      })
+
+      if (lastDocxUrl) {
+        URL.revokeObjectURL(lastDocxUrl)
+      }
+      const blobUrl = URL.createObjectURL(blob)
+      lastDocxUrl = blobUrl
+      docxSrc.value = blobUrl
+      return
+    }
+
+    // ★ 一般模式：維持原本 POST /docs/preview/docx 行為
     const payload = {
+      token: t,
       attribute: [{ ...form }],
       content: [
         ...toGenericBlocks(specBlocks.value, 4),
@@ -943,14 +996,13 @@ async function generateAndPreviewDocx() {
       ],
     }
 
-    const url = `${API_BASE_URL}/docs/generate/word`
+    const url = `${API_BASE_URL}/docs/preview/docx`
     const res = await axios.post(url, payload, { responseType: 'blob' })
 
-    // 轉成 blob URL 給 WordPreview 使用
     const blob = new Blob([res.data], {
       type:
         res.headers['content-type'] ||
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument-wordprocessingml.document',
     })
 
     if (lastDocxUrl) {
@@ -976,37 +1028,103 @@ function extractFilenameFromDisposition(disposition, fallback = 'document.docx')
   if (plain?.[1]) return plain[1]
   return fallback
 }
+function extractErrorMessage(e, fallback = '文件產出失敗，請稍後再試') {
+  console.error('generate word error:', e)
+
+  let msg = fallback
+
+  const resp = e?.response
+  if (resp) {
+    const ct = (resp.headers?.['content-type'] || '').toLowerCase()
+
+    // axios 設了 responseType: 'blob'，後端 JSON 會被包成 Blob
+    if (resp.data instanceof Blob) {
+      // 這裡不能用 sync，要在呼叫端 await
+      return resp.data.text().then((text) => {
+        let parsedMsg = text || fallback
+
+        // 嘗試當 JSON parse，再抓 message
+        try {
+          const obj = JSON.parse(text)
+          if (obj && typeof obj === 'object' && obj.message) {
+            parsedMsg = String(obj.message)
+          }
+        } catch {
+          // 不是 JSON 就維持原本 text
+        }
+
+        // 如果含有 ORA-01031，替換成比較友善的說明
+        if (parsedMsg.includes('ORA-01031')) {
+          parsedMsg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
+        }
+
+        // 把 \n 換成真正換行（如果你之後改成 <pre> 或 white-space: pre-wrap 會生效）
+        return parsedMsg.replace(/\\n/g, '\n')
+      })
+    }
+
+    // 如果不是 Blob（例如後端沒包成 Blob）
+    if (resp.data && typeof resp.data === 'object' && 'message' in resp.data) {
+      msg = String(resp.data.message)
+    }
+  }
+
+  return Promise.resolve(msg)
+}
 async function generateAndDownloadDocx() {
-  // if (steps.some(step => !step.status)) {
-  //   alert('請把內容完成才可下載')
-  //   return
-  // }
-  
+  // ★ Snapshot 檢視模式：不允許重新產出 Word（避免重複建 RMS / EIP）
+  if (isSnapshotView.value) {
+    alert('此畫面為歷史快照檢視，只能預覽，無法重新產出 Word 文件。\n如需重新送簽，請改用「變版」功能或新建文件。')
+    return
+  }
+
+  if (steps.some(step => !step.status)) {
+    alert('請把內容完成才可下載')
+    return
+  }
+
   loading.value = true
   errorMsg.value = ''
   try {
+    const t = await ensureDraftToken()
+    if (!t) throw new Error('缺少 document token，無法產出文件')
+
     const payload = {
-      token: draftToken.value,
-      attribute: [{...form}],
-      content: [...toGenericBlocks(specBlocks.value, 4), ...serializeParamsFromMCR(), ...toGenericBlocks(qualityBlocks.value, 6), ...toGenericBlocks(otherBlocks.value, 7)],
-      reference: [
-        ...(usedForms.value || []).map(f => ({referenceType: 1, referenceDocumentID: f.formId, referenceDocumentName: f.formName})),
+      token: t,
+      attribute: [{ ...form }],
+      content: [
+        ...toGenericBlocks(specBlocks.value, 4),
+        ...serializeParamsFromMCR(),
+        ...toGenericBlocks(qualityBlocks.value, 6),
+        ...toGenericBlocks(otherBlocks.value, 7)
       ],
+      reference: [
+        ...(usedForms.value || []).map(f => ({
+          referenceType: 1,
+          referenceDocumentID: f.formId,
+          referenceDocumentName: f.formName
+        }))
+      ]
     }
-    const url = `${API_BASE_URL}/docs/generate/word` // or /docs/generate/word if that’s your route
+    const url = `${API_BASE_URL}/docs/generate/word`
 
-    const res = await axios.post(url, payload, {responseType: 'blob'})
+    // 先強制儲存草稿
+    await saveDraft()
 
-    // 🔸 若後端有回傳 X-Document-ID，就更新到 form
+    const res = await axios.post(url, payload, { responseType: 'blob' })
+
     const docIdHeader =
       res.headers['x-document-id'] || res.headers['X-Document-ID']
     if (docIdHeader) {
       form.documentID = docIdHeader
     }
 
-    const contentType = res.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const contentType =
+      res.headers['content-type'] ||
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     const dispo = res.headers['content-disposition']
-    const filename = extractFilenameFromDisposition(dispo, 'document.docx')
+    const versionStr = Number(form.documentVersion ?? 1).toFixed(1)
+    const filename = extractFilenameFromDisposition(dispo, `${form.documentName || 'document'}${versionStr}.docx`)
 
     const blob = new Blob([res.data], { type: contentType })
 
@@ -1028,15 +1146,33 @@ async function generateAndDownloadDocx() {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
   } catch (e) {
     console.error(e)
+    // ...保留你原本的錯誤處理邏輯
     if (e?.response?.data instanceof Blob) {
       try {
-        const t = await e.response.data.text()
-        errorMsg.value = t || e.message || 'download error'
+        const text = await e.response.data.text()
+        let msg = text || e.message || '文件產出失敗，請稍後再試'
+
+        try {
+          const obj = JSON.parse(text)
+          if (obj && typeof obj === 'object' && obj.message) {
+            msg = String(obj.message)
+          }
+        } catch {}
+
+        if (msg.includes('ORA-01031')) {
+          msg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
+        }
+
+        errorMsg.value = msg.replace(/\\n/g, '\n')
       } catch {
-        errorMsg.value = e?.message || 'download error'
+        errorMsg.value = e?.message || '文件產出失敗，請稍後再試'
       }
     } else {
-      errorMsg.value = e?.message || 'download error'
+      const msg =
+        e?.response?.data?.message ||
+        e?.message ||
+        '文件產出失敗，請稍後再試'
+      errorMsg.value = msg
     }
   } finally {
     loading.value = false
@@ -1044,41 +1180,63 @@ async function generateAndDownloadDocx() {
 }
 
 // ---------- save ----------
+const isSaving = ref(false)
+
 const saveDraft = async () => {
-  const t = await ensureDraftToken()
-  if (!t) return
+  // Snapshot 模式：直接用 URL token 覆蓋最新草稿
+  let t
+  if (isSnapshotView.value) {
+    t = routeToken.value
+    if (!t) {
+      alert('缺少文件代碼，無法儲存草稿')
+      return
+    }
+
+    setToken(t, { updateUrl: false })
+
+    const ok = window.confirm(
+      `${snapshotWarningMessage.value || '此畫面為歷史快照檢視'}\n\n` +
+      '現在儲存會以目前畫面內容覆蓋這份文件最新草稿，確定要這樣做嗎？'
+    )
+    if (!ok) return
+  } else {
+    // 一般情況：走原本 ensureDraftToken 流程
+    t = await ensureDraftToken()
+    if (!t) return
+  }
+
   try {
     isSaving.value = true
 
-    // 1) attributes
-    const a = await saveAttributes(t, form)
-    if (!a?.success) {
-      isSaving.value = false
-      return alert(a?.message || '屬性儲存失敗')
-    }
+    const specBlockPayload = toGenericBlocks(specBlocks.value, 4)
+    const qualityBlockPayload = toGenericBlocks(qualityBlocks.value, 6)
+    const otherBlockPayload = toGenericBlocks(otherBlocks.value, 7)
+    const paramPayload = serializeParamsFromMCR()
 
-    // 2) step 3: 規範 → generic blocks (step_type = 4)
-    await saveBlocks(t, 4, toGenericBlocks(specBlocks.value, 4))
-
-    // 3) step 4: 參數一覽表 → params (step_type = 5)
-    await saveParams(t, serializeParamsFromMCR(), 5)
-
-    // 4) step 5: 品質與規格內容 → generic blocks (step_type = 6)
-    await saveBlocks(t, 6, toGenericBlocks(qualityBlocks.value, 6))
-
-    // 5) step 7: 其他 → generic blocks (step_type = 7)
-    await saveBlocks(t, 7, toGenericBlocks(otherBlocks.value, 7))
-
-    // 6) step 6: 使用表單 → references
-    await saveReferences(t, {
-      documents: [],
-      forms: (usedForms.value || []).map(f => ({
-        formId: f.formId,
-        formName: f.formName,
-      })),
+    const result = await saveDraftAll(t, {
+      form,
+      blockRequests: [
+        { step_type: 4, blocks: specBlockPayload },
+        { step_type: 6, blocks: qualityBlockPayload },
+        { step_type: 7, blocks: otherBlockPayload },
+      ],
+      paramRequests: [
+        { step_type: 5, blocks: paramPayload },
+      ],
+      references: {
+        documents: [],
+        forms: (usedForms.value || []).map(f => ({
+          formId: f.formId,
+          formName: f.formName,
+        })),
+      },
     })
 
-    alert(`草稿已儲存（時間：${a.issueTime || ''}）`)
+    if (!result?.success) {
+      return alert(result?.message || '屬性儲存失敗')
+    }
+
+    alert(`草稿已儲存（時間：${result.issueTime || ''}）`)
   } catch (e) {
     console.error('saveDraft failed:', e)
     alert('儲存草稿失敗')
@@ -1086,83 +1244,116 @@ const saveDraft = async () => {
     isSaving.value = false
   }
 }
-const isRevision = computed(() => {
-  return !!String(form.previousDocumentToken || '').trim()
-})
-onMounted(async () => {
-  window.addEventListener('scroll', handleScroll, { passive: true })
 
-  const t = await ensureDraftToken()
-  if (!t) return
-  try {
-    // 1) attributes
-    const a = await loadAttributes(t)
-    if (a?.success) Object.assign(form, a.form || {})
+// ★ 共用：把後端撈回來的 snapshot/draft 結果套用到前端
+const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false }) => {
+  // 1) attributes
+  if (snapshot.attributes?.success) {
+    Object.assign(form, snapshot.attributes.form || {})
+  }
+
+  // 如果是 snapshot 檢視 → 不要覆蓋原本的部門/作者
+  // 否則正常帶入登入者資訊
+  if (!isSnapshot) {
     form.department = sessionStorage.getItem('loggedInUserdeptName')
     form.author_id = sessionStorage.getItem('loggedInUserNo')
     form.author = sessionStorage.getItem('loggedInUserName')
 
     const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
-    if (personnel?.success){
-      if (form.confirmer.length == 0) form.confirmer = personnel.data.personnel.confirmer
-      if (form.approver.length == 0) form.approver = personnel.data.personnel.approver
+    if (personnel?.success) {
+      if (!form.confirmer) form.confirmer = personnel.data.personnel.confirmer
+      if (!form.approver) form.approver = personnel.data.personnel.approver
     }
+  }
 
-    // 依據品目載入 style options + 顯示 specification
-    if (form.attribute.itemType) {
-      // 先載入該品目的式樣清單，供下拉選
-      await loadStylesForItem(form.attribute.itemType)
+  // 依據品目載入 style options + 顯示 specification
+  if (form.attribute?.itemType) {
+    await loadStylesForItem(form.attribute.itemType)
 
-      // 顯示已儲存的 specification（PROCESS_NAME 串）
-      if (Array.isArray(form.attribute.specification)) {
-        specificationDisplay.value = form.attribute.specification
-          .map(s => s.name)
-          .join(', ')
-      }
+    if (Array.isArray(form.attribute.specification)) {
+      specificationDisplay.value = form.attribute.specification.map(s => s.name).join(', ')
     }
+  }
 
+  // 2) 規範 blocks (step_type=4)
+  const sp = snapshot.blocks?.['4']
+  if (sp?.success) {
+    specBlocks.value = fromGenericBlocks(sp, 2)
+  }
 
-    // 2) 規範 blocks (step_type = 4)
-    const sp = await loadBlocks(t, 4)
-    if (sp?.success) specBlocks.value = fromGenericBlocks(sp, 2)
+  // 3) 參數 (step_type=5)
+  const pm = snapshot.params?.['5']
+  if (pm?.success) {
+    loadParamsIntoMCR(pm)
+  } else {
+    paramsLoaded.value = true
+  }
 
-    // 3) 參數 (step_type = 5)
-    const pm = await loadParams(t, 5)
-    if (pm?.success) {
-      loadParamsIntoMCR(pm)
+  // 4) 品質與規格 blocks (step_type=6)
+  const ql = snapshot.blocks?.['6']
+  if (ql?.success) {
+    qualityBlocks.value = fromGenericBlocks(ql, 4)
+  }
+
+  // 5) 其他 blocks (step_type=7)
+  const ot = snapshot.blocks?.['7']
+  if (ot?.success) {
+    otherBlocks.value = fromGenericBlocks(ot, 6)
+  }
+
+  // 6) 使用表單
+  const rf = snapshot.references
+  if (rf?.success) {
+    let i = 1
+    usedForms.value = (rf.forms || []).map(f => ({
+      id: i++,
+      formId: f.formId,
+      formName: f.formName,
+    }))
+  }
+}
+onMounted(async () => {
+  window.addEventListener('scroll', handleScroll, { passive: true })
+
+  try {
+    const t = await ensureDraftToken()
+    if (!t) return
+
+    let snapshot
+
+    if (isSnapshotView.value) {
+      // ⭐ 從 Submitted / Rejected 進來 → 用 snapshot-draft-all
+      snapshot = await loadSnapshotDraftAll(t, {
+        blocks: [4, 6, 7],
+        params: [5],
+        attrs: true,
+        refs: true,
+        rms_id: rmsId.value,
+      })
+      await applyLoadedData(snapshot, { isSnapshot: true })
     } else {
-      // 沒有舊資料 → 至少要把 flag 打開讓 child 建空 block
-      paramsLoaded.value = true
-    }
-
-
-    // 4) 品質與規格 blocks (step_type = 6)
-    const ql = await loadBlocks(t, 6)
-    if (ql?.success) qualityBlocks.value = fromGenericBlocks(ql, 4)
-
-    // 5) 其他 blocks (step_type = 7)
-    const ot = await loadBlocks(t, 7)
-    if (ot?.success) otherBlocks.value = fromGenericBlocks(ot, 6)
-
-    // 6) 使用表單
-    const rf = await loadReferences(t)
-    if (rf?.success) {
-      let i = 1
-      usedForms.value = (rf.forms || []).map(f => ({
-        id: i++,
-        formId: f.formId,
-        formName: f.formName,
-      }))
+      // 一般新建/草稿 → 用 draft-all
+      snapshot = await loadDraftAll(t, {
+        blocks: [4, 6, 7],
+        params: [5],
+        attrs: true,
+        refs: true,
+      })
+      await applyLoadedData(snapshot, { isSnapshot: false })
     }
   } catch (e) {
-    console.error('load draft failed:', e)
-    alert('載入草稿失敗')
+    console.error('load draft/snapshot failed:', e)
+    alert(isSnapshotView.value ? '載入歷史快照失敗' : '載入草稿失敗')
     paramsLoaded.value = true
   }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleScroll)
+})
+
+const isRevision = computed(() => {
+  return !!String(form.previousDocumentToken || '').trim()
 })
 
 // optional devtools

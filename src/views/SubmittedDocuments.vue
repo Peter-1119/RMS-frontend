@@ -129,11 +129,21 @@ export default {
       if (!item || !item.documentToken) return
 
       const token = encodeURIComponent(item.documentToken)
+      const rmsId = item.rmsId
 
-      // base 要帶上 BASE_URL（例如 /rms/ 之類），不要加 #
-      const base = window.location.origin + (import.meta.env.BASE_URL || '/')
-      // 這裡直接接 docs/preview/...
-      const url = `${base}docs/preview/${token}`
+      // 假設 router 有一個 name: 'docx-preview' 對應 DocxPreviewPage.vue
+      // 並且 path 類似 '/docx-preview/:token'
+      const routeLocation = this.$router.resolve({
+        name: 'docx-preview',
+        params: { token },
+        query: {
+          mode: 'snapshot',   // 告訴 DocxPreviewPage 要用 snapshot API
+          rms_id: rmsId || '',
+        },
+      })
+
+      const url = window.location.origin + (import.meta.env.BASE_URL || '/') + routeLocation.fullPath.replace(/^\//, '')
+      console.log('[SubmittedDocuments] open snapshot preview:', url)
 
       const features = [
         'noopener',
@@ -144,21 +154,8 @@ export default {
         'scrollbars=yes'
       ].join(',')
 
-      // 用固定名字，之後再點別的文件會重用同一個預覽視窗
       window.open(url, 'docxPreviewWindow', features)
     },
-
-    // openWordPreview(item) {
-    //   if (!item || !item.documentToken) return
-    //   // 後端我們等一下會做 GET /docs/view/<token>/docx
-    //   const base = window.location.origin
-    //   const token = encodeURIComponent(item.documentToken)
-    //   const url = `${base}/#/docs/preview/${token}`
-
-    //   // 另開視窗（新 tab）
-    //   window.open(url, '_blank')
-    // },
-
     changePage(p) {
       if (p < 1 || p > this.totalPages) return
       this.page = p
@@ -168,7 +165,14 @@ export default {
     performSearch(item) {
       if (!item) return
       const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
-      this.$router.push({ name: routeName, query: { token: item.documentToken } })
+      this.$router.push({
+        name: routeName,
+        query: {
+          token: item.documentToken,
+          mode: 'submitted',          // ★ from Submitted
+          rms_id: item.rmsId || '',   // ★ 指定要看的 RMS 單
+        },
+      })
     },
     // debounce keyword input
     onKeywordInput() {

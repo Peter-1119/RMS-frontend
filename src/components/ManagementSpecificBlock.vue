@@ -26,701 +26,755 @@
 
 
 <script>
-import { EditorContent, Editor } from '@tiptap/vue-3';
+import { EditorContent, Editor } from '@tiptap/vue-3'
 import { Focus } from '@tiptap/extensions'
-import Document from '@tiptap/extension-document';
-import Paragraph from '@tiptap/extension-paragraph';
-import Text from '@tiptap/extension-text';
-import { Table } from '@tiptap/extension-table';
-import { TableRow } from '@tiptap/extension-table-row';
-import { TableHeader } from '@tiptap/extension-table-header';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { Color } from '@tiptap/extension-color';
-import { TextStyle } from '@tiptap/extension-text-style';
-import { History } from '@tiptap/extension-history';
+import Document from '@tiptap/extension-document'
+import Paragraph from '@tiptap/extension-paragraph'
+import Text from '@tiptap/extension-text'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableHeader } from '@tiptap/extension-table-header'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { Color } from '@tiptap/extension-color'
+import { TextStyle } from '@tiptap/extension-text-style'
+import { History } from '@tiptap/extension-history'
 import { CellSelection, selectedRect } from 'prosemirror-tables'
 
 const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
 
-const CustomTableCell = TableCell.extend({ addAttributes() { return { ...this.parent?.(), contenteditable: {default: true}, class: {default: null} } } });
-const CustomTableHeader = TableHeader.extend({ addAttributes() { return { ...this.parent?.(), contenteditable: { default: true } } } });
-const CustomTableRow = TableRow.extend({ addAttributes() { return { ...this.parent?.(), class: { default: null } } } });
+const CustomTableCell = TableCell.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      contenteditable: { default: true },
+      class: { default: null },
+    }
+  },
+})
+const CustomTableHeader = TableHeader.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      contenteditable: { default: true },
+    }
+  },
+})
+const CustomTableRow = TableRow.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      class: { default: null },
+    }
+  },
+})
+
 const tableEditorExtensions = [
-    Document.extend({ content: 'table' }), ...baseExt, Table, Focus.configure({ className: 'has-focus', mode: 'all' }),
-    CustomTableRow, CustomTableHeader, CustomTableCell, History
-];
+  Document.extend({ content: 'table' }),
+  ...baseExt,
+  Table,
+  Focus.configure({ className: 'has-focus', mode: 'all' }),
+  CustomTableRow,
+  CustomTableHeader,
+  CustomTableCell,
+  History,
+]
 
-const lockCols = [0, 1, 2];
-const initialTableData = [
-    ["項次", "槽體", "管理項目", '規格下限(OOS-)','操作下限(OOC-)','設定值','操作上限(OOC+)','規格上限(OOS+)', "單位", "檢查頻率", "檢查方式", "檢驗人員", "記錄", "備註/參考指示書"],
-    ["", "熱水洗1", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
-    ["", "熱水洗1", "溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
-    ["", "剝膜1", "氫氧化鈉NaOH", "", "", "", "", "", "%", "", "", "", "", ""],
-    ["", "剝膜1", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
-    ["", "剝膜1", "作業溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
-    ["", "剝膜2", "氫氧化鈉NaOH", "", "", "", "", "", "%", "", "", "", "", ""],
-    ["", "剝膜2", "噴壓", "", "", "", "", "", "kgf/cm2", "", "", "", "", ""],
-    ["", "剝膜2", "作業溫度", "", "", "", "", "", "℃", "", "", "", "", ""],
-];
+// 鎖定不可編輯欄（用在 from PMS 的 arrayData）
+const lockCols = [0, 1, 2]
 
-const extractText = (cellNode) => {
-    const paragraphNode = cellNode.content.content[0]; 
-    if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return '';
-    
-    return paragraphNode.content.content.map(textNode => textNode.text).join('').trim();
-};
+// --- 工具：取 cell 裡的純文字（給驗證用） ---
+const extractText = cellNode => {
+  const paragraphNode = cellNode.content?.content?.[0]
+  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return ''
+  return (paragraphNode.content?.content || [])
+    .map(textNode => textNode.text || '')
+    .join('')
+    .trim()
+}
 
-const extractCellText = (cellNode) => {
-    if (!cellNode || !cellNode.content || !cellNode.content.childCount) {
-        return "";
-    }
-    
-    const paragraphNode = cellNode.content.child(0); 
-    if (!paragraphNode || paragraphNode.type.name !== 'paragraph') {
-        return "";
-    }
+// --- 工具：取 cell 裡的純文字（給匯出 / copy 用） ---
+const extractCellText = cellNode => {
+  if (!cellNode || !cellNode.content || !cellNode.content.childCount) return ''
+  const paragraphNode = cellNode.content.child(0)
+  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return ''
 
-    let text = '';
-    paragraphNode.content.forEach(textNode => {
-        if (textNode.text) text += textNode.text;
-    });
-
-    return text.trim();
-};
-
+  let text = ''
+  paragraphNode.content.forEach(textNode => {
+    if (textNode.text) text += textNode.text
+  })
+  return text.trim()
+}
 
 export default {
-    name: 'ManagementSpecificBlock',
-    components: {
-        EditorContent,
-    },
-    props: {
-        machines: { type: Array, required: true },
-        managementBlock: { type: Object, required: true },
-        hasPms: { type: Boolean, default: true },
-        allowColor: {type: Boolean, default: true}
-    },
-    data() {
-        return {
-            localBlockData: { ...this.managementBlock },
-            editor: null,
-            hasUserEdited: false,      // 使用者是否改過
-            lastExternalJson: null,    // 上一次「外部載入」的 jsonContent 簽章
-            validateTimer: null,   // 驗證用 timeout
-            syncTimer: null,       // 同步 parent 用 timeout
-            dirtyRows: new Set(),  // 被改過的 row index
+  name: 'ManagementSpecificBlock',
+  components: {
+    EditorContent,
+  },
+  props: {
+    machines: { type: Array, required: true },
+    managementBlock: { type: Object, required: true },
+    hasPms: { type: Boolean, default: true },
+    allowColor: { type: Boolean, default: true },
+  },
+  data() {
+    return {
+      localBlockData: { ...this.managementBlock },
+      editor: null,
+      hasUserEdited: false, // 使用者是否改過
+      lastExternalJson: null, // 上一次「外部載入」的 jsonContent 簽章
+      validateTimer: null, // 驗證用 timeout
+      syncTimer: null, // 同步 parent 用 timeout
+      dirtyRows: new Set(), // 被改過的 row index
+    }
+  },
+  mounted() {
+    this.initOrReloadFromProps(true)
+  },
+  beforeUnmount() {
+    if (this.validateTimer) clearTimeout(this.validateTimer)
+    if (this.syncTimer) clearTimeout(this.syncTimer)
+    this.exportTableData(this.editor)
+    if (this.editor) this.editor.destroy()
+  },
+  watch: {
+    managementBlock: {
+      deep: true,
+      handler(newVal) {
+        const data = newVal?.data || {}
+        const jsonContent = data.jsonContent || null
+        const sig = JSON.stringify(jsonContent || null)
+
+        // 若這次的內容跟 lastExternalJson 一樣 → 多半是自己 emit update-table-data 之後
+        // 父層又把同一份內容丟回來，這種就不要再重載，避免無限迴圈
+        if (sig === this.lastExternalJson && this.hasUserEdited) {
+          return
         }
-    },
-    mounted() {
-      this.initOrReloadFromProps(true)
-    },
 
-    beforeUnmount() {
-        if (this.validateTimer) clearTimeout(this.validateTimer)
-        if (this.syncTimer) clearTimeout(this.syncTimer)
-        this.exportTableData(this.editor)
-        if (this.editor) this.editor.destroy();
+        // 其他情況（例如：載入草稿 / 換機台重設 PMS） → 正式重載
+        this.initOrReloadFromProps(false)
+      },
     },
-    computed: {
-        isTableSelected() { return this.editor?.can().mergeCells() || this.editor?.can().splitCell() }
-    },
-    watch: {
-        managementBlock: {
-            deep: true,
-            handler(newVal) {
-                const data = newVal?.data || {}
-                const jsonContent = data.jsonContent || null
-                const sig = JSON.stringify(jsonContent || null)
+  },
+  methods: {
+    initOrReloadFromProps(isInitial = false) {
+      const blk = this.managementBlock || {}
+      const data = blk.data || {}
+      const jsonContent = data.jsonContent || null
+      const arrayData = Array.isArray(data.arrayData) ? data.arrayData : []
 
-                // 若這次的內容跟 lastExternalJson 一樣 → 多半是自己 emit update-table-data 之後
-                // 父層又把同一份內容丟回來，這種就不要再重載，避免無限迴圈
-                if (sig === this.lastExternalJson && this.hasUserEdited) {
-                    return
-                }
+      // 記錄目前這次「外部狀態」的簽章（只看 jsonContent）
+      const sig = JSON.stringify(jsonContent || null)
+      this.lastExternalJson = sig
+      this.hasUserEdited = false // 外部重載時視為尚未編輯
 
-                // 其他情況（例如：載入草稿 / 換機台重設 PMS） → 正式重載
-                this.initOrReloadFromProps(false)
+      // ✅ 完全沒有內容（沒有草稿 json，也沒有 PMS arrayData）→ 不建立 editor
+      //    只保留「選擇的機台無任何參數」提示
+      if (!jsonContent && !arrayData.length) {
+        if (this.editor) {
+          this.editor.destroy()
+          this.editor = null
+        }
+        this.localBlockData = { ...blk }
+        return
+      }
+
+      let content
+      if (jsonContent) {
+        // 優先使用草稿 / DB 儲存的內容
+        content = jsonContent
+      } else {
+        // 只有 PMS arrayData → 由後端回來的參數表生成 Tiptap table
+        content = this.getInitialTableContent(arrayData)
+      }
+
+      this.localBlockData = { ...blk }
+
+      if (!this.editor) {
+        // 第一次建立 editor
+        this.editor = new Editor({
+          content,
+          extensions: tableEditorExtensions,
+          editorProps: {
+            handleDOMEvents: {
+              drop: () => true,
+              dragstart: () => true,
+              copy: (view, event) => this.handleCopy(view, event),
+              keydown: (view, event) => this.handleKeydown(view, event),
+              paste: (view, event) => this.handlePaste(view, event),
             },
-        },
+          },
+          onUpdate: ({ editor }) => {
+            // 1️⃣ 不要每次都立即 export / validate
+
+            // 先標記目前 row 是 dirty
+            this.markCurrentRowDirty(editor)
+
+            // 2️⃣ 驗證：稍微 debounce，只檢查 dirtyRows
+            if (this.validateTimer) clearTimeout(this.validateTimer)
+            this.validateTimer = setTimeout(() => {
+              const rows = Array.from(this.dirtyRows)
+              if (rows.length) {
+                this.validateTableContent(editor, rows)
+                this.dirtyRows.clear()
+              }
+            }, 200)
+
+            // 3️⃣ 同步 parent：比較慢一點沒關係
+            if (this.syncTimer) clearTimeout(this.syncTimer)
+            this.syncTimer = setTimeout(() => {
+              this.exportTableData(editor)
+            }, 500)
+          },
+        })
+        this.validateTableContent(this.editor)
+      } else {
+        // 已經有 editor → 只重設內容
+        this.editor.commands.setContent(content, false)
+        this.validateTableContent(this.editor)
+      }
     },
 
-    methods: {
-        initOrReloadFromProps(isInitial = false) {
-            const blk = this.managementBlock || {}
-            const data = blk.data || {}
-            const jsonContent = data.jsonContent || null
-            const arrayData   = Array.isArray(data.arrayData) ? data.arrayData : []
-
-            // 記錄目前這次「外部狀態」的簽章（只看 jsonContent）
-            const sig = JSON.stringify(jsonContent || null)
-            this.lastExternalJson = sig
-            this.hasUserEdited = false  // 外部重載時視為尚未編輯
-
-            // ★ 沒有 PMS 且沒有任何資料 → 不建立 editor，只顯示「選擇的機台無任何參數」
-            if (!this.hasPms && !jsonContent && !arrayData.length) {
-            if (this.editor) {
-                this.editor.destroy()
-                this.editor = null
-            }
-            this.localBlockData = { ...blk }
-            return
-            }
-
-            let content
-            if (jsonContent) {
-              // 優先使用草稿 / DB 儲存的內容
-              content = jsonContent
-            } else if (arrayData.length) {
-              // 其次使用 PMS 回來的 arrayData
-              content = this.getInitialTableContent(arrayData)
-            } else {
-              // 兩邊都沒有 → fallback 初始模板
-              content = this.getInitialTableContent(initialTableData)
-            }
-
-            this.localBlockData = { ...blk }
-
-            if (!this.editor) {
-                // 第一次建立 editor
-                this.editor = new Editor({
-                    content,
-                    extensions: tableEditorExtensions,
-                    editorProps: { handleDOMEvents: { 
-                        drop: () => true, 
-                        dragstart: () => true, 
-                        copy: (view, event) => this.handleCopy(view, event),      // ⭐ 新增 copy
-                        keydown: (view, event) => this.handleKeydown(view, event),
-                        paste: (view, event) => this.handlePaste(view, event),   // ⭐ 新增這行
-                    }},
-                    onUpdate: ({ editor }) => {
-                        // 1️⃣ 不要每次都立即 export / validate
-
-                        // 先標記目前 row 是 dirty
-                        this.markCurrentRowDirty(editor)
-
-                        // 2️⃣ 驗證：120ms 後只檢查 dirtyRows
-                        if (this.validateTimer) clearTimeout(this.validateTimer)
-                        this.validateTimer = setTimeout(() => {
-                            const rows = Array.from(this.dirtyRows)
-                            if (rows.length) {
-                                this.validateTableContent(editor, rows)
-                                this.dirtyRows.clear()
-                            }
-                        }, 200)   // 你可以調 150~300，看順手程度
-
-                        // 3️⃣ 同步 parent：比較慢一點沒關係
-                        if (this.syncTimer) clearTimeout(this.syncTimer)
-                        this.syncTimer = setTimeout(() => {
-                            this.exportTableData(editor)
-                        }, 500)   // 0.5s 內沒有再打字，就同步一次
-                    },
-                })
-                this.validateTableContent(this.editor)
-            } else {
-                // 已經有 editor → 只重設內容
-                this.editor.commands.setContent(content, false)
-                this.validateTableContent(this.editor)
-            }
-        },
-        markCurrentRowDirty(editor) {
-            if (!editor) return
-            const rowIndex = this.rowFocusCheck()
-            if (rowIndex > 0) {
-                this.dirtyRows.add(rowIndex)
-            }
-        },
-
-        handleKeydown(view, event) {
-            if (event.key !== 'Enter') return false
-
-            const { state } = view
-            const { $from } = state.selection
-
-            // 找到目前所在的 cell / header
-            let cellNode = null
-            let cellDepth = -1
-            for (let d = $from.depth; d > 0; d--) {
-                const node = $from.node(d)
-                if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
-                    cellNode = node
-                    cellDepth = d
-                    break
-                }
-            }
-            if (!cellNode || cellDepth < 0) return false
-
-            // rowNode = 這個 cell 所在的那一列
-            const rowNode = $from.node(cellDepth - 1)
-            // tableNode = 整張 table
-            const tableNode = $from.node(cellDepth - 2)
-
-            let rowIndex = -1
-            let colIndex = -1
-
-            // 取得 rowIndex
-            tableNode.content.forEach((row, _offset, index) => {
-                if (row === rowNode) {
-                    rowIndex = index
-                }
-            })
-
-            // 取得 colIndex
-            rowNode.content.forEach((cell, _offset, index) => {
-                if (cell === cellNode) {
-                    colIndex = index
-                }
-            })
-
-            if (rowIndex < 0 || colIndex < 0) return false
-            const blockedCols = [3, 4, 5, 6, 7]
-
-            // 如果是在需要鎖 Enter 的那些欄位，就擋掉
-            if (blockedCols.includes(colIndex)) {
-                event.preventDefault()
-                return true       // 告訴 ProseMirror：這個事件已經處理完了
-            }
-
-            return false
-        },
-        handleCopy(view, event) {
-            const { state } = view
-            const sel = state.selection
-
-            // 只處理「多格選取」的情況，其他丟回瀏覽器預設
-            if (!(sel instanceof CellSelection)) {
-                return false
-            }
-
-            const rect = selectedRect(state)
-            const table = rect.table
-            const rows = []
-
-            for (let r = rect.top; r < rect.bottom; r++) {
-                const rowNode = table.child(r)
-                const cols = []
-                for (let c = rect.left; c < rect.right; c++) {
-                    const cellNode = rowNode.child(c)
-                    cols.push(extractCellText(cellNode) || '')
-                }
-                rows.push(cols.join('\t'))
-            }
-
-            const text = rows.join('\n')
-
-            // 寫進剪貼簿，只用純文字（避免 contenteditable 屬性跟著亂跑）
-            if (event.clipboardData) {
-                event.clipboardData.setData('text/plain', text)
-                event.preventDefault()
-                return true
-            }
-
-            return false
-        },
-        handlePaste(view, event) {
-            const { state, dispatch } = view
-            const sel = state.selection
-
-            const { $from } = sel
-
-            // 讀剪貼簿文字
-            const raw = event.clipboardData?.getData('text/plain') || ''
-            if (!raw) return false
-
-            // 解析矩陣：換行 -> row，tab -> col
-            const rows = raw.split(/\r?\n/).filter(r => r.length > 0)
-            if (!rows.length) return true
-
-            const matrix = rows.map(r => r.split('\t'))
-            const rowCount = matrix.length
-            const colCount = Math.max(...matrix.map(r => r.length))
-
-            // 先找到「目前 table / row / col 的起點」
-            let tableNode = null
-            let rowNode = null
-            let tableDepth = -1
-            let rowDepth = -1
-
-            for (let d = $from.depth; d > 0; d--) {
-                const node = $from.node(d)
-                if (!tableNode && node.type.name === 'table') {
-                    tableNode = node
-                    tableDepth = d
-                } else if (!rowNode && node.type.name === 'tableRow') {
-                    rowNode = node
-                    rowDepth = d
-                }
-            }
-            if (!tableNode || !rowNode) return false
-
-            // 算目前所在的 rowIndex / colIndex
-            let startRowIndex = -1
-            let startColIndex = -1
-
-            // 如果現在是多格選取，就用「選取矩形的左上角」當起點
-            if (sel instanceof CellSelection) {
-                const rect = selectedRect(state)
-                startRowIndex = rect.top
-                startColIndex = rect.left
-            } else {
-                // 否則就用 cursor 所在的 cell 當起點（跟你原本類似）
-                const table = tableNode
-
-                table.content.forEach((row, _off, idx) => {
-                    if (row === rowNode) startRowIndex = idx
-                })
-
-                let cellNode = null
-                for (let d = $from.depth; d > 0; d--) {
-                    const node = $from.node(d)
-                    if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
-                        cellNode = node
-                        break
-                    }
-                }
-                if (!cellNode) return false
-
-                rowNode.content.forEach((cell, _off, idx) => {
-                    if (cell === cellNode) startColIndex = idx
-                })
-            }
-
-            if (startRowIndex < 0 || startColIndex < 0) return false
-
-            // 找出 table 在整個 doc 裡的起始位置
-            let tablePos = null
-            state.doc.descendants((node, pos) => {
-                if (node === tableNode) {
-                    tablePos = pos
-                    return false
-                }
-                return true
-            })
-            if (tablePos == null) return true
-
-            // ⭐ 第一步：預檢查 + 收集所有要替換的 cell（還不動 tr）
-            const targets = []   // { from, to, type, attrs, text }
-
-            for (let r = 0; r < rowCount; r++) {
-                const targetRowIndex = startRowIndex + r
-                if (targetRowIndex >= tableNode.childCount) break
-
-                const targetRowNode = tableNode.child(targetRowIndex)
-
-                // 算這一列在 doc 裡的起始 pos（用「原始 doc」的 nodeSize）
-                let rowStart = tablePos + 1
-                for (let i = 0; i < targetRowIndex; i++) {
-                    rowStart += tableNode.child(i).nodeSize
-                }
-
-                let cellPos = rowStart + 1
-
-                for (let c = 0; c < targetRowNode.childCount; c++) {
-                    const targetCell = targetRowNode.child(c)
-                    const thisCellPos = cellPos
-                    const thisCellEnd = cellPos + targetCell.nodeSize
-
-                    // 是否在要貼的矩陣範圍內
-                    if (c >= startColIndex && c < startColIndex + colCount) {
-                        const colOffset = c - startColIndex
-                        const text = (matrix[r][colOffset] ?? '').toString()
-
-                        // 🔒 如果其中一格是 contenteditable=false → 整個 paste 擋掉
-                        if (targetCell.attrs?.contenteditable === false) { return true }
-
-                        targets.push({ from: thisCellPos, to: thisCellEnd, type: targetCell.type, attrs: { ...targetCell.attrs }, text })
-                    }
-
-                    cellPos = thisCellEnd
-                }
-            }
-
-            if (!targets.length) return true
-
-            // ⭐ 第二步：反向套用（避免 pos 因為前面 replaceWith 而變動）
-            let tr = state.tr
-            const schema = state.schema
-
-            for (let i = targets.length - 1; i >= 0; i--) {
-                const { from, to, type, attrs, text } = targets[i]
-
-                const paragraph = text && text.length > 0 ? schema.nodes.paragraph.create({}, schema.text(text)) : schema.nodes.paragraph.create()
-
-                const newCell = type.create(attrs, [paragraph])
-                tr = tr.replaceWith(from, to, newCell)
-            }
-
-            if (tr.docChanged) {
-                dispatch(tr.scrollIntoView())
-            }
-            event.preventDefault()
-            return true
-        },
-        validateTableContent(editor, rowsToCheck = null) {
-            if (!editor) return
-
-            const { state } = editor
-            const tableNode = state.doc.content.firstChild
-            if (!tableNode || tableNode.type.name !== 'table') return
-
-            let tr = state.tr
-            let changed = false
-
-            const rowCount = tableNode.content.childCount
-            let rowPos = 1 // 第一列 row 的起始位置（table node 之後）
-
-            const rowsSet = rowsToCheck ? new Set(rowsToCheck) : null
-
-            for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-                const rowNode = tableNode.content.child(rowIndex)
-                const cells = rowNode.content
-
-                // 表頭列跳過
-                if (rowIndex === 0) {
-                    rowPos += rowNode.nodeSize
-                    continue
-                }
-
-                // 有指定要檢查的 rows，而且這列不在裡面 → 跳過
-                if (rowsSet && !rowsSet.has(rowIndex)) {
-                    rowPos += rowNode.nodeSize
-                    continue
-                }
-
-                // 計算這一列每個 cell 的起始 pos
-                const cellPos = []
-                let pos = rowPos + 1
-                for (let i = 0; i < cells.childCount; i++) {
-                    cellPos.push(pos)
-                    pos += cells.child(i).nodeSize
-                }
-
-                const values = []
-                const valueStatus = []
-
-                // 3~7 欄：數值欄
-                for (let col = 3; col <= 7; col++) {
-                    const cellNode = cells.child(col)
-                    const txt = extractText(cellNode)
-                    if (!txt) {
-                        valueStatus.push('empty')
-                        values.push(null)
-                    } else {
-                        const num = Number(txt)
-                        if (!Number.isFinite(num)) {
-                            valueStatus.push('invalid')
-                            values.push(null)
-                        } else {
-                            valueStatus.push('valid')
-                            values.push(num)
-                        }
-                    }
-                }
-
-                // 8~12 欄：只看有沒有填
-                // for (let col = 8; col <= 12; col++) {
-                //     const cellNode = cells.child(col)
-                //     const txt = extractText(cellNode)
-                //     valueStatus.push(txt ? 'valid' : 'empty')
-                // }
-
-                const statusCheck = (s) => (s === 'valid' || s === 'error')
-                for (let i = 1; i < 5; i++) {
-                    const a = values[i - 1]
-                    const b = values[i]
-                    if (a != null && b != null && statusCheck(valueStatus[i - 1]) && statusCheck(valueStatus[i]) && a > b) {
-                        valueStatus[i - 1] = 'error'
-                        valueStatus[i] = 'error'
-                    }
-                }
-                
-                for (let offset = 0; offset < 5; offset++) {
-                    const colIndex = 3 + offset
-                    const cellNode = cells.child(colIndex)
-                    const newClass = 'value-' + valueStatus[offset]
-
-                    if (cellNode.attrs.class === newClass) continue
-
-                    const newAttrs = { ...cellNode.attrs, class: newClass }
-                    tr = tr.setNodeMarkup(
-                        cellPos[colIndex],
-                        cellNode.type,
-                        newAttrs,
-                        cellNode.marks
-                    )
-                    changed = true
-                }
-
-                rowPos += rowNode.nodeSize
-            }
-
-            if (changed) {
-                editor.view.dispatch(tr)
-            }
-        },
-        getInitialTableContent(data) {
-            let table = { type: "table", content: [] };
-            for (let row = 0; row < data.length; row++) {
-                let row_data = [];
-                for (let col = 0; col < data[row].length; col++){
-                    let type = (row == 0) ? "tableHeader" : "tableCell";
-                    let paragraphText = {type: "text", text: (row > 0 && col == 0) ? row.toString() : data[row][col]};
-                    let content = [{ type: "paragraph", content: (paragraphText.text.length > 0) ? [paragraphText] : []}];
-                    row_data.push({ type, content: content, attrs: (row == 0 || lockCols.some(lockCol => lockCol == col)) ? {contenteditable: false} : {}});
-                }
-                table.content.push({ type: "tableRow", content: row_data });
-            }
-            return { type: "doc", content: [table] };
-        },
-        rowFocusCheck() {
-            if (!this.editor) return -1
-            const { selection } = this.editor.state;
-            const rowDepth = this.editor.state.selection.$anchor.depth - 2;
-
-            let currentRowIndex = -1;
-            selection.$anchor.node(rowDepth - 1).forEach((child, offset, index) => {
-                if (currentRowIndex != -1) return;
-                if (child === selection.$anchor.node(rowDepth)) {
-                    currentRowIndex = index; 
-                }
-            });
-
-            return currentRowIndex;
-        },
-        deleteRow() {
-            if (!this.editor) return
-            let targetRowIndex = this.rowFocusCheck();
-            if (targetRowIndex == 0) {
-                alert("請選擇要刪除的列");
-                return;
-            }
-
-            const { state } = this.editor;
-            let rowIndex = 0;
-            let success = true;
-            state.doc.descendants((node, pos) => {
-                if (node.type.name == "tableRow" && success){
-                    if (rowIndex == targetRowIndex) {
-                        if (node.content.child(1).attrs?.contenteditable == false) {
-                            success = false;
-                        }
-                    }
-                    rowIndex++;
-                }
-            });
-
-            if (!success) {
-                alert("禁止刪除初始參數");
-                return;
-            }
-
-            this.editor.chain().focus().deleteRow().run();
-            this.updateTable();
-        },
-        addRow(below) {
-            if (!this.editor) return
-            if (this.rowFocusCheck() == 0) {
-                alert("請選擇要插入的列");
-                return;
-            }
-
-            if (below)
-                this.editor.chain().focus().addRowAfter().run();
-            else
-                this.editor.chain().focus().addRowBefore().run();
-
-            this.updateTable();
-        },
-        flushNow() {
-            if (!this.editor) return
-
-            // 把未執行的 timer 清掉，避免重複跑
-            if (this.validateTimer) {
-                clearTimeout(this.validateTimer)
-                this.validateTimer = null
-            }
-            if (this.syncTimer) {
-                clearTimeout(this.syncTimer)
-                this.syncTimer = null
-            }
-
-            // 直接全表驗證一次（不傳 rows => 全掃）
-            this.validateTableContent(this.editor)
-
-            // 直接把 arrayData + jsonContent 同步給 parent
-            this.exportTableData(this.editor)
-        },
-
-        updateTable() {
-            if (!this.editor) return
-            const { state, view } = this.editor;
-            const tr = state.tr;
-            let rowIndex = 0;
-
-            // Collect all need node and position
-            const rowsToUpdate = [];
-            state.doc.descendants((node, pos) => {
-                if (node.type.name == "tableRow")
-                    rowsToUpdate.push({ node, pos, rowNumber: rowIndex++ });
-            });
-
-            // Process text from the end
-            rowsToUpdate.slice(1).reverse().forEach(rowNode => {
-                const { node, pos, rowNumber } = rowNode;
-
-                const firstCell = node.content.child(0);
-                const isCell = firstCell && (firstCell.type.name == "tableCell" || firstCell.type.name == "tableHeader");
-
-                if (isCell) {
-                    const paragraph = state.schema.nodes.paragraph.create({}, state.schema.text(rowNumber.toString()));
-                    const newCell = firstCell.type.create({ ...firstCell.attrs, contenteditable: false }, paragraph);
-                    tr.replaceWith(pos + 1, pos + 1 + firstCell.nodeSize, newCell);
-                }
-            })
-            
-            // Update front-end interface
-            if (tr.docChanged) view.dispatch(tr);
-        },
-        exportTableData(editor) {
-            if (!editor || !editor.state) {
-                console.error("Editor 實例無效。");
-                return { arrayData: [], jsonContent: null };
-            }
-
-            const jsonContent = editor.getJSON();
-            const doc = editor.state.doc;
-            const tableNode = doc.content.firstChild;
-            const arrayData = [];
-            
-            if (!tableNode || tableNode.type.name !== 'table') {
-                console.warn("編輯器內容不是表格。");
-                return { arrayData, jsonContent };
-            }
-
-            tableNode.content.forEach(rowNode => {
-                if (rowNode.type.name !== 'tableRow') return;
-
-                const rowArray = rowNode.content.content.map(cellNode => {
-                    return (cellNode.type.name === 'tableCell' || cellNode.type.name === 'tableHeader')
-                        ? extractCellText(cellNode)
-                        : "";
-                })
-                
-                arrayData.push(rowArray);
-            });
-
-            this.localBlockData.data["arrayData"] = arrayData;
-            this.localBlockData.data["jsonContent"] = jsonContent;
-
-            // ⭐ 標記這是「使用者編輯後」的版本，並更新 lastExternalJson
-            this.hasUserEdited = true
-            this.lastExternalJson = JSON.stringify(jsonContent || null)
-
-            this.$emit("update-table-data", this.localBlockData);
-            return { arrayData, jsonContent };
+    markCurrentRowDirty(editor) {
+      if (!editor) return
+      const rowIndex = this.rowFocusCheck()
+      if (rowIndex > 0) {
+        this.dirtyRows.add(rowIndex)
+      }
+    },
+
+    handleKeydown(view, event) {
+      if (event.key !== 'Enter') return false
+
+      const { state } = view
+      const { $from } = state.selection
+
+      // 找到目前所在的 cell / header
+      let cellNode = null
+      let cellDepth = -1
+      for (let d = $from.depth; d > 0; d--) {
+        const node = $from.node(d)
+        if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+          cellNode = node
+          cellDepth = d
+          break
         }
+      }
+      if (!cellNode || cellDepth < 0) return false
+
+      // rowNode = 這個 cell 所在的那一列
+      const rowNode = $from.node(cellDepth - 1)
+      // tableNode = 整張 table
+      const tableNode = $from.node(cellDepth - 2)
+
+      let rowIndex = -1
+      let colIndex = -1
+
+      // 取得 rowIndex
+      tableNode.content.forEach((row, _offset, index) => {
+        if (row === rowNode) {
+          rowIndex = index
+        }
+      })
+
+      // 取得 colIndex
+      rowNode.content.forEach((cell, _offset, index) => {
+        if (cell === cellNode) {
+          colIndex = index
+        }
+      })
+
+      if (rowIndex < 0 || colIndex < 0) return false
+      const blockedCols = [3, 4, 5, 6, 7]
+
+      // 如果是在需要鎖 Enter 的那些欄位，就擋掉
+      if (blockedCols.includes(colIndex)) {
+        event.preventDefault()
+        return true // 告訴 ProseMirror：這個事件已經處理完了
+      }
+
+      return false
     },
-};
+
+    handleCopy(view, event) {
+      const { state } = view
+      const sel = state.selection
+
+      // 只處理「多格選取」的情況，其他丟回瀏覽器預設
+      if (!(sel instanceof CellSelection)) {
+        return false
+      }
+
+      const rect = selectedRect(state)
+      const table = rect.table
+      const rows = []
+
+      for (let r = rect.top; r < rect.bottom; r++) {
+        const rowNode = table.child(r)
+        const cols = []
+        for (let c = rect.left; c < rect.right; c++) {
+          const cellNode = rowNode.child(c)
+          cols.push(extractCellText(cellNode) || '')
+        }
+        rows.push(cols.join('\t'))
+      }
+
+      const text = rows.join('\n')
+
+      // 寫進剪貼簿，只用純文字（避免 contenteditable 屬性跟著亂跑）
+      if (event.clipboardData) {
+        event.clipboardData.setData('text/plain', text)
+        event.preventDefault()
+        return true
+      }
+
+      return false
+    },
+
+    handlePaste(view, event) {
+      const { state, dispatch } = view
+      const sel = state.selection
+      const { $from } = sel
+
+      // 讀剪貼簿文字
+      const raw = event.clipboardData?.getData('text/plain') || ''
+      if (!raw) return false
+
+      // 解析矩陣：換行 -> row，tab -> col
+      const rows = raw.split(/\r?\n/).filter(r => r.length > 0)
+      if (!rows.length) return true
+
+      const matrix = rows.map(r => r.split('\t'))
+      const rowCount = matrix.length
+      const colCount = Math.max(...matrix.map(r => r.length))
+
+      // 先找到「目前 table / row / col 的起點」
+      let tableNode = null
+      let rowNode = null
+
+      for (let d = $from.depth; d > 0; d--) {
+        const node = $from.node(d)
+        if (!tableNode && node.type.name === 'table') {
+          tableNode = node
+        } else if (!rowNode && node.type.name === 'tableRow') {
+          rowNode = node
+        }
+      }
+      if (!tableNode || !rowNode) return false
+
+      let startRowIndex = -1
+      let startColIndex = -1
+
+      // 如果是多格選取 → 用矩形左上角當起點
+      if (sel instanceof CellSelection) {
+        const rect = selectedRect(state)
+        startRowIndex = rect.top
+        startColIndex = rect.left
+      } else {
+        // 否則沿用原本「從游標所在 cell 推算」的邏輯
+        tableNode.content.forEach((row, _off, idx) => {
+          if (row === rowNode) startRowIndex = idx
+        })
+
+        let cellNode = null
+        for (let d = $from.depth; d > 0; d--) {
+          const node = $from.node(d)
+          if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+            cellNode = node
+            break
+          }
+        }
+        if (!cellNode) return false
+
+        rowNode.content.forEach((cell, _off, idx) => {
+          if (cell === cellNode) startColIndex = idx
+        })
+      }
+
+      if (startRowIndex < 0 || startColIndex < 0) return false
+
+      // 找出 table 在整個 doc 裡的起始位置
+      let tablePos = null
+      state.doc.descendants((node, pos) => {
+        if (node === tableNode) {
+          tablePos = pos
+          return false
+        }
+        return true
+      })
+      if (tablePos == null) return true
+
+      // ⭐：這次貼上的所有目標 row index
+      const impactedRowIndexes = new Set()
+      const targets = [] // { from, to, type, attrs, text }
+
+      // 先預檢查 + 收集所有要替換的 cell（還不動 tr）
+      for (let r = 0; r < rowCount; r++) {
+        const targetRowIndex = startRowIndex + r
+        if (targetRowIndex >= tableNode.childCount) break
+
+        const targetRowNode = tableNode.child(targetRowIndex)
+        impactedRowIndexes.add(targetRowIndex)
+
+        // 算這一列在 doc 裡的起始 pos
+        let rowStart = tablePos + 1
+        for (let i = 0; i < targetRowIndex; i++) {
+          rowStart += tableNode.child(i).nodeSize
+        }
+
+        let cellPos = rowStart + 1
+
+        for (let c = 0; c < targetRowNode.childCount; c++) {
+          const targetCell = targetRowNode.child(c)
+          const thisCellPos = cellPos
+          const thisCellEnd = cellPos + targetCell.nodeSize
+
+          if (c >= startColIndex && c < startColIndex + colCount) {
+            const colOffset = c - startColIndex
+            const text = (matrix[r][colOffset] ?? '').toString()
+
+            // 🔒 任一格 contenteditable=false → 整個 paste 擋掉
+            if (targetCell.attrs?.contenteditable === false) {
+              return true
+            }
+
+            targets.push({
+              from: thisCellPos,
+              to: thisCellEnd,
+              type: targetCell.type,
+              attrs: { ...targetCell.attrs },
+              text,
+            })
+          }
+
+          cellPos = thisCellEnd
+        }
+      }
+
+      if (!targets.length) return true
+
+      // ⭐ 反向套用 replace，避免 pos 變動
+      let tr = state.tr
+      const schema = state.schema
+
+      for (let i = targets.length - 1; i >= 0; i--) {
+        const { from, to, type, attrs, text } = targets[i]
+        const paragraph =
+          text && text.length > 0
+            ? schema.nodes.paragraph.create({}, schema.text(text))
+            : schema.nodes.paragraph.create()
+        const newCell = type.create(attrs, [paragraph])
+        tr = tr.replaceWith(from, to, newCell)
+      }
+
+      if (tr.docChanged) {
+        dispatch(tr.scrollIntoView())
+
+        // ⭐⭐ 關鍵：把所有受影響列標記為 dirty，並立即驗證
+        if (impactedRowIndexes.size && this.editor) {
+          impactedRowIndexes.forEach(idx => {
+            this.dirtyRows.add(idx)
+          })
+          this.validateTableContent(this.editor, Array.from(impactedRowIndexes))
+        }
+      }
+
+      event.preventDefault()
+      return true
+    },
+
+    validateTableContent(editor, rowsToCheck = null) {
+      if (!editor) return
+
+      const { state } = editor
+      const tableNode = state.doc.content.firstChild
+      if (!tableNode || tableNode.type.name !== 'table') return
+
+      let tr = state.tr
+      let changed = false
+
+      const rowCount = tableNode.content.childCount
+      let rowPos = 1 // 第一列 row 的起始位置（table node 之後）
+
+      const rowsSet = rowsToCheck ? new Set(rowsToCheck) : null
+
+      for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+        const rowNode = tableNode.content.child(rowIndex)
+        const cells = rowNode.content
+
+        // 表頭列跳過
+        if (rowIndex === 0) {
+          rowPos += rowNode.nodeSize
+          continue
+        }
+
+        // 有指定要檢查的 rows，而且這列不在裡面 → 跳過
+        if (rowsSet && !rowsSet.has(rowIndex)) {
+          rowPos += rowNode.nodeSize
+          continue
+        }
+
+        // 計算這一列每個 cell 的起始 pos
+        const cellPos = []
+        let pos = rowPos + 1
+        for (let i = 0; i < cells.childCount; i++) {
+          cellPos.push(pos)
+          pos += cells.child(i).nodeSize
+        }
+
+        const values = []
+        const valueStatus = []
+
+        // 3~7 欄：數值欄
+        for (let col = 3; col <= 7; col++) {
+          const cellNode = cells.child(col)
+          const txt = extractText(cellNode)
+          if (!txt) {
+            valueStatus.push('empty')
+            values.push(null)
+          } else {
+            const num = Number(txt)
+            if (!Number.isFinite(num)) {
+              valueStatus.push('invalid')
+              values.push(null)
+            } else {
+              valueStatus.push('valid')
+              values.push(num)
+            }
+          }
+        }
+
+        const statusCheck = s => s === 'valid' || s === 'error'
+        for (let i = 1; i < 5; i++) {
+          const a = values[i - 1]
+          const b = values[i]
+          if (a != null && b != null && statusCheck(valueStatus[i - 1]) && statusCheck(valueStatus[i]) && a > b) {
+            valueStatus[i - 1] = 'error'
+            valueStatus[i] = 'error'
+          }
+        }
+
+        for (let offset = 0; offset < 5; offset++) {
+          const colIndex = 3 + offset
+          const cellNode = cells.child(colIndex)
+          const newClass = 'value-' + valueStatus[offset]
+
+          if (cellNode.attrs.class === newClass) continue
+
+          const newAttrs = { ...cellNode.attrs, class: newClass }
+          tr = tr.setNodeMarkup(cellPos[colIndex], cellNode.type, newAttrs, cellNode.marks)
+          changed = true
+        }
+
+        rowPos += rowNode.nodeSize
+      }
+
+      if (changed) {
+        editor.view.dispatch(tr)
+      }
+    },
+
+    // ✅ 只負責「把 arrayData 變成 TipTap Table JSON」
+    //   - 第一列當 header（contenteditable=false）
+    //   - 每列第 0,1,2 欄鎖定（contenteditable=false）
+    getInitialTableContent(data) {
+      const table = { type: 'table', content: [] }
+
+      for (let row = 0; row < data.length; row++) {
+        const row_data = []
+        for (let col = 0; col < data[row].length; col++) {
+          const type = row === 0 ? 'tableHeader' : 'tableCell'
+          const textValue = data[row][col] ?? ''
+          const paragraphText = {
+            type: 'text',
+            text: textValue,
+          }
+          const content = [
+            {
+              type: 'paragraph',
+              content: paragraphText.text.length > 0 ? [paragraphText] : [],
+            },
+          ]
+          const isHeader = row === 0
+          const isLockedCol = lockCols.includes(col)
+          const attrs =
+            isHeader || isLockedCol
+              ? { contenteditable: false }
+              : {}
+
+          row_data.push({ type, content, attrs })
+        }
+        table.content.push({ type: 'tableRow', content: row_data })
+      }
+
+      return { type: 'doc', content: [table] }
+    },
+
+    rowFocusCheck() {
+      if (!this.editor) return -1
+      const { selection } = this.editor.state
+      const rowDepth = selection.$anchor.depth - 2
+
+      let currentRowIndex = -1
+      selection.$anchor.node(rowDepth - 1).forEach((child, offset, index) => {
+        if (currentRowIndex !== -1) return
+        if (child === selection.$anchor.node(rowDepth)) {
+          currentRowIndex = index
+        }
+      })
+
+      return currentRowIndex
+    },
+
+    deleteRow() {
+      if (!this.editor) return
+      const targetRowIndex = this.rowFocusCheck()
+      if (targetRowIndex === 0) {
+        alert('請選擇要刪除的列')
+        return
+      }
+
+      const { state } = this.editor
+      let rowIndex = 0
+      let success = true
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'tableRow' && success) {
+          if (rowIndex === targetRowIndex) {
+            if (node.content.child(1).attrs?.contenteditable === false) {
+              success = false
+            }
+          }
+          rowIndex++
+        }
+      })
+
+      if (!success) {
+        alert('禁止刪除初始參數')
+        return
+      }
+
+      this.editor.chain().focus().deleteRow().run()
+      this.updateTable()
+    },
+
+    addRow(below) {
+      if (!this.editor) return
+      if (this.rowFocusCheck() === 0) {
+        alert('請選擇要插入的列')
+        return
+      }
+
+      if (below) this.editor.chain().focus().addRowAfter().run()
+      else this.editor.chain().focus().addRowBefore().run()
+
+      this.updateTable()
+    },
+
+    flushNow() {
+      if (!this.editor) return
+
+      // 把未執行的 timer 清掉，避免重複跑
+      if (this.validateTimer) {
+        clearTimeout(this.validateTimer)
+        this.validateTimer = null
+      }
+      if (this.syncTimer) {
+        clearTimeout(this.syncTimer)
+        this.syncTimer = null
+      }
+
+      // 直接全表驗證一次（不傳 rows => 全掃）
+      this.validateTableContent(this.editor)
+
+      // 直接把 arrayData + jsonContent 同步給 parent
+      this.exportTableData(this.editor)
+    },
+
+    updateTable() {
+      if (!this.editor) return
+      const { state, view } = this.editor
+      const tr = state.tr
+      let rowIndex = 0
+
+      // Collect all rows
+      const rowsToUpdate = []
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'tableRow') {
+          rowsToUpdate.push({ node, pos, rowNumber: rowIndex++ })
+        }
+      })
+
+      // Process text from the end（避免位置受影響）
+      rowsToUpdate
+        .slice(1)
+        .reverse()
+        .forEach(rowNode => {
+          const { node, pos, rowNumber } = rowNode
+          const firstCell = node.content.child(0)
+          const isCell =
+            firstCell &&
+            (firstCell.type.name === 'tableCell' || firstCell.type.name === 'tableHeader')
+
+          if (isCell) {
+            const paragraph = state.schema.nodes.paragraph.create(
+              {},
+              state.schema.text(rowNumber.toString()),
+            )
+            const newCell = firstCell.type.create(
+              { ...firstCell.attrs, contenteditable: false },
+              paragraph,
+            )
+            tr.replaceWith(pos + 1, pos + 1 + firstCell.nodeSize, newCell)
+          }
+        })
+
+      if (tr.docChanged) view.dispatch(tr)
+    },
+
+    exportTableData(editor) {
+      if (!editor || !editor.state) {
+        console.error('Editor 實例無效。')
+        return { arrayData: [], jsonContent: null }
+      }
+
+      const jsonContent = editor.getJSON()
+      const doc = editor.state.doc
+      const tableNode = doc.content.firstChild
+      const arrayData = []
+
+      if (!tableNode || tableNode.type.name !== 'table') {
+        console.warn('編輯器內容不是表格。')
+        return { arrayData, jsonContent }
+      }
+
+      tableNode.content.forEach(rowNode => {
+        if (rowNode.type.name !== 'tableRow') return
+
+        const rowArray = rowNode.content.content.map(cellNode => {
+          return cellNode.type.name === 'tableCell' || cellNode.type.name === 'tableHeader'
+            ? extractCellText(cellNode)
+            : ''
+        })
+
+        arrayData.push(rowArray)
+      })
+
+      if (!this.localBlockData.data) {
+        this.localBlockData.data = {}
+      }
+      this.localBlockData.data.arrayData = arrayData
+      this.localBlockData.data.jsonContent = jsonContent
+
+      // ⭐ 標記這是「使用者編輯後」的版本，並更新 lastExternalJson
+      this.hasUserEdited = true
+      this.lastExternalJson = JSON.stringify(jsonContent || null)
+
+      this.$emit('update-table-data', this.localBlockData)
+      return { arrayData, jsonContent }
+    },
+  },
+}
 </script>
+
 
 <style scoped>
 
