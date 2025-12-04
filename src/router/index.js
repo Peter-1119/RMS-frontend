@@ -28,7 +28,7 @@ const routes = [
   { path: '/instruction-change',     name: 'instruction-change',    component: InstructionChangePage,  meta: { requiresAuth: true, title: '製造條件指示書-變版' } },
   { path: "/new-specification",      name: "new-specification",     component: NewSpecification,       meta: { requiresAuth: true, title: '製造式樣書-新建', keepAlive: true, } },
   { path: '/specification-change',   name: 'specification-change',  component: SpecificationChangePage,meta: { requiresAuth: true, title: '製造式樣書-變版' } },
-  { path: '/SearchPage',             name: 'SearchPage',            component: SearchPage,             meta: { requiresAuth: true, title: '文件檢索', keepAlive: true, } },
+  { path: '/SearchPage',             name: 'SearchPage',            component: SearchPage,             meta: { requiresAuth: true, title: '文件檢索' } },
   { path: '/DraftDocuments',         name: 'DraftDocuments',        component: DraftDocuments,         meta: { requiresAuth: true, title: '草稿匣' } },
   { path: '/SubmittedDocuments',     name: 'SubmittedDocuments',    component: SubmittedDocuments,     meta: { requiresAuth: true, title: '已送審' } },
   { path: '/RejectedDocuments',      name: 'RejectedDocuments',     component: RejectedDocuments,      meta: { requiresAuth: true, title: '已退回' } },

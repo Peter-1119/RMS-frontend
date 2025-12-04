@@ -11,7 +11,7 @@
       <table class="speicifcation-change-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>查看</th>
+            <th>編輯</th>
             <th>編號</th>
             <th>文件名稱</th>
             <th>版本</th>

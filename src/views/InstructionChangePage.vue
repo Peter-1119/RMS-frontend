@@ -11,7 +11,7 @@
       <table class="instruction-change-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>查看</th>
+            <th>編輯</th>
             <th>編號</th>
             <th>文件名稱</th>
             <th>版本</th>
@@ -109,10 +109,8 @@ export default {
           sort: this.sort,
           order: this.order,
         })
-        this.searchData = (items || []).map(x => ({
-          ...x,
-          issueDate: this.formatDate(x.issueDate),
-        }))
+        console.log("items: ", items)
+        this.searchData = (items || []).map(x => ({ ...x, issueDate: this.formatDate(x.issueDate) }))
         this.total = total || 0
       } catch (e) {
         console.error(e)
