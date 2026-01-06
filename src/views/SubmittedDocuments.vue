@@ -1,7 +1,7 @@
 <template>
   <div class="new-instruction-container">
     <div class="header">
-      <h1>已送審</h1>
+      <h1>文件狀態</h1>
       <div class="right">
         <input v-model="keyword" type="text" placeholder="搜尋名稱/編號" class="search-input" @input="onKeywordInput"/>
       </div>
@@ -11,50 +11,53 @@
       <table class="submitted-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>查看</th>
+            <th>編輯</th>
             <th>編號</th>
+            <th>文件狀態</th>
             <th>文件名稱</th>
             <th>版本</th>
             <th>作者</th>
-            <th>更新日期</th>
+            <th>日期</th>
+            <th>退回者</th>
+            <th>退回理由</th>
           </tr>
         </thead>
 
         <tbody>
           <tr v-for="(item, index) in searchData" :key="item.documentToken || index">
             <td>
-              <button class="btn doc" @click="performSearch(item)">
-                <img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc" />
-              </button>
+              <button class="btn doc" @click="performSearch(item)"><img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc"/></button>
             </td>
             <td>{{ item.documentId }}</td>
-            <!-- <td>{{ item.documentName }}</td> -->
+            <td>{{ item.eipStatus }}</td>
             <td class="doc-name"><button class="doc-link" @click="openWordPreview(item)">{{ item.documentName }}</button></td>
             <td>{{ item.documentVersion }}</td>
             <td>{{ item.author }}</td>
             <td>{{ item.issueDate }}</td>
+            <td>{{ item.rejecter }}</td>
+            <td>{{ item.rejectReason }}</td>
           </tr>
 
           <tr v-if="!loading && searchData.length === 0">
-            <td colspan="6" style="text-align:center; padding:20px;">沒有資料可顯示。</td>
+            <td colspan="9" style="text-align:center; padding:20px;">沒有資料可顯示。</td>
           </tr>
           <tr v-if="loading">
-            <td colspan="6" style="text-align:center; padding:20px;">讀取中…</td>
+            <td colspan="9" style="text-align:center; padding:20px;">讀取中…</td>
           </tr>
         </tbody>
       </table>
 
       <div class="pager">
         <button :disabled="page===1 || loading" @click="changePage(page-1)">上一頁</button>
-        <span class="page-info">{{ page }} / {{ totalPages }}</span>
-        <button :disabled="page===totalPages || loading" @click="changePage(page+1)">下一頁</button>
+        <span class="page-info">{{ page }} / {{ total }}</span>
+        <button :disabled="page===total || loading" @click="changePage(page+1)">下一頁</button>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { getSubmitted } from '@/services/docs'
+import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
@@ -66,17 +69,12 @@ export default {
       loading: false,
       errorMsg: '',
       page: 1,
-      pageSize: 20,
+      pageSize: 10,
       total: 0,
       keyword: '',
-      sort: 'issue_date',
-      order: 'desc',
     }
   },
   computed: {
-    totalPages() {
-      return Math.max(1, Math.ceil(this.total / this.pageSize))
-    },
     effectiveUserId() {
       return sessionStorage.getItem('loggedInUserNo') || ''
     },
@@ -94,6 +92,19 @@ export default {
         return iso
       }
     },
+    async getPagesAndLoad() {
+      const {status, data} = await axios.get(`${API_BASE_URL}/docs/submitted-and-rejected`, {
+        params: { user_id: this.effectiveUserId, keyword: this.keyword, pageSize: this.pageSize, getPages: true }
+      })
+
+      if (status != 200) {
+        alert("取得資料庫發生問題，請重新確認網路")
+        return
+      }
+
+      this.total = data.data.pages
+      this.load()
+    },
     async load() {
       if (!this.effectiveUserId) {
         this.errorMsg = '缺少 user_id，請先登入'
@@ -103,19 +114,16 @@ export default {
       }
       this.loading = true
       try {
-        const { items, total } = await getSubmitted({
-          userId: this.effectiveUserId,
-          keyword: this.keyword,
-          page: this.page,
-          pageSize: this.pageSize,
-          sort: this.sort,
-          order: this.order,
+        const { status, data } = await axios.get(`${API_BASE_URL}/docs/submitted-and-rejected`, {
+          params: { user_id: this.effectiveUserId, keyword: this.keyword, page: this.page, pageSize: this.pageSize }
         })
-        this.searchData = (items || []).map(x => ({
-          ...x,
-          issueDate: this.formatDate(x.issueDate),
-        }))
-        this.total = total || 0
+
+        if (status != 200) {
+          alert("訪問資料庫發生問題，請重新確認網路連接")
+          return
+        }
+
+        this.searchData = (data.data.items || []).map(x => ({...x, issueDate: this.formatDate(x.issueDate),}))
       } catch (e) {
         console.error(e)
         this.searchData = []
@@ -157,7 +165,7 @@ export default {
       window.open(url, 'docxPreviewWindow', features)
     },
     changePage(p) {
-      if (p < 1 || p > this.totalPages) return
+      if (p < 1 || p > this.total) return
       this.page = p
       this.load()
     },
@@ -179,12 +187,12 @@ export default {
       clearTimeout(this.__kwTimer)
       this.__kwTimer = setTimeout(() => {
         this.page = 1
-        this.load()
-      }, 300)
+        this.getPagesAndLoad()
+      }, 500)
     },
   },
-  mounted() {
-    this.load()
+  async mounted() {
+    this.getPagesAndLoad()
   },
 }
 </script>
@@ -240,7 +248,7 @@ export default {
   letter-spacing: 0.5px;
 }
 .submitted-documents-table td { border: 1px solid #e0e0e0; padding: 12px 20px; text-align: center; color: #555555; }
-.submitted-documents-table td:nth-child(3) { text-align: left; }
+.submitted-documents-table td:nth-child(4) { text-align: left; }
 
 /* 斑馬線效果 (可選，但強烈建議) */
 .submitted-documents-table tbody tr:nth-child(even) { background-color: #fafafa; }

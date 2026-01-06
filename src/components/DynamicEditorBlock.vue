@@ -362,7 +362,7 @@ transition: background-color 0.2s ease;
 /* TipTap Table 樣式 */
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
 .editor-content :deep(th) { position:sticky; top:35px; z-index:5; }
-.editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+.editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: center; vertical-align: top; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px auto; cursor: pointer; border: 2px solid transparent; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px 0; cursor: pointer; border: 2px solid transparent; }
 

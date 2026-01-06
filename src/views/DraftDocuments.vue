@@ -18,9 +18,7 @@
             <td>{{ item?.author }}</td>
             <td>{{ item?.issueDate }}</td>
             <td>
-              <button class="btn edit" @click="performSearch(item)">
-                <img src="@/assets/edit-icon.png" alt="變更" class="icon edit">
-              </button>
+              <button class="btn edit" @click="performSearch(item)"><img src="@/assets/edit-icon.png" alt="變更" class="icon edit"></button>
             </td>
             <td>
               <button @click="deleteDraft(item)" style="border: none; background: none; cursor: pointer;">
@@ -37,8 +35,8 @@
       </table>   
       <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
         <button :disabled="page===1" @click="changePage(page-1)">上一頁</button>
-        <span>{{ page }} / {{ totalPages }}</span>
-        <button :disabled="page===totalPages" @click="changePage(page+1)">下一頁</button>
+        <span>{{ page }} / {{ total }}</span>
+        <button :disabled="page===total" @click="changePage(page+1)">下一頁</button>
       </div>   
     </div>
   </div>
@@ -63,8 +61,6 @@ export default {
       pageSize: 10,
       total: 0,
       keyword: '',
-      sort: 'issue_date',
-      order: 'desc',
     }
   },
   computed: {
@@ -76,45 +72,47 @@ export default {
     }
   },
   methods: {
-    async loadDrafts() {
+    async getPagesAndLoad() {
+      const {status, data} = await axios.get(`${API_BASE_URL}/docs/drafts`, {
+        params: { userId: this.effectiveUserId, keyword: this.keyword, pageSize: this.pageSize, getPages: true }
+      })
+
+      if (status != 200) {
+        alert("取得資料庫發生問題，請重新確認網路")
+        return
+      }
+
+      this.total = data.data.pages
+      this.load()
+    },
+    async load() {
       if (!this.effectiveUserId) {
-        this.errorMsg = '缺少 user_id，請先登入或從 props 傳入 userId'
+        this.errorMsg = '缺少 user_id，請先登入'
         this.searchData = []
         this.total = 0
         return
       }
       this.loading = true
-      this.errorMsg = ''
       try {
-        const res = await axios.get(`${API_BASE_URL}/docs/drafts`, {
-          params: {
-            user_id: this.effectiveUserId,
-            status: 0,
-            page: this.page,
-            page_size: this.pageSize,
-            keyword: this.keyword || undefined,
-            sort: this.sort,
-            order: this.order,
-          },
+        const { status, data } = await axios.get(`${API_BASE_URL}/docs/drafts`, {
+          params: { userId: this.effectiveUserId, keyword: this.keyword, page: this.page, pageSize: this.pageSize }
         })
-        const { success, items, total } = res.data || {}
-        if (!success) throw new Error(res.data?.error || 'drafts api failed')
 
-        this.searchData = (items || []).map(x => ({
-          ...x,
-          issueDate: this.formatDate(x.issueDate),
-        }))
-        this.total = total || 0
+        if (status != 200) {
+          alert("訪問資料庫發生問題，請重新確認網路連接")
+          return
+        }
+
+        this.searchData = (data.data.items || []).map(x => ({...x, issueDate: this.formatDate(x.issueDate),}))
       } catch (e) {
         console.error(e)
-        this.errorMsg = e?.message || '讀取草稿失敗'
         this.searchData = []
         this.total = 0
+        this.errorMsg = e?.message || '讀取失敗'
       } finally {
         this.loading = false
       }
     },
-
     formatDate(iso) {
       if (!iso) return ''
       try {
@@ -143,7 +141,7 @@ export default {
       if (!confirm(`確定刪除「${item.documentName || item.documentToken}」草稿？`)) return
       try {
         await axios.delete(`${API_BASE_URL}/docs/${encodeURIComponent(item.documentToken)}`)
-        await this.loadDrafts()
+        await this.getPagesAndLoad()
       } catch (e) {
         const msg = e?.response?.data?.error || e.message || '刪除失敗'
         alert(msg)
@@ -157,7 +155,7 @@ export default {
     },
   },
   mounted() {
-    this.loadDrafts()
+    this.getPagesAndLoad()
   },
 }
 </script>

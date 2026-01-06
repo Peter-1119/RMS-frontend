@@ -207,13 +207,7 @@ body, html { margin: 0; padding: 0; font-family: Arial, sans-serif; }
 .btn { margin: 0px 4px; padding: 6px 8px; font-size: 14px }
 
 /* ✅ tab bar */
-.tab-bar {
-  display: flex;
-  border-bottom: 1px solid #ddd;
-  margin-bottom: 8px;
-  overflow-x: auto;
-  white-space: nowrap;
-}
+.tab-bar { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 8px; overflow-x: auto; white-space: nowrap; }
 .tab-item {
   display: inline-flex;
   align-items: center;
@@ -226,19 +220,12 @@ body, html { margin: 0; padding: 0; font-family: Arial, sans-serif; }
   cursor: pointer;
   font-size: 14px;
 }
-.tab-item.active {
-  background: #ffffff;
-  border-bottom-color: #ffffff;
-  font-weight: bold;
-}
-.tab-title {
-  margin-right: 6px;
-}
-.tab-close {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-}
+.tab-item.active { background: #ffffff; border-bottom-color: #ffffff; font-weight: bold; }
+.tab-title { margin-right: 6px; }
+.tab-close { border: none; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; }
+</style>
+
+<style>
+body { font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+input, button, textarea, select { font-family: inherit; }
 </style>

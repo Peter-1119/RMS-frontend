@@ -46,15 +46,17 @@
 
       <div class="pager">
         <button :disabled="page===1 || loading" @click="changePage(page-1)">上一頁</button>
-        <span class="page-info">{{ page }} / {{ totalPages }}</span>
-        <button :disabled="page===totalPages || loading" @click="changePage(page+1)">下一頁</button>
+        <span class="page-info">{{ page }} / {{ total }}</span>
+        <button :disabled="page===total || loading" @click="changePage(page+1)">下一頁</button>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { getAllDocuments } from '@/services/docs'
+import axios from 'axios';
+
+const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
 export default {
   name: 'SubmittedDocuments',
@@ -67,14 +69,9 @@ export default {
       pageSize: 20,
       total: 0,
       keyword: '',
-      sort: 'issue_date',
-      order: 'desc',
     }
   },
   computed: {
-    totalPages() {
-      return Math.max(1, Math.ceil(this.total / this.pageSize))
-    },
     effectiveUserId() {
       return sessionStorage.getItem('loggedInUserNo') || ''
     },
@@ -92,6 +89,20 @@ export default {
         return iso
       }
     },
+    async getPagesAndLoad() {
+      const {status, data} = await axios.get(`${API_BASE_URL}/docs/passed`, {
+        params: { keyword: this.keyword, pageSize: this.pageSize, getPages: true }
+      })
+
+      console.log("pages: ", data.data)
+      if (status != 200) {
+        alert("取得資料庫發生問題，請重新確認網路")
+        return
+      }
+
+      this.total = data.data.pages
+      this.load()
+    },
     async load() {
       if (!this.effectiveUserId) {
         this.errorMsg = '缺少 user_id，請先登入'
@@ -101,19 +112,16 @@ export default {
       }
       this.loading = true
       try {
-        const { items, total } = await getAllDocuments({
-          status: 2,
-          keyword: this.keyword,
-          page: this.page,
-          pageSize: this.pageSize,
-          sort: this.sort,
-          order: this.order,
+        const { status, data } = await axios.get(`${API_BASE_URL}/docs/passed`, {
+          params: { keyword: this.keyword, page: this.page, pageSize: this.pageSize }
         })
-        this.searchData = (items || []).map(x => ({
-          ...x,
-          issueDate: this.formatDate(x.issueDate),
-        }))
-        this.total = total || 0
+
+        if (status != 200) {
+          alert("訪問資料庫發生問題，請重新確認網路連接")
+          return
+        }
+
+        this.searchData = (data.data.items || []).map(x => ({...x, issueDate: this.formatDate(x.issueDate),}))
       } catch (e) {
         console.error(e)
         this.searchData = []
@@ -165,8 +173,8 @@ export default {
       }, 300)
     },
   },
-  mounted() {
-    this.load()
+  async mounted() {
+    this.getPagesAndLoad()
   },
 }
 </script>
@@ -222,7 +230,7 @@ export default {
   letter-spacing: 0.5px;
 }
 .search-documents-table td { border: 1px solid #e0e0e0; padding: 12px 20px; text-align: center; color: #555555; }
-.search-documents-table td:first-child { text-align: left; }
+.search-documents-table td:nth-child(3) { text-align: left; }
 
 /* 斑馬線效果 (可選，但強烈建議) */
 .search-documents-table tbody tr:nth-child(even) { background-color: #fafafa; }

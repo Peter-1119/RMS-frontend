@@ -40,78 +40,51 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { History } from '@tiptap/extension-history'
 import { CellSelection, selectedRect } from 'prosemirror-tables'
 
-const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
+const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })];
 
 const CustomTableCell = TableCell.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      contenteditable: { default: true },
-      class: { default: null },
-    }
-  },
+  addAttributes() { return { ...this.parent?.(), contenteditable: { default: true }, class: { default: null } }; },
 })
 const CustomTableHeader = TableHeader.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      contenteditable: { default: true },
-    }
-  },
+  addAttributes() { return { ...this.parent?.(), contenteditable: { default: true } }; },
 })
 const CustomTableRow = TableRow.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      class: { default: null },
-    }
-  },
+  addAttributes() { return { ...this.parent?.(), class: { default: null } }; },
 })
 
 const tableEditorExtensions = [
-  Document.extend({ content: 'table' }),
-  ...baseExt,
-  Table,
+  Document.extend({ content: 'table' }), ...baseExt, Table,
   Focus.configure({ className: 'has-focus', mode: 'all' }),
-  CustomTableRow,
-  CustomTableHeader,
-  CustomTableCell,
-  History,
+  CustomTableRow, CustomTableHeader, CustomTableCell, History,
 ]
 
 // 鎖定不可編輯欄（用在 from PMS 的 arrayData）
-const lockCols = [0, 1, 2]
+const lockCols = [0, 1, 2];
 
 // --- 工具：取 cell 裡的純文字（給驗證用） ---
 const extractText = cellNode => {
-  const paragraphNode = cellNode.content?.content?.[0]
-  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return ''
-  return (paragraphNode.content?.content || [])
-    .map(textNode => textNode.text || '')
-    .join('')
-    .trim()
+  const paragraphNode = cellNode.content?.content?.[0];
+  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return '';
+  return (paragraphNode.content?.content || []).map(textNode => textNode.text || '').join('').trim();
 }
 
 // --- 工具：取 cell 裡的純文字（給匯出 / copy 用） ---
 const extractCellText = cellNode => {
-  if (!cellNode || !cellNode.content || !cellNode.content.childCount) return ''
-  const paragraphNode = cellNode.content.child(0)
-  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return ''
+  if (!cellNode || !cellNode.content || !cellNode.content.childCount) return '';
+  const paragraphNode = cellNode.content.child(0);
+  if (!paragraphNode || paragraphNode.type.name !== 'paragraph') return '';
 
-  let text = ''
+  let text = '';
   paragraphNode.content.forEach(textNode => {
-    if (textNode.text) text += textNode.text
+    if (textNode.text) text += textNode.text;
   })
-  return text.trim()
+  return text.trim();
 }
 
 export default {
   name: 'ManagementSpecificBlock',
-  components: {
-    EditorContent,
-  },
+  components: { EditorContent },
   props: {
-    machines: { type: Array, required: true },
     managementBlock: { type: Object, required: true },
     hasPms: { type: Boolean, default: true },
     allowColor: { type: Boolean, default: true },
@@ -120,74 +93,38 @@ export default {
     return {
       localBlockData: { ...this.managementBlock },
       editor: null,
-      hasUserEdited: false, // 使用者是否改過
-      lastExternalJson: null, // 上一次「外部載入」的 jsonContent 簽章
       validateTimer: null, // 驗證用 timeout
-      syncTimer: null, // 同步 parent 用 timeout
       dirtyRows: new Set(), // 被改過的 row index
     }
   },
   mounted() {
-    this.initOrReloadFromProps(true)
+    this.initOrReloadFromProps();
   },
   beforeUnmount() {
-    if (this.validateTimer) clearTimeout(this.validateTimer)
-    if (this.syncTimer) clearTimeout(this.syncTimer)
-    this.exportTableData(this.editor)
-    if (this.editor) this.editor.destroy()
-  },
-  watch: {
-    managementBlock: {
-      deep: true,
-      handler(newVal) {
-        const data = newVal?.data || {}
-        const jsonContent = data.jsonContent || null
-        const sig = JSON.stringify(jsonContent || null)
-
-        // 若這次的內容跟 lastExternalJson 一樣 → 多半是自己 emit update-table-data 之後
-        // 父層又把同一份內容丟回來，這種就不要再重載，避免無限迴圈
-        if (sig === this.lastExternalJson && this.hasUserEdited) {
-          return
-        }
-
-        // 其他情況（例如：載入草稿 / 換機台重設 PMS） → 正式重載
-        this.initOrReloadFromProps(false)
-      },
-    },
+    if (this.validateTimer) clearTimeout(this.validateTimer);
+    this.exportTableData(this.editor);
+    if (this.editor) this.editor.destroy();
   },
   methods: {
-    initOrReloadFromProps(isInitial = false) {
-      const blk = this.managementBlock || {}
-      const data = blk.data || {}
-      const jsonContent = data.jsonContent || null
-      const arrayData = Array.isArray(data.arrayData) ? data.arrayData : []
-
-      // 記錄目前這次「外部狀態」的簽章（只看 jsonContent）
-      const sig = JSON.stringify(jsonContent || null)
-      this.lastExternalJson = sig
-      this.hasUserEdited = false // 外部重載時視為尚未編輯
+    initOrReloadFromProps() {
+      const blk = this.managementBlock || {};
+      const data = blk.data || {};
+      const jsonContent = data.jsonContent || null;
+      const arrayData = Array.isArray(data.arrayData) ? data.arrayData : [];
 
       // ✅ 完全沒有內容（沒有草稿 json，也沒有 PMS arrayData）→ 不建立 editor
       //    只保留「選擇的機台無任何參數」提示
       if (!jsonContent && !arrayData.length) {
         if (this.editor) {
-          this.editor.destroy()
-          this.editor = null
+          this.editor.destroy();
+          this.editor = null;
         }
-        this.localBlockData = { ...blk }
-        return
+        this.localBlockData = { ...blk };
+        return;
       }
 
-      let content
-      if (jsonContent) {
-        // 優先使用草稿 / DB 儲存的內容
-        content = jsonContent
-      } else {
-        // 只有 PMS arrayData → 由後端回來的參數表生成 Tiptap table
-        content = this.getInitialTableContent(arrayData)
-      }
-
-      this.localBlockData = { ...blk }
+      let content = (jsonContent) ? jsonContent : this.getInitialTableContent(arrayData);
+      this.localBlockData = { ...blk };
 
       if (!this.editor) {
         // 第一次建立 editor
@@ -204,33 +141,25 @@ export default {
             },
           },
           onUpdate: ({ editor }) => {
-            // 1️⃣ 不要每次都立即 export / validate
-
             // 先標記目前 row 是 dirty
-            this.markCurrentRowDirty(editor)
+            this.markCurrentRowDirty(editor);
 
             // 2️⃣ 驗證：稍微 debounce，只檢查 dirtyRows
             if (this.validateTimer) clearTimeout(this.validateTimer)
             this.validateTimer = setTimeout(() => {
-              const rows = Array.from(this.dirtyRows)
+              const rows = Array.from(this.dirtyRows);
               if (rows.length) {
-                this.validateTableContent(editor, rows)
-                this.dirtyRows.clear()
+                this.validateTableContent(editor, rows);
+                this.dirtyRows.clear();
               }
-            }, 200)
-
-            // 3️⃣ 同步 parent：比較慢一點沒關係
-            if (this.syncTimer) clearTimeout(this.syncTimer)
-            this.syncTimer = setTimeout(() => {
-              this.exportTableData(editor)
-            }, 500)
+            }, 200);
           },
-        })
-        this.validateTableContent(this.editor)
+        });
+        this.validateTableContent(this.editor);
       } else {
         // 已經有 editor → 只重設內容
-        this.editor.commands.setContent(content, false)
-        this.validateTableContent(this.editor)
+        this.editor.commands.setContent(content, false);
+        this.validateTableContent(this.editor);
       }
     },
 
@@ -483,94 +412,92 @@ export default {
     },
 
     validateTableContent(editor, rowsToCheck = null) {
-      if (!editor) return
+      if (!editor) return;
 
-      const { state } = editor
-      const tableNode = state.doc.content.firstChild
-      if (!tableNode || tableNode.type.name !== 'table') return
+      const { state } = editor;
+      const tableNode = state.doc.content.firstChild;
+      if (!tableNode || tableNode.type.name !== 'table') return;
 
-      let tr = state.tr
-      let changed = false
+      let tr = state.tr;
+      let changed = false;
 
-      const rowCount = tableNode.content.childCount
-      let rowPos = 1 // 第一列 row 的起始位置（table node 之後）
+      const rowCount = tableNode.content.childCount;
+      let rowPos = 1; // 第一列 row 的起始位置（table node 之後）
 
-      const rowsSet = rowsToCheck ? new Set(rowsToCheck) : null
+      const rowsSet = rowsToCheck ? new Set(rowsToCheck) : null;
 
       for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-        const rowNode = tableNode.content.child(rowIndex)
-        const cells = rowNode.content
+        const rowNode = tableNode.content.child(rowIndex);
+        const cells = rowNode.content;
 
         // 表頭列跳過
         if (rowIndex === 0) {
-          rowPos += rowNode.nodeSize
-          continue
+          rowPos += rowNode.nodeSize;
+          continue;
         }
 
         // 有指定要檢查的 rows，而且這列不在裡面 → 跳過
         if (rowsSet && !rowsSet.has(rowIndex)) {
-          rowPos += rowNode.nodeSize
-          continue
+          rowPos += rowNode.nodeSize;
+          continue;
         }
 
         // 計算這一列每個 cell 的起始 pos
-        const cellPos = []
-        let pos = rowPos + 1
+        const cellPos = [];
+        let pos = rowPos + 1;
         for (let i = 0; i < cells.childCount; i++) {
-          cellPos.push(pos)
-          pos += cells.child(i).nodeSize
+          cellPos.push(pos);
+          pos += cells.child(i).nodeSize;
         }
 
-        const values = []
-        const valueStatus = []
+        const values = [];
+        const valueStatus = [];
 
         // 3~7 欄：數值欄
         for (let col = 3; col <= 7; col++) {
-          const cellNode = cells.child(col)
-          const txt = extractText(cellNode)
+          const cellNode = cells.child(col);
+          const txt = extractText(cellNode);
           if (!txt) {
-            valueStatus.push('empty')
-            values.push(null)
+            valueStatus.push('empty');
+            values.push(null);
           } else {
             const num = Number(txt)
             if (!Number.isFinite(num)) {
-              valueStatus.push('invalid')
-              values.push(null)
+              valueStatus.push('invalid');
+              values.push(null);
             } else {
-              valueStatus.push('valid')
-              values.push(num)
+              valueStatus.push('valid');
+              values.push(num);
             }
           }
         }
 
-        const statusCheck = s => s === 'valid' || s === 'error'
+        const statusCheck = s => s === 'valid' || s === 'error';
         for (let i = 1; i < 5; i++) {
-          const a = values[i - 1]
-          const b = values[i]
+          const a = values[i - 1];
+          const b = values[i];
           if (a != null && b != null && statusCheck(valueStatus[i - 1]) && statusCheck(valueStatus[i]) && a > b) {
-            valueStatus[i - 1] = 'error'
-            valueStatus[i] = 'error'
+            valueStatus[i - 1] = 'error';
+            valueStatus[i] = 'error';
           }
         }
 
         for (let offset = 0; offset < 5; offset++) {
-          const colIndex = 3 + offset
-          const cellNode = cells.child(colIndex)
-          const newClass = 'value-' + valueStatus[offset]
+          const colIndex = 3 + offset;
+          const cellNode = cells.child(colIndex);
+          const newClass = 'value-' + valueStatus[offset];
 
-          if (cellNode.attrs.class === newClass) continue
+          if (cellNode.attrs.class === newClass) continue;
 
-          const newAttrs = { ...cellNode.attrs, class: newClass }
-          tr = tr.setNodeMarkup(cellPos[colIndex], cellNode.type, newAttrs, cellNode.marks)
-          changed = true
+          const newAttrs = { ...cellNode.attrs, class: newClass };
+          tr = tr.setNodeMarkup(cellPos[colIndex], cellNode.type, newAttrs, cellNode.marks);
+          changed = true;
         }
 
-        rowPos += rowNode.nodeSize
+        rowPos += rowNode.nodeSize;
       }
 
-      if (changed) {
-        editor.view.dispatch(tr)
-      }
+      if (changed) editor.view.dispatch(tr);
     },
 
     // ✅ 只負責「把 arrayData 變成 TipTap Table JSON」
@@ -584,22 +511,11 @@ export default {
         for (let col = 0; col < data[row].length; col++) {
           const type = row === 0 ? 'tableHeader' : 'tableCell'
           const textValue = data[row][col] ?? ''
-          const paragraphText = {
-            type: 'text',
-            text: textValue,
-          }
-          const content = [
-            {
-              type: 'paragraph',
-              content: paragraphText.text.length > 0 ? [paragraphText] : [],
-            },
-          ]
+          const paragraphText = { type: 'text', text: textValue }
+          const content = [{ type: 'paragraph', content: paragraphText.text.length > 0 ? [paragraphText] : [] }]
           const isHeader = row === 0
           const isLockedCol = lockCols.includes(col)
-          const attrs =
-            isHeader || isLockedCol
-              ? { contenteditable: false }
-              : {}
+          const attrs = isHeader || isLockedCol ? { contenteditable: false } : {}
 
           row_data.push({ type, content, attrs })
         }
@@ -669,26 +585,6 @@ export default {
       this.updateTable()
     },
 
-    flushNow() {
-      if (!this.editor) return
-
-      // 把未執行的 timer 清掉，避免重複跑
-      if (this.validateTimer) {
-        clearTimeout(this.validateTimer)
-        this.validateTimer = null
-      }
-      if (this.syncTimer) {
-        clearTimeout(this.syncTimer)
-        this.syncTimer = null
-      }
-
-      // 直接全表驗證一次（不傳 rows => 全掃）
-      this.validateTableContent(this.editor)
-
-      // 直接把 arrayData + jsonContent 同步給 parent
-      this.exportTableData(this.editor)
-    },
-
     updateTable() {
       if (!this.editor) return
       const { state, view } = this.editor
@@ -704,72 +600,49 @@ export default {
       })
 
       // Process text from the end（避免位置受影響）
-      rowsToUpdate
-        .slice(1)
-        .reverse()
-        .forEach(rowNode => {
-          const { node, pos, rowNumber } = rowNode
-          const firstCell = node.content.child(0)
-          const isCell =
-            firstCell &&
-            (firstCell.type.name === 'tableCell' || firstCell.type.name === 'tableHeader')
+      rowsToUpdate.slice(1).reverse().forEach(rowNode => {
+        const { node, pos, rowNumber } = rowNode
+        const firstCell = node.content.child(0)
+        const isCell = firstCell && (firstCell.type.name === 'tableCell' || firstCell.type.name === 'tableHeader')
 
-          if (isCell) {
-            const paragraph = state.schema.nodes.paragraph.create(
-              {},
-              state.schema.text(rowNumber.toString()),
-            )
-            const newCell = firstCell.type.create(
-              { ...firstCell.attrs, contenteditable: false },
-              paragraph,
-            )
-            tr.replaceWith(pos + 1, pos + 1 + firstCell.nodeSize, newCell)
-          }
-        })
+        if (isCell) {
+          const paragraph = state.schema.nodes.paragraph.create({}, state.schema.text(rowNumber.toString()) )
+          const newCell = firstCell.type.create({ ...firstCell.attrs, contenteditable: false }, paragraph)
+          tr.replaceWith(pos + 1, pos + 1 + firstCell.nodeSize, newCell)
+        }
+      })
 
       if (tr.docChanged) view.dispatch(tr)
     },
 
     exportTableData(editor) {
-      if (!editor || !editor.state) {
-        console.error('Editor 實例無效。')
-        return { arrayData: [], jsonContent: null }
-      }
+      if (!editor || !editor.state) return { arrayData: [], jsonContent: null };
 
-      const jsonContent = editor.getJSON()
-      const doc = editor.state.doc
-      const tableNode = doc.content.firstChild
-      const arrayData = []
+      const jsonContent = editor.getJSON();
+      const doc = editor.state.doc;
+      const tableNode = doc.content.firstChild;
+      const arrayData = [];
 
-      if (!tableNode || tableNode.type.name !== 'table') {
-        console.warn('編輯器內容不是表格。')
-        return { arrayData, jsonContent }
-      }
+      if (!tableNode || tableNode.type.name !== 'table') return { arrayData, jsonContent };
 
       tableNode.content.forEach(rowNode => {
         if (rowNode.type.name !== 'tableRow') return
 
         const rowArray = rowNode.content.content.map(cellNode => {
-          return cellNode.type.name === 'tableCell' || cellNode.type.name === 'tableHeader'
-            ? extractCellText(cellNode)
-            : ''
+          return cellNode.type.name === 'tableCell' || cellNode.type.name === 'tableHeader' ? extractCellText(cellNode) : '';
         })
 
-        arrayData.push(rowArray)
+        arrayData.push(rowArray);
       })
 
       if (!this.localBlockData.data) {
-        this.localBlockData.data = {}
+        this.localBlockData.data = {};
       }
-      this.localBlockData.data.arrayData = arrayData
-      this.localBlockData.data.jsonContent = jsonContent
+      this.localBlockData.data.arrayData = arrayData;
+      this.localBlockData.data.jsonContent = jsonContent;
 
-      // ⭐ 標記這是「使用者編輯後」的版本，並更新 lastExternalJson
-      this.hasUserEdited = true
-      this.lastExternalJson = JSON.stringify(jsonContent || null)
-
-      this.$emit('update-table-data', this.localBlockData)
-      return { arrayData, jsonContent }
+      this.$emit('update-table-data', this.localBlockData);
+      return { arrayData, jsonContent };
     },
   },
 }

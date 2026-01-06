@@ -40,8 +40,7 @@ export default {
                 ]},
                 {id: 5, title: '文件管理', children: [
                     {id: 51, title: "草稿匣", link: '/DraftDocuments'},
-                    {id: 52, title: "已送審", link: '/SubmittedDocuments'},
-                    {id: 53, title: "已退回", link: '/RejectedDocuments'}
+                    {id: 52, title: "文件狀態", link: '/SubmittedDocuments'},
                 ]},
             ],
         };

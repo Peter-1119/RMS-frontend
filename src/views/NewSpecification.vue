@@ -145,14 +145,13 @@
             </div>
           </div>
 
-          <FormSearchWindow
+          <FormSearchWindow 
             v-if="formWindowVisible"
             headerName="表單選取"
-            :existingForms="usedForms"
-            :allow-color="isRevisionDoc"
+            documentType="form"
             @add-new-form="addUsedForm"
-            @close-window="formWindowVisible = false"
-          />
+            @close-window="formWindowVisible=false">
+          </FormSearchWindow>
         </section>
 
         <!-- Step 7 其它 -->
@@ -1109,7 +1108,8 @@ async function generateAndDownloadDocx() {
     const url = `${API_BASE_URL}/docs/generate/word`
 
     // 先強制儲存草稿
-    await saveDraft()
+    const success = await saveDraft();
+    if (success == false) return;
 
     const res = await axios.post(url, payload, { responseType: 'blob' })
 
@@ -1184,62 +1184,48 @@ const isSaving = ref(false)
 
 const saveDraft = async () => {
   // Snapshot 模式：直接用 URL token 覆蓋最新草稿
-  let t
+  let t;
   if (isSnapshotView.value) {
-    t = routeToken.value
+    t = routeToken.value;
     if (!t) {
-      alert('缺少文件代碼，無法儲存草稿')
-      return
+      alert('缺少文件代碼，無法儲存草稿');
+      return false;
     }
 
-    setToken(t, { updateUrl: false })
+    setToken(t, { updateUrl: false });
 
-    const ok = window.confirm(
-      `${snapshotWarningMessage.value || '此畫面為歷史快照檢視'}\n\n` +
-      '現在儲存會以目前畫面內容覆蓋這份文件最新草稿，確定要這樣做嗎？'
-    )
-    if (!ok) return
+    const ok = window.confirm(`${snapshotWarningMessage.value || '此畫面為歷史快照檢視'}\n\n` + '現在儲存會以目前畫面內容覆蓋這份文件最新草稿，確定要這樣做嗎？');
+    if (!ok) return false;
   } else {
     // 一般情況：走原本 ensureDraftToken 流程
-    t = await ensureDraftToken()
-    if (!t) return
+    t = await ensureDraftToken();
+    if (!t) return false;
   }
 
   try {
-    isSaving.value = true
+    isSaving.value = true;
 
-    const specBlockPayload = toGenericBlocks(specBlocks.value, 4)
-    const qualityBlockPayload = toGenericBlocks(qualityBlocks.value, 6)
-    const otherBlockPayload = toGenericBlocks(otherBlocks.value, 7)
-    const paramPayload = serializeParamsFromMCR()
+    const specBlockPayload = toGenericBlocks(specBlocks.value, 4);
+    const qualityBlockPayload = toGenericBlocks(qualityBlocks.value, 6);
+    const otherBlockPayload = toGenericBlocks(otherBlocks.value, 7);
+    const paramPayload = serializeParamsFromMCR();
 
     const result = await saveDraftAll(t, {
       form,
-      blockRequests: [
-        { step_type: 4, blocks: specBlockPayload },
-        { step_type: 6, blocks: qualityBlockPayload },
-        { step_type: 7, blocks: otherBlockPayload },
-      ],
-      paramRequests: [
-        { step_type: 5, blocks: paramPayload },
-      ],
-      references: {
-        documents: [],
-        forms: (usedForms.value || []).map(f => ({
-          formId: f.formId,
-          formName: f.formName,
-        })),
-      },
-    })
+      blockRequests: [{ step_type: 4, blocks: specBlockPayload }, { step_type: 6, blocks: qualityBlockPayload }, { step_type: 7, blocks: otherBlockPayload },],
+      paramRequests: [{ step_type: 5, blocks: paramPayload }],
+      references: { documents: [], forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })) },
+    });
 
     if (!result?.success) {
-      return alert(result?.message || '屬性儲存失敗')
+      alert(result?.message || '屬性儲存失敗');
+      return false;
     }
-
-    alert(`草稿已儲存（時間：${result.issueTime || ''}）`)
+    alert(`草稿已儲存（時間：${result.issueTime || ''}）`);
   } catch (e) {
-    console.error('saveDraft failed:', e)
-    alert('儲存草稿失敗')
+    console.error('saveDraft failed:', e);
+    alert('儲存草稿失敗');
+    return false;
   } finally {
     isSaving.value = false
   }

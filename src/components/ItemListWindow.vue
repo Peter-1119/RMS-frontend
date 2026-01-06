@@ -29,7 +29,7 @@
           </tbody>
         </table>
 
-        <p v-else style="margin-top: 12px;">尚未有查詢結果</p>
+        <!-- <p v-else style="margin-top: 12px;">尚未有查詢結果</p> -->
       </div>
 
       <div class="footer">
@@ -92,7 +92,7 @@ export default {
   },
   methods: {
     async requestItemsFromAPI(keyword) {
-      this.warningText = "";
+      this.warningText = "品目查詢中";
       this.selectedItem = null;
       this.items = [];
       this.filterItems = [];
@@ -112,6 +112,7 @@ export default {
         if (this.machineCode)  params.machine  = this.machineCode;
 
         const response = await axios.get(url, { params });
+        this.warningText = "資料處理中";
 
         if (!response.data.success) {
           this.warningText = response.data.error || "查詢失敗";
@@ -123,6 +124,9 @@ export default {
         this.filterItems = this.items;
         if (!this.filterItems.length) {
           this.warningText = "查無符合條件的品目";
+        }
+        else {
+          this.warningText = "";
         }
       } catch (error) {
         console.error("Error fetching items:", error);

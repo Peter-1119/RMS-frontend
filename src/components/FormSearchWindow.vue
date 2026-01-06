@@ -1,46 +1,46 @@
 <template>
-    <div class="window-wrapper" @click.self="closeWindow">
-        <div class="dialog">
-            <div class="window-header">
-                <h3>{{ headerName }}</h3>
-            </div>
-            <div class="content">
-                <div class="search-block">
-                    <p>關鍵字：</p>
-                    <input type="text" class="form-input" v-model="searchKeyword" placeholder="請輸入文件名稱" @keyup.enter="searchForm(searchKeyword)"/>
-                    <button class="btn-search" @click="searchForm(searchKeyword)">搜尋</button>
-                </div>
-                <table class="search-table">
-                    <thead>
-                        <tr>
-                            <th>文管編號</th>
-                            <th>文件名稱</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="formInfo in paginatedFormInfos" :key="formInfo.id" @click="selectForm(formInfo)" :class="{'selected-row': formInfo.id === selectedFormId}">
-                            <td>{{ formInfo.formId }}</td>
-                            <td>{{ formInfo.formName }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="footer">
-                <div class="page-action-block">
-                    <span class="icon-item prev" @click="changePage(currentPage - 1)" :class="{'disabled': currentPage === 1}">&lt;</span>
-                    <label>第</label>
-                    <input type="number" class="page-input" :showSpinButton="false" v-model.number="currentPage" min="1" :max="totalPage" @change="changePage(currentPage)"/>
-
-                    <label>頁, 共{{ totalPage }}頁</label>
-                    <span class="icon-item next" @click="changePage(currentPage + 1)" :class="{'disabled': currentPage === totalPage}">&gt;</span>
-                </div>
-                <div class="window-action-block">
-                    <button class="btn confirm" @click="addNewForm">確定</button>
-                    <button class="btn cancel" @click="closeWindow">取消</button>
-                </div>
-            </div>
+  <div class="window-wrapper" @click.self="closeWindow">
+    <div class="dialog">
+      <div class="window-header">
+        <h3>{{ headerName }}</h3>
+      </div>
+      <div class="content">
+        <div class="search-block">
+          <p>關鍵字：</p>
+          <input type="text" class="form-input" v-model="keyword" placeholder="請輸入文件名稱" @keyup.enter="searchKeywork(keyword)"/>
+          <button class="btn-search" @click="searchForm(keyword)">搜尋</button>
         </div>
+        <table class="search-table">
+          <thead>
+            <tr>
+              <th>文管編號</th>
+              <th>文件名稱</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="formInfo in formInfos" :key="formInfo.formId" @click="selectedForm = formInfo" :class="{'selected-row': formInfo.formId === selectedForm.formId}">
+              <td>{{ formInfo.formId }}</td>
+              <td>{{ formInfo.formName }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="footer">
+        <div class="page-action-block">
+          <span class="icon-item prev" @click="changePage(page - 1)" :class="{'disabled': page === 1}">&lt;</span>
+          <label>第</label>
+          <input type="number" class="page-input" :showSpinButton="false" v-model.number="page" min="1" :max="total" @change="changePage(page)"/>
+
+          <label>頁, 共{{ total }}頁</label>
+          <span class="icon-item next" @click="changePage(page + 1)" :class="{'disabled': page === total}">&gt;</span>
+        </div>
+        <div class="window-action-block">
+          <button class="btn confirm" @click="addNewForm">確定</button>
+          <button class="btn cancel" @click="closeWindow">取消</button>
+        </div>
+      </div>
     </div>
+  </div>
 </template>
 
 <script>
@@ -49,117 +49,91 @@ import axios from 'axios';
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || '';
 
 export default{
-    name: "FormSearchWindow",
-    props: {
-        headerName: {type: String, default: ""},
-        existingForms: {type: Array, default: () => []}, // [{ formId, formName }]
-    },
-    data() {
-        return {
-            formInfos: [],   // 其實可以不用，但保留也無妨
-            results: [],     // 當前頁要顯示的資料
-            totalCount: 0,   // 後端回傳的 total
-            selectedFormId: null,
+  name: "FormSearchWindow",
+  props: { 
+    headerName: {type: String, default: ""},
+    documentType: {type: String, default: ""},
+  },
+  data() {
+    return {
+      formInfos: [],
+      loading: false,
+      errorMsg: "",
 
-            formName: "",
-            formId: null,
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      keyword: '',
 
-            currentPage: 1,
-            pageRows: 8,
-            searchKeyword: '',
-        }
-    },
-    computed: {
-        totalPage() {
-            if (!this.totalCount)
-                return 1;
-            return Math.ceil(this.totalCount / this.pageRows);
-        },
-        paginatedFormInfos() {
-            // 後端已經分頁了，這裡直接回 results 即可
-            return this.results;
-        },
-    },
-    mounted() {
-        // 一進來就查第 1 頁
-        this.fetchForms('');
-    },
-    methods: {
-        async fetchForms(keyword = '') {
-            try {
-                const resp = await axios.get(`${API_BASE_URL}/dcc/forms`, {
-                    params: {
-                        keyword,
-                        page: this.currentPage,
-                        page_size: this.pageRows,
-                    }
-                });
-
-                if (!resp.data || !resp.data.success) {
-                    console.error('取得表單清單失敗:', resp.data);
-                    alert('取得表單清單失敗');
-                    return;
-                }
-
-                const rows = resp.data.data || [];
-                this.totalCount = resp.data.total || 0;
-
-                const existingIds = new Set(this.existingForms.map(f => f.formId));
-
-                // 把已存在的 formId 過濾掉，再映射到前端使用的格式
-                this.results = rows
-                    .filter(r => !existingIds.has(r.dccno))
-                    .map((r, index) => ({
-                        id: index,            // 單頁內唯一就好
-                        formId: r.dccno,
-                        formName: r.dccname,
-                    }));
-
-                this.formInfos = this.results; // 如果你別的地方會用到就保留
-                this.selectedFormId = null;
-                this.formId = null;
-                this.formName = "";
-            } catch (err) {
-                console.error('呼叫 /dcc/forms 發生錯誤:', err);
-                alert('無法連線到伺服器 (表單搜尋)');
-            }
-        },
-
-        searchForm(searchKeyword) {
-            this.searchKeyword = searchKeyword || '';
-            this.currentPage = 1;           // 新搜尋從第 1 頁開始
-            this.fetchForms(this.searchKeyword);
-        },
-
-        selectForm(formInfo) {
-            this.selectedFormId = formInfo.id;
-            this.formId = formInfo.formId;
-            this.formName = formInfo.formName;
-        },
-
-        changePage(page) {
-            if (page < 1 || page > this.totalPage) return;
-            this.currentPage = page;
-            this.fetchForms(this.searchKeyword);
-        },
-
-        addNewForm() {
-            if (!this.formName || this.formName == ""){
-                alert("條件名稱不能為空");
-                return;
-            }
-            if (!this.formId || this.formId == ""){
-                alert("請選擇表單");
-                return;
-            }
-            this.$emit("add-new-form", {formId: this.formId, formName: this.formName});
-        },
-
-        closeWindow() {
-            console.log("cancel window");
-            this.$emit("close-window");
-        }
+      selectedForm: {},
     }
+  },
+  mounted() {
+    this.searchKeywork("");
+    this.loading = false;
+  },
+  methods: {
+    async getPagesAndLoad(keyword, page) {
+      try{
+        const {status, data} = await axios.get(`${API_BASE_URL}/dcc/docs`, { params: { documentType: this.documentType, keyword, pageSize: this.pageSize, getPages: true } });
+
+        if (status != 200) {
+          alert(`資料檢索異常，原因為 ${data}`);
+          return {pages: 0, data: []};
+        }
+
+        return {pages: data.data.pages, data: await this.load(keyword, page)};
+      }
+      catch { alert("取得資料庫發生問題，請重新確認網路1"); }
+      return {pages: 0, data: []};
+    },
+    async load(keyword, page) {
+      try {
+        this.loading = true;
+        const {status, data} = await axios.get(`${API_BASE_URL}/dcc/docs`, { params: { documentType: this.documentType, keyword, page, pageSize: this.pageSize }});
+
+        if (status != 200) {
+          alert(`資料檢索異常，原因為 ${data}`);
+          return [];
+        }
+
+        return data.data.map(row => { return { formId: row.dccno, formName: row.dccname }; });
+      }
+      catch { alert("取得資料庫發生問題，請重新確認網路2"); }
+      return [];
+    },
+    async changePage(p) {
+      if (p < 1 || p > this.total) return;
+      this.loading = true;
+
+      this.page = p;
+      this.formInfos = await this.load(this.keyword, this.page);
+
+      this.loading = false;
+    },
+    async searchKeywork(keyword) {
+      this.loading = true;
+
+      this.keyword = keyword;
+      this.page = 1;
+
+      const info = await this.getPagesAndLoad(this.keyword, this.page);
+      this.total = info.pages;
+      this.formInfos = info.data;
+
+      this.loading = false;
+    },
+    addNewForm() {
+      if (Object.keys(this.selectedForm).length === 0){
+        alert("請選擇表單");
+      }
+      this.$emit("add-new-form", {formId: this.selectedForm.formId, formName: this.selectedForm.formName});
+    },
+
+    closeWindow() {
+      this.$emit("close-window");
+    }
+  }
 }
 </script>
 
