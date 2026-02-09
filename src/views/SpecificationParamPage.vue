@@ -1,69 +1,72 @@
 <template>
-    <div class="Specification-Parameters-container">
-        <div class="top-controls">
-            <div class="input-action-layout">
-                <p>關鍵字：</p>
-                <input type="text" placeholder="請輸入機台關鍵字" v-model="machineKeyword" @keyup.enter="fetchConditions(machineKeyword)"/>
-                <button class="btn-search" @click="fetchConditions(machineKeyword)">搜尋</button>
-            </div>
-            <div class="btn-action-layout">
-                <button class="btn add-condition" @click="openEditWindow(null)">新增條件</button>
-            </div>
+  <div class="Specification-Parameters-container">
+      <div class="top-controls">
+        <div class="input-action-layout">
+          <p>關鍵字：</p>
+          <input type="text" placeholder="請輸入條件關鍵字" v-model="conditionKeyword" @keyup.enter="fetchConditionsByKeyword(conditionKeyword)"/>
+          <button class="btn-search" @click="fetchConditionsByKeyword(conditionKeyword)">搜尋</button>
         </div>
-        
-        <div class="table-content">
-            <div class="condition-table-wrapper">
-                <table class="conditions-table">
-                    <thead>
-                        <tr>
-                            <th>項次</th>
-                            <th>條件名稱</th>
-                            <th>條件細項</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(condition, index) in conditions" :key="condition.id" @click="selectConditionRow(index)" :class="{'selected-row': index === selectedIndex}">
-                            <td>{{ index + 1 }}</td>
-                            <td>{{ condition.name }}</td>
-                            <td><ul class="list-param"><li v-for="param in condition.parameters" :key="param">{{ param }}</li></ul></td>
-                            <td>
-                                <button class="btn edit" @click="openEditWindow(index)">編輯</button>
-                                <button class="btn delete" @click="deleteCondition(index)">刪除</button>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="machine-table-wrapper">
-                <table class="machines-table">
-                    <thead>
-                        <tr>
-                            <th>機台群組</th>
-                            <th>機台名稱</th>
-                        </tr>
-                    </thead>
-                    <tbody v-if="selectedIndex != null">
-                        <tr v-for="(mi, mn) in groups" :key="mi.code">
-                            <td>{{ mn }}</td>
-                            <td>{{ Object.keys(mi.machines).join(', ') }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+        <div class="input-action-layout">
+          <p>關鍵字：</p>
+          <input type="text" placeholder="請輸入機台關鍵字" v-model="machineKeyword" @keyup.enter="fetchConditionsByMachines(machineKeyword)"/>
+          <button class="btn-search" @click="fetchConditionsByMachines(machineKeyword)">搜尋</button>
+        </div>
+        <div class="btn-action-layout">
+          <button class="btn add-condition" @click="openEditWindow(null)">新增條件</button>
+        </div>
+      </div>
+      
+      <div class="table-content">
+        <div class="condition-table-wrapper">
+          <table class="conditions-table">
+            <thead>
+              <tr>
+                <th>項次</th>
+                <th>條件名稱</th>
+                <th>條件細項</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(condition, index) in conditions" :key="condition.id" @click="selectConditionRow(index)" :class="{'selected-row': index === selectedIndex}">
+                <td>{{ index + 1 }}</td>
+                <td>{{ condition.name }}</td>
+                <td><ul class="list-param"><li v-for="param in condition.parameters" :key="param">{{ param }}</li></ul></td>
+                <td>
+                  <button class="btn edit" @click="openEditWindow(index)">編輯</button>
+                  <button class="btn delete" @click="deleteCondition(index)">刪除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
-        <SpecificationParamWindow 
-            v-if="visible"
-            :condition="conditions[selectedIndex]"
-            @update-condition-data="updateConditionData"
-            @cancel="closeWindow">
-            <template #header>
-                <h3>{{ this.selectedIndex != null ? '編輯條件' : '新增條件' }}</h3>
-            </template>
-        </SpecificationParamWindow>
-    </div>
+        <div class="machine-table-wrapper">
+          <table class="machines-table">
+            <thead>
+              <tr>
+                <th>機台群組</th>
+                <th>機台名稱</th>
+              </tr>
+            </thead>
+            <tbody v-if="selectedIndex != null">
+              <tr v-for="(mi, mn) in groups" :key="mi.code">
+                <td>{{ mn }}</td>
+                <td>{{ Object.keys(mi.machines).join(', ') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    <SpecificationParamWindow 
+      v-if="visible"
+      :condition="conditions[selectedIndex]"
+      @update-condition-data="updateConditionData"
+      @cancel="closeWindow">
+      <template #header><h3>{{ this.selectedIndex != null ? '編輯條件' : '新增條件' }}</h3></template>
+    </SpecificationParamWindow>
+  </div>
 </template>
 
 <script>
@@ -71,103 +74,109 @@ import axios from 'axios';
 import SpecificationParamWindow from '@/components/SpecificationParamWindow.vue';
 
 export default {
-    name: "SpecificationParamPage",
-    components: {
-        SpecificationParamWindow
+  name: "SpecificationParamPage",
+  components: { SpecificationParamWindow },
+  data() {
+    return {
+      machineKeyword: "",
+      conditionKeyword: "",
+      conditions: [],
+      groups: {},
+      results: [],
+      visible: false,
+      selectedIndex: null,
+    };
+  },
+  async mounted() {
+    this.fetchConditionsByKeyword("");
+  },
+  methods: {
+    async selectConditionRow(condition_index) {
+      this.selectedIndex = condition_index;
+      if (condition_index == null) return;
+
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+        const response = await axios.get(API_BASE_URL + "/conditions/get-condition-machines", {params: {condition_id: this.conditions[condition_index].id}});
+        this.groups = response.data.data.groups;
+      }
+      catch (error) {
+        this.groups = {};
+      }
     },
-    data() {
-        return {
-            machineKeyword: "",
-            conditions: [],
-            groups: {},
-            results: [],
-            visible: false,
-            selectedIndex: null,
-        };
+    async fetchConditionsByMachines(keyword) {
+      try {
+        // console.log("GET /conditions/search-conditions-by-machines.")
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+        const response = await axios.get(API_BASE_URL + "/conditions/search-conditions-by-machines", {params: {keyword}});
+        this.conditions = response.data.data.conditions;
+
+        if (this.conditions.length > 0) this.selectedIndex = (this.selectedIndex < this.conditions.length) ? this.selectedIndex : null;
+        else this.selectedIndex = null;
+        this.conditionKeyword = "";
+      }
+      catch (error) {
+        this.conditions = [];
+        console.error("conditions fetch error: ", error);
+        this.selectedIndex = (this.conditions.length > 0) ? 0 : null;
+      }
     },
-    async mounted() {
-        this.fetchConditions("");
+    async fetchConditionsByKeyword(keyword) {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+        const response = await axios.get(API_BASE_URL + "/conditions/search-conditions-by-keyword", {params: {keyword}});
+        this.conditions = response.data.data.conditions;
+
+        if (this.conditions.length > 0) this.selectedIndex = (this.selectedIndex < this.conditions.length) ? this.selectedIndex : null;
+        else this.selectedIndex = "";
+        this.machineKeyword = "";
+      }
+      catch (error) {
+        this.conditions = [];
+        console.error("conditions fetch error: ", error);
+        this.selectedIndex = (this.conditions.length > 0) ? 0 : null;
+      }
     },
-    methods: {
-        async selectConditionRow(condition_index) {
-            this.selectedIndex = condition_index;
+    async deleteCondition(condition_index) {
+      if (!confirm("確認要刪除 " + this.conditions[condition_index].name + " 條件參數嗎?")){
+        return;
+      }
+      
+      try {
+        const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+        const response = await axios.get(API_BASE_URL + "/conditions/delete-condition-by-id", {params: {condition_id: this.conditions[condition_index].id}});
 
-            if (condition_index == null) {
-                return;
-            }
+        if (this.selectedIndex == condition_index || this.conditions.length == 1) {
+          this.selectedIndex = null;
+        }
+        else if (this.selectedIndex > condition_index) {
+          this.selectedIndex -= 1;
+        }
 
-            try {
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/conditions/get-condition-machines", {params: {condition_id: this.conditions[condition_index].id}});
-                this.groups = response.data.data.groups;
-            }
+        this.conditions.splice(condition_index, 1);
+      }
+      catch (error) {
+        this.conditions = [];
+        console.error("conditions fetch error: ", error);
+        this.selectedIndex = null;
+      }
+    },
+    openEditWindow(condition_index) {
+      this.selectedIndex = condition_index;
+      this.visible = true;
+    },
 
-            catch (error) {
-                this.groups = {};
-            }
-        },
-        async fetchConditions(keyword) {
-            try {
-                // console.log("GET /conditions/search-conditions-by-machines.")
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/conditions/search-conditions-by-machines", {params: {keyword}});
-                this.conditions = response.data.data.conditions;
-
-                if (this.conditions.length > 0) {
-                    this.selectedIndex = (this.selectedIndex < this.conditions.length) ? this.selectedIndex : null;
-                }
-                else {
-                    this.selectedIndex = null;
-                }
-            }
-            catch (error) {
-                this.conditions = [];
-                console.error("conditions fetch error: ", error);
-                this.selectedIndex = (this.conditions.length > 0) ? 0 : null;
-            }
-        },
-        async deleteCondition(condition_index) {
-            if (!confirm("確認要刪除 " + this.conditions[condition_index].name + " 條件參數嗎?")){
-                return;
-            }
-            
-            try {
-                const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-                const response = await axios.get(API_BASE_URL + "/conditions/delete-condition-by-id", {params: {condition_id: this.conditions[condition_index].id}});
-                console.log("刪除狀態: ", response);
-                console.log("刪除狀態: ", response.data.data.message);
-
-                if (this.selectedIndex == condition_index || this.conditions.length == 1) {
-                    this.selectedIndex = null;
-                }
-                else if (this.selectedIndex > condition_index) {
-                    this.selectedIndex -= 1;
-                }
-
-                this.conditions.splice(condition_index, 1);
-            }
-            catch (error) {
-                this.conditions = [];
-                console.error("conditions fetch error: ", error);
-                this.selectedIndex = null;
-            }
-        },
-        openEditWindow(condition_index) {
-            this.selectedIndex = condition_index;
-            this.visible = true;
-        },
-
-        //  Handle window event
-        updateConditionData() {
-            this.fetchConditions("");
-            if (this.selectedIndex != null) {
-                this.selectConditionRow(this.selectedIndex);
-            }
-        },
-        closeWindow() {
-            this.visible = false;
-        },
-    }
+    // Handle window event
+    updateConditionData() {
+      this.fetchConditionsByKeyword("");
+      if (this.selectedIndex != null) {
+        this.selectConditionRow(this.selectedIndex);
+      }
+    },
+    closeWindow() {
+      this.visible = false;
+    },
+  }
 };
 </script>
 

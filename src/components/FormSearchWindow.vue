@@ -8,7 +8,7 @@
         <div class="search-block">
           <p>關鍵字：</p>
           <input type="text" class="form-input" v-model="keyword" placeholder="請輸入文件名稱" @keyup.enter="searchKeywork(keyword)"/>
-          <button class="btn-search" @click="searchForm(keyword)">搜尋</button>
+          <button class="btn-search" @click="searchKeywork(keyword)">搜尋</button>
         </div>
         <table class="search-table">
           <thead>
@@ -126,6 +126,7 @@ export default{
     addNewForm() {
       if (Object.keys(this.selectedForm).length === 0){
         alert("請選擇表單");
+        return;
       }
       this.$emit("add-new-form", {formId: this.selectedForm.formId, formName: this.selectedForm.formName});
     },

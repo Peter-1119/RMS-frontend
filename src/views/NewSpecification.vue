@@ -89,6 +89,7 @@
             :key="blk.id"
             :block-editors="blk"
             :allow-color="isRevisionDoc"
+            @add-block="addSpecLayer"
             @update-block="updateSpecLayer"
             @delete-block="removeSpecLayer(blk.id)"
           />
@@ -100,6 +101,7 @@
           <ManufacturingParameterBlocks
             v-if="paramsLoaded"
             :data-blocks="mcrBlocks"
+            :itemType="form.attribute.itemType"
             :specification="form.attribute.specification"
             :current-step="currentStep"
             :document-token="draftToken"
@@ -122,6 +124,7 @@
             :key="blk.id"
             :block-editors="blk"
             :allow-color="isRevisionDoc"
+            @add-block="addQualityLayer"
             @update-block="updateQualityLayer"
             @delete-block="removeQualityLayer(blk.id)"
           />
@@ -158,7 +161,7 @@
         <section :ref="el => (sectionRefs[6].value = el)" class="step-section">
           <h2>6. 其它</h2>
           <div class="other-block"><button class="layer-action-btn add" @click="addOtherLayer">新增下一層</button></div>
-          <DynamicEditorBlock v-for="blk in otherBlocks" :key="blk.id" :block-editors="blk" @update-block="updateOtherLayer" @delete-block="removeOtherLayer(blk.id)"/>
+          <DynamicEditorBlock v-for="blk in otherBlocks" :key="blk.id" :block-editors="blk" @add-block="addOtherLayer" @update-block="updateOtherLayer" @delete-block="removeOtherLayer(blk.id)"/>
         </section>
       </div>
 
@@ -192,7 +195,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
+defineOptions({ name: 'new-specification' })
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick, onActivated } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 
@@ -217,7 +221,8 @@ const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specificati
 const route = useRoute()
 
 // ─── 模式判斷 ──────────────────────────────
-const isRevisionDoc = computed(() => route.query.mode === 'revision')
+const isRevisionDoc = computed(() => form.documentVersion > 1)
+// const isRevisionDoc = computed(() => route.query.mode === 'revision')
 
 // 從哪裡來：submitted / rejected / ''
 const fromSource = computed(() => String(route.query.source || '').trim())  // submitted / rejected / ''
@@ -267,6 +272,7 @@ const form = reactive({
   documentPurpose: '',
   department: '',
   author: '',
+  author_id: '',
   approver: '',
   confirmer: '',
   reviseReason: '',
@@ -433,30 +439,31 @@ const isStep4Valid = computed(() => {
     const meta = data.metadata || {}
     const arr  = data.arrayParameterData || []
 
-    const hasGroup   = !!meta.machineGroup
-    const hasMachine = !!meta.machine
-    const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0) || !!meta.programCode
+    const hasGroup   = !!meta.groupCode
+    const hasMachine = meta.machines.length > 0
+    const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0)
+    const hasProcessOrder = (meta.processOrder.length > 0)
 
     const hasTableBody = Array.isArray(arr) && arr.length > 1
 
-    const isTotallyUnused = !hasGroup && !hasMachine && !hasProgram && !hasTableBody
+    // const isTotallyUnused = !hasGroup && !hasMachine && !hasProgram && !hasTableBody
 
     // 🔹 完全沒動過的 block：略過
-    if (isTotallyUnused) {
-      continue
-    }
+    // if (isTotallyUnused) {
+    //   continue
+    // }
 
     // 走到這裡代表這個 block 有被操作過
     hasAnySelection = true
 
     // ✅ 情境 4：已選群組+機台+程式號碼，但沒有任何 PMS 資料
     //    → 該機台本來就沒 PMS，「不上色」（當成不需要填資料）
-    if (hasGroup && hasMachine && hasProgram && !hasTableBody) {
-      continue
-    }
+    // if (hasGroup && hasMachine && hasProgram && !hasTableBody) {
+    //   continue
+    // }
 
     // 🔴 只要有動作，但欄位不完整（群組 / 機台 / 程式 / 表格其中缺一） → 錯
-    if (!hasGroup || !hasMachine || !hasProgram || !hasTableBody) {
+    if (!hasGroup || !hasMachine || !hasProgram || !hasTableBody || !hasProcessOrder) {
       return false
     }
 
@@ -466,17 +473,16 @@ const isStep4Valid = computed(() => {
     // 數值檢查：欄位 2~6 必須是數字、不可遞減
     for (let r = 1; r < arr.length; r++) {
       const row = arr[r] || []
-      const vals = []
-      for (let c = 2; c <= 6; c++) {
-        const txt = String(row[c] ?? '').trim()
-        if (!txt) return false
-        const num = Number(txt)
-        if (!Number.isFinite(num)) return false
-        vals.push(num)
-      }
-      for (let k = 1; k < vals.length; k++) {
-        if (vals[k - 1] > vals[k]) return false
-      }
+      const cellStatus = row.slice(3, 8).map(cell => {
+        let status = 'empty';
+        let val = Number(cell);
+        if (cell) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+        return status;
+      });
+    //   console.log(`row: ${r}, cellStatus: ${cellStatus}`);
+      if (cellStatus.some(status => status == 'invalid')) return false;
+      if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+      if (cellStatus.every(status => status == 'empty')) return false;
     }
 
     // 建立 signature，用來檢查不同 block 是否完全同一組 PMS
@@ -607,6 +613,198 @@ const stepStatusClass = (index) => {
   steps[index].status = true
   return 'step-ok'
 }
+
+/* =========================================
+   新增：全域驗證與錯誤收集邏輯 (仿照 NewInstruction)
+   ========================================= */
+
+// 檢查單一 Dynamic Block (層級) 是否填寫完整
+// 邏輯：檢查該 Block 內的所有 item，只要有一個 item 沒填標題或內容就算不完整
+const isDynamicBlockComplete = (blk) => {
+  const items = blk.data || [];
+  if (items.length === 0) return false; // 雖然理論上不會是空陣列
+
+  for (const item of items) {
+    // 使用既有的 isDynamicBlockItemValid 函式進行檢查
+    if (!isDynamicBlockItemValid(item)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const collectValidationErrors = () => {
+  const errors = [];
+
+  // --- Step 1: 基本屬性 ---
+  const vRaw = String(form.documentVersion ?? '').trim();
+  const vNum = parseFloat(vRaw || '1');
+  const isFirstVersion = !Number.isFinite(vNum) || vNum <= 1;
+
+  if (!form.documentName) errors.push('【基本屬性】文件名稱未填寫');
+  if (!form.attribute.itemType) errors.push('【基本屬性】品目未選擇');
+  if (!form.attribute.styleNo) errors.push('【基本屬性】式樣NO未選擇');
+  if (!Array.isArray(form.attribute.specification) || form.attribute.specification.length === 0) {
+    errors.push('【基本屬性】適用工程未載入');
+  }
+  if (!form.department) errors.push('【基本屬性】制訂單位未填寫');
+  if (!form.author) errors.push('【基本屬性】制訂者未填寫');
+  if (!form.confirmer) errors.push('【基本屬性】確認者未填寫');
+  if (!form.approver) errors.push('【基本屬性】承認者未填寫');
+
+  // 變版檢查 (版本 > 1.0)
+  if (!isFirstVersion) {
+    if (!form.documentID) errors.push('【基本屬性】文管編號未填寫 (變版必填)');
+    if (!form.reviseReason) errors.push('【基本屬性】變更理由未填寫 (變版必填)');
+    if (!form.revisePoint) errors.push('【基本屬性】變更要點未填寫 (變版必填)');
+  }
+
+  // --- Step 2: 目的 ---
+  if (!String(form.documentPurpose ?? '').trim()) {
+    errors.push('【1. 目的】內容未填寫');
+  }
+
+  // --- Step 3: 製作條件規範 (Dynamic) ---
+  const specBs = specBlocks.value || [];
+  // 檢查是否有建立區塊，且每個區塊都完整
+  if (specBs.length > 0) {
+    specBs.forEach((blk, idx) => {
+      if (!isDynamicBlockComplete(blk)) {
+        errors.push(`【2. 製作條件規範 - 層級 ${idx + 1}】內容未填寫完整 (標題必填，若選文字/表格/圖片則需有內容)`);
+      }
+    });
+  } else {
+    // 若此章節完全沒新增，視為未填寫 (若此章節為選填可移除此判斷)
+    // errors.push('【2. 製作條件規範】至少需新增一層內容'); 
+  }
+
+  // --- Step 4: 製造參數一覽表 (PMS) ---
+  // 這部分邏輯最複雜，需檢查 Group, Machine, ProcessOrder, Table Values
+  if (!hasAnyMachineGroup.value) {
+    // 若完全沒有機台群組，此步驟不需檢查
+  } else {
+    const pmsBs = mcrBlocks.value || [];
+    if (pmsBs.length === 0) {
+      errors.push('【3. 製造參數一覽表】尚未建立任何參數模塊');
+    } else {
+      let hasAnySelection = false;
+      const signatures = [];
+
+      pmsBs.forEach((blk, idx) => {
+        const prefix = `【3. 製造參數一覽表 - 模塊 ${idx + 1}】`;
+        const meta = blk.data?.metadata || {};
+        const arr = blk.data?.arrayParameterData || [];
+
+        const hasGroup = !!meta.groupCode;
+        const hasMachine = meta.machines && meta.machines.length > 0;
+        const hasProcessOrder = meta.processOrder && meta.processOrder.length > 0;
+        const hasTableBody = Array.isArray(arr) && arr.length > 1;
+
+        // 若完全沒動過 (空的)，視為未填
+        if (!hasGroup && !hasMachine && !hasTableBody) {
+           errors.push(`${prefix} 未選擇機台群組與機台`);
+           return;
+        }
+
+        hasAnySelection = true;
+
+        // 檢查必填欄位
+        if (!hasGroup) errors.push(`${prefix} 未選擇機台群組`);
+        if (!hasMachine) errors.push(`${prefix} 未選擇機台`);
+        if (!hasProcessOrder) errors.push(`${prefix} 未選擇流程順序`);
+        
+        // 檢查表格數值 (PMS Table)
+        // 欄位 2~6 (規下, 操下, 設定, 操上, 規上) 必須是有效數字
+        if (hasTableBody) {
+          let tableInvalid = false;
+          for (let r = 1; r < arr.length; r++) {
+            const row = arr[r] || [];
+            // 取出重點 5 欄
+            const cellStatus = row.slice(2, 7).map(cell => {
+              const val = Number(cell);
+              // 有文字但不是數字 -> invalid
+              if (cell && Number.isNaN(val)) return 'invalid';
+              // 沒文字 -> empty
+              if (!cell && cell !== 0) return 'empty';
+              return 'valid';
+            });
+
+            // 規則：不能有 invalid (非數字)
+            if (cellStatus.some(s => s === 'invalid')) {
+              tableInvalid = true; 
+              break;
+            }
+            // 規則：若有設定值，則不能全空 (詳細邏輯參考 isStep4Valid)
+            // 簡易版：檢查是否全部 empty -> 若全空則該行沒意義
+            if (cellStatus.every(s => s === 'empty')) {
+               tableInvalid = true; 
+               break;
+            }
+          }
+          if (tableInvalid) {
+            errors.push(`${prefix} 表格數值填寫不完整或包含非數字內容`);
+          }
+
+          // 收集簽名以檢查重複 (Row 2~6 的內容)
+          const mat = [];
+          for (let r = 1; r < arr.length; r++) {
+            const row = arr[r] || [];
+            const sub = [];
+            for (let c = 2; c <= 6; c++) sub.push(String(row[c] ?? '').trim());
+            mat.push(sub);
+          }
+          signatures.push(JSON.stringify(mat));
+
+        } else {
+           // 有選機台但沒表格資料 (如果是因為該機台本來就沒 PMS 則忽略，否則報錯)
+           // 這裡假設選了就要有
+           // errors.push(`${prefix} 無法取得 PMS 表格資料`);
+        }
+      });
+
+      if (!hasAnySelection) {
+        errors.push('【3. 製造參數一覽表】未進行任何機台設定');
+      }
+
+      // 檢查重複內容
+      for (let i = 0; i < signatures.length; i++) {
+        for (let j = i + 1; j < signatures.length; j++) {
+          if (signatures[i] === signatures[j]) {
+            errors.push(`【3. 製造參數一覽表】模塊 ${i + 1} 與 模塊 ${j + 1} 的參數設定內容完全重複`);
+          }
+        }
+      }
+    }
+  }
+
+  // --- Step 5: 適用品質與規格內容 (Dynamic) ---
+  const qualBs = qualityBlocks.value || [];
+  if (qualBs.length > 0) {
+    qualBs.forEach((blk, idx) => {
+      if (!isDynamicBlockComplete(blk)) {
+        errors.push(`【4. 適用品質與規格內容 - 層級 ${idx + 1}】內容未填寫完整`);
+      }
+    });
+  }
+
+  // --- Step 6: 使用表單 ---
+  // 若為必填可取消註解
+  // if ((usedForms.value || []).length === 0) {
+  //   errors.push('【5. 使用表單】未選擇任何表單');
+  // }
+
+  // --- Step 7: 其他 (Dynamic) ---
+  const otherBs = otherBlocks.value || [];
+  if (otherBs.length > 0) {
+    otherBs.forEach((blk, idx) => {
+      if (!isDynamicBlockComplete(blk)) {
+        errors.push(`【6. 其他 - 層級 ${idx + 1}】內容未填寫完整`);
+      }
+    });
+  }
+
+  return errors;
+};
 // ---------- pickers ----------
 const specificsListVisible = ref(false)
 
@@ -625,17 +823,13 @@ function onSelectItemType(payload) {
 }
 async function loadStylesForItem(matnr) {
   try {
-    const { data } = await axios.get(`${API_BASE_URL}/item/styles`, {
-      params: { matnr },
-    })
+    const { data } = await axios.get(`${API_BASE_URL}/item/styles`, { params: { matnr } })
     if (!data.success) {
       alert(data.error || '取得式樣清單失敗')
       styleOptions.value = []
       return
     }
-    styleOptions.value = Array.isArray(data.data?.styles)
-      ? data.data.styles
-      : []
+    styleOptions.value = Array.isArray(data.data?.styles) ? data.data.styles : []
   } catch (e) {
     console.error('loadStylesForItem failed:', e)
     alert('取得式樣清單失敗')
@@ -657,9 +851,7 @@ async function onSelectStyle() {
   if (!matnr || !sfhnr) return
 
   try {
-    const { data } = await axios.get(`${API_BASE_URL}/item/processes`, {
-      params: { matnr, sfhnr },
-    })
+    const { data } = await axios.get(`${API_BASE_URL}/item/processes`, { params: { matnr, sfhnr }, })
     if (!data.success) {
       alert(data.error || '取得適用工程失敗')
       form.attribute.specification = []
@@ -851,8 +1043,6 @@ const fromGenericBlocks = (payload, stepType) =>
     step: stepType,
     tier: blk.tier,
     data: (blk.data || []).map(it => ({
-      content_id: null,
-      client_temp_id: null,
       option: it.option ?? 0,
       jsonHeader: it.jsonHeader || null,
       jsonContent: it.jsonContent || null,
@@ -867,7 +1057,8 @@ const onMachineGroupInfo = (payload) => {
 }
 // serialize params → backend shape for /docs/params/save (step_type = 5)
 function serializeParamsFromMCR() {
-  if (mcrBlocks.value.length == 0 || (mcrBlocks.value.length == 1 && !mcrBlocks.value[0].data.jsonParameterContent)){
+  console.log("mcrBlocks: ", mcrBlocks.value);
+  if (mcrBlocks.value.length == 0 || (mcrBlocks.value.length == 1 && mcrBlocks.value[0].data.metadata.programs.length == 0)){
     return []
   }
   return (mcrBlocks.value || []).map((blk, i) => ({
@@ -881,6 +1072,7 @@ function serializeParamsFromMCR() {
 }
 // load backend → fill mcrBlocks that the child understands
 function loadParamsIntoMCR(payload) {
+  console.log("payload: ", payload);
   mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
     id: i + 1,
     code: b.code || `XXXX${i + 1}`,
@@ -902,6 +1094,15 @@ const removeUsedForm = (id) => { usedForms.value = usedForms.value.filter(x => x
 // 規則：
 //   - snapshotView：使用 URL 上的 token（同一份文件），覆蓋原草稿
 //   - 一般模式：用 initDoc(1) 建立 / 取得草稿 token
+// 當組件被 keep-alive 喚醒時觸發
+onActivated(() => {
+  // 如果當前 URL 沒有 token，但我們手上有草稿 token (代表是點側邊欄切回來的)
+  if (!route.query.token && draftToken.value) {
+    // 把 token 補回 URL，這樣看起來才像是在編輯同一份文件
+    setToken(draftToken.value, { updateUrl: true })
+  }
+})
+
 const ensureDraftToken = async () => {
   // Snapshot 模式：一定要用 URL 上的 token
   if (isSnapshotView.value) {
@@ -915,13 +1116,16 @@ const ensureDraftToken = async () => {
   }
 
   // 一般情況：如同原本邏輯
-  if (draftToken.value) return draftToken.value
+  if (draftToken.value) {
+    if (!route.query.token) setToken(draftToken.value, { updateUrl: true });
+    return draftToken.value;
+  }
 
   try {
     // doc_type = 1 → 製造式樣書
     const res = await initDoc(1)
     if (res?.success && res.token) {
-      setToken(res.token, { updateUrl: false })
+      setToken(res.token, { updateUrl: true })
       return res.token
     }
     throw new Error(res?.message || 'init failed')
@@ -1071,6 +1275,12 @@ function extractErrorMessage(e, fallback = '文件產出失敗，請稍後再試
   return Promise.resolve(msg)
 }
 async function generateAndDownloadDocx() {
+  const errors = collectValidationErrors();
+  if (errors.length > 0) {
+    alert("檢測到以下內容未完成，無法產生文件：\n\n" + errors.join('\n'));
+    return;
+  }
+
   // ★ Snapshot 檢視模式：不允許重新產出 Word（避免重複建 RMS / EIP）
   if (isSnapshotView.value) {
     alert('此畫面為歷史快照檢視，只能預覽，無法重新產出 Word 文件。\n如需重新送簽，請改用「變版」功能或新建文件。')
@@ -1253,6 +1463,7 @@ const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false })
   }
 
   // 依據品目載入 style options + 顯示 specification
+  console.log("form.attribute.specification: ", form.attribute.specification);
   if (form.attribute?.itemType) {
     await loadStylesForItem(form.attribute.itemType)
 

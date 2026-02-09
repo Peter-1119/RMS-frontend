@@ -30,9 +30,7 @@
               <td>{{ (page-1)*pageSize + idx + 1 }}</td>
               <td>{{ row.projectCode.slice(0, 3) }}</td>
               <td>{{ row.projectName.slice(3) }}</td>
-              <td>
-                <button class="btn edit" @click.stop="openAddSpecsDialog(row)">編輯</button>
-              </td>
+              <td><button class="btn edit" @click.stop="openAddSpecsDialog(row)">編輯</button></td>
             </tr>
             <tr v-if="!loading && list.length===0">
               <td colspan="4">無資料</td>
@@ -67,9 +65,7 @@
             <tr v-for="p in processes" :key="p.id">
               <td>{{ p.specCode }}</td>
               <td>{{ p.specName }}</td>
-              <td>
-                <button class="btn delete" @click="removeProcess(p)">移除</button>
-              </td>
+              <td><button class="btn delete" @click="removeProcess(p)">移除</button></td>
             </tr>
             <tr v-if="activeId && !loadingRight && processes.length===0">
               <td colspan="3">此工程目前無製程</td>
@@ -98,96 +94,88 @@ import { ref, computed } from 'vue'
 import { getEngineeringList, getEngineeringProcesses, deleteProcessFromEngineering } from '@/services/applicableProcess'
 import ProjectSpecificationWindow from '@/components/ProjectSpecificationWindow.vue'
 
-const keyword = ref('')
-const page = ref(1)
-const pageSize = ref(20)
-const total = ref(0)
-const list = ref([])
-const loading = ref(false)
+const keyword = ref('');
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
+const list = ref([]);
+const loading = ref(false);
 
-const activeId = ref(null)
-const activeRow = ref(null)
-const processes = ref([])
-const loadingRight = ref(false)
+const activeId = ref(null);
+const activeRow = ref(null);
+const processes = ref([]);
+const loadingRight = ref(false);
 
-const showAdd = ref(false)
-const addDialogProject = ref(null) // pass project info to dialog
+const showAdd = ref(false);
+const addDialogProject = ref(null); // pass project info to dialog
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
 
 function openAddSpecsDialog(row) {
-  const r = row || activeRow.value
-  if (!r) return
+  const r = row || activeRow.value;
+  if (!r) return;
   // 工程類別 = 工程代碼 + 適用工程（顯示用，唯讀）
-  const displayLabel = `${r.projectName}(${r.projectCode})`
+  const displayLabel = `${r.projectName}(${r.projectCode})`;
   addDialogProject.value = {
     projectCode: r.projectCode,
     projectName: r.projectName,
     displayLabel
   }
-  showAdd.value = true
+  showAdd.value = true;
 }
 
 
 async function onAdded() {
-  showAdd.value = false
-  if (activeRow.value) await selectRow(activeRow.value) // refresh right table
+  showAdd.value = false;
+  if (activeRow.value) await selectRow(activeRow.value); // refresh right table
 }
 
 async function removeProcess(p) {
-  if (!activeId.value) return
-  if (!confirm(`確定將製程「${p.specName}」從工程中移除？`)) return
-  await deleteProcessFromEngineering(activeId.value, p.id)
-  await selectRow(activeRow.value)
+  if (!activeId.value) return;
+  if (!confirm(`確定將製程「${p.specName}」從工程中移除？`)) return;
+  await deleteProcessFromEngineering(activeId.value, p.id);
+  await selectRow(activeRow.value);
 }
 
 
 let debounceTimer = null
 function onKeywordInput() {
-  clearTimeout(debounceTimer)
+  clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
-    page.value = 1
-    load()
+    page.value = 1;
+    load();
   }, 300)
 }
 
 async function load() {
-  loading.value = true
+  loading.value = true;
   try {
-    const { items, total: t } = await getEngineeringList({ keyword: keyword.value, page: page.value, pageSize: pageSize.value })
-    list.value = items || []
-    total.value = t || 0
+    const { items, total: t } = await getEngineeringList({ keyword: keyword.value, page: page.value, pageSize: pageSize.value });
+    list.value = items || [];
+    total.value = t || 0;
     if (activeId.value && !list.value.some(x => x.id === activeId.value)) {
-      activeId.value = null
-      activeRow.value = null
-      processes.value = []
+      activeId.value = null;
+      activeRow.value = null;
+      processes.value = [];
     }
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function changePage(p) {
-  if (p < 1 || p > totalPages.value) return
-  page.value = p
-  load()
+  if (p < 1 || p > totalPages.value) return;
+  page.value = p;
+  load();
 }
 
 async function selectRow(row) {
-  activeId.value = row.id
-  activeRow.value = row
-  loadingRight.value = true
-  try {
-    processes.value = await getEngineeringProcesses(row.id)
-  } finally {
-    loadingRight.value = false
-  }
+  activeId.value = row.id;
+  activeRow.value = row;
+  loadingRight.value = true;
+  try { processes.value = await getEngineeringProcesses(row.id, keyword.value); }
+  finally {loadingRight.value = false; }
 }
-
-// async function editEngineering(row) {
-//   console.log('edit', row)
-//   openAddSpecsDialog(row)
-// }
 
 // init
 load()

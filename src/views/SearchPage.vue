@@ -11,7 +11,7 @@
       <table class="search-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>查看</th>
+            <!-- <th>查看</th> -->
             <th>編號</th>
             <th>文件名稱</th>
             <th>版本</th>
@@ -22,11 +22,7 @@
 
         <tbody>
           <tr v-for="(item, index) in searchData" :key="item.documentToken || index">
-            <td>
-              <button class="btn doc" @click="performSearch(item)">
-                <img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc" />
-              </button>
-            </td>
+            <!-- <td><button class="btn doc" @click="openWordPreview(item)"><img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc" /></button></td> -->
             <td>{{ item.documentId }}</td>
             <td class="doc-name"><button class="doc-link" @click="openWordPreview(item)">{{ item.documentName }}</button></td>
             <!-- <td>{{ item.documentName }}</td> -->

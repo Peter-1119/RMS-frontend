@@ -31,9 +31,8 @@
 
           <!-- ✅ 用 keep-alive 包 router-view，讓每個 tab 保持各自 state -->
           <router-view v-slot="{ Component, route }">
-            <!-- 對有 tab 的頁面啟用 keep-alive，其餘照常顯示 -->
-            <keep-alive>
-              <component :is="Component" :key="route.fullPath" v-if="route.meta.keepAlive" />
+            <keep-alive :include="cachedViews">
+              <component :is="Component" :key="route.name" v-if="route.meta.keepAlive"/>
             </keep-alive>
             <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive" />
           </router-view>
@@ -57,7 +56,8 @@ export default {
       currentPath: "/",
       // ✅ 分頁管理
       tabs: [],             // [{ fullPath, path, name, title, closable }]
-      activeTabFullPath: '' // 目前啟用的 tab fullPath
+      activeTabFullPath: '', // 目前啟用的 tab fullPath
+      cachedViews: [] // ★ 新增：用來控制 keep-alive include 的陣列
     };
   },
   mounted() {
@@ -126,6 +126,13 @@ export default {
         return;
       }
 
+      // ★ 新增：如果該路由需要 keep-alive，加入 cachedViews
+      if (route.meta.keepAlive && route.name) {
+        if (!this.cachedViews.includes(route.name)) {
+          this.cachedViews.push(route.name);
+        }
+      }
+
       const fullPath = route.fullPath;
       const key = route.name || fullPath;   // 👈 tab 的「識別 key」
 
@@ -158,9 +165,25 @@ export default {
     },
     closeTab(tab, index) {
       const isActive = (tab.fullPath === this.activeTabFullPath);
+      
+      // ★ 新增：根據關閉的 Tab 路由名稱，清除對應的 localStorage
+      if (tab.name === 'new-instruction') {
+        localStorage.removeItem('rms:draft:new-instruction');
+        // 如果有其他需要清除的狀態，也可以在這裡處理
+      }
+      if (tab.name === 'new-specification') {
+        localStorage.removeItem('rms:draft:new-specification');
+      }
+
+      // ★ 新增：從 cachedViews 移除，這會強制銷毀組件實例，下次打開就是全新的
+      if (tab.name) {
+        this.cachedViews = this.cachedViews.filter(name => name !== tab.name);
+      }
+
+      // 原本的關閉邏輯
       this.tabs.splice(index, 1);
 
-      if (!isActive) return; // 關閉的不是當前 tab → 不需要導航
+      if (!isActive) return; 
 
       if (this.tabs.length === 0) {
         this.activeTabFullPath = '';
@@ -168,7 +191,6 @@ export default {
         return;
       }
 
-      // 優先切到左邊的 tab，如果沒有就右邊
       const newIndex = index > 0 ? index - 1 : 0;
       const newTab = this.tabs[newIndex];
       this.activeTabFullPath = newTab.fullPath;

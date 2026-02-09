@@ -137,13 +137,12 @@ export async function releaseProgramCodesByDocument(documentToken) {
   return res.data.data; // { document_token }
 }
 
-export function copySpecParamFromCode(programCode) {
+export async function copySpecParamFromCode(programCode) {
   // 對應後端新路徑
-  return http.post('/parameters/copy-spec-source', { program_code: programCode })
-    .then(res => res.data)
+  return http.post('/parameters/copy-spec-source', { program_code: programCode }).then(res => res.data)
 }
 
-export function copyMcrFromCode(payload) {
+export async function copyMcrFromCode(payload) {
   // payload = { program_code: 'RE...', base_machine_code: 'xxxx' }
   return http.post('/parameters/copy-source', payload).then(res => res.data)  // 回傳 { success, message, data }
 }

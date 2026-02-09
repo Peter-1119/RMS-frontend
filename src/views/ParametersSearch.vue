@@ -12,7 +12,7 @@
           <div class="search">
             <div class="fundamental-attribute">
               <div class="form-group">
-                <label>適用工程：</label>
+                <label>製程：</label>
                 <input class="window-input" type="text" v-model="form.specific" @click="specificsListVisible = true" readonly/>
               </div>
 
@@ -353,6 +353,8 @@ export default {
         const { data } = await axios.post(`${API_BASE_URL}/parameters/search`, payload)
         const res = (data && data.data) || {}
 
+        console.log("res: ", res);
+
         // 更新 Headers (這決定了 Table 中間會出現哪些條件欄位)
         // 如果使用者選了機台，後端會回傳該機台的所有條件名稱
         this.conditionHeadersFromAPI = res.condition_headers || []
@@ -382,10 +384,7 @@ export default {
         // ★ 用 document_type 決定要打哪一個 step
         const stepType = row.document_type === 1 ? 5 : 2
 
-        const { data } = await axios.get(
-          `${API_BASE_URL}/parameters/${row.document_token}/blocks`,
-          { params: { step_type: stepType } }
-        )
+        const { data } = await axios.get(`${API_BASE_URL}/parameters/${row.document_token}/blocks`, { params: { step_type: stepType } })
 
         this.parameterRows = (data && data.data && data.data.rows) || []
       } catch (e) {

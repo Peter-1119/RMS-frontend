@@ -44,8 +44,18 @@
               </div>
               <div class="form-group">
                 <label for="machines">適用機台：</label>
-                <input class="input-machine" type="text" id="machines" v-model="inputMachines" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
+                <input class="input-machine" type="text" id="machines" :value="'    --- 請選擇機台 ---    '" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
               </div>
+              <div class="form-group"><label for="space"></label>
+                <div v-if="machines_tag.length" class="machine-tags">
+                  <div v-for="machine in machines_tag" :key="machine.id" class="machine-tag" :class="{ invalid: !machine.isValid }">
+                    <span class="tag-name">{{ machine.name }}</span>
+                    <button type="button" class="tag-remove" @click="removeMachineTag(machine.id)" title="移除此機台">✕</button>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="form-group"><label for="scope-units">適用單位：</label><input class="scope-units" type="text" id="scope-units" v-model="form.attribute.scopeUnits" readonly/></div>
               <div class="form-group"><label for="department">制訂單位：</label><input type="text" id="department" v-model="form.department" readonly/></div>
               <div class="form-group"><label for="author">制訂者：</label><input type="text" id="author" v-model="form.author" readonly/></div>
               <div class="form-group"><label for="confirmer">確認者：</label><input type="text" id="confirmer" v-model="form.confirmer"/></div>
@@ -86,7 +96,7 @@
             v-model="processFlowData"
             :cols="9"
             :token="draftToken"
-            :machineCode="firstMachineCode"
+            :machineCode="(form.attribute.machines.length > 0) ? form.attribute.machines[0] : ''"
             :version="flowVersion"
             :allow-color="isRevisionDoc"
           />
@@ -103,6 +113,7 @@
           <div class="management-combination-block">
             <ManagementSpecificBlock
               ref="ManagementSpecificBlockComponent"
+              :machine_id="form.attribute.machines[0]"
               :managementBlock="managementSpecific"
               :has-pms="hasPmsForStep3"
               :allow-color="isRevisionDoc"
@@ -115,6 +126,7 @@
               :key="blk.id"
               :block-editors="blk"
               :allow-color="isRevisionDoc"
+              @add-block="addManagementLayer"
               @update-block="updateManagementBlockData"
               @delete-block="removeManagementLayer"
             />
@@ -131,10 +143,10 @@
             :current-step="currentStep"
             :has-pms="hasPmsForMcr"
             :has-conditions="hasCondForMcr"
-            :spec-options="specOptionsForMcr"
+            :spec-options="form.attribute.specifications"
             :document-token="draftToken"
             :allow-color="isRevisionDoc"
-            :base-machine-code="baseMachineCode"
+            :machines="form.attribute.machines"
             @update:dataBlocks="mcrBlocks = $event"
             @save="mcrBlocks = $event"
           />
@@ -153,6 +165,7 @@
             :key="blockContent.id"
             :blockEditors="blockContent"
             :allow-color="isRevisionDoc"
+            @add-block="addExceptionLayer"
             @delete-block="removeExceptionLayer(blockContent.id)"
             @update-block="updateExceptionBlockData"
           ></DynamicEditorBlock>
@@ -180,7 +193,7 @@
             v-if="docWindowVisible"
             headerName="相關文件選取"
             documentType="doc"
-            @add-new-doc="addRelativeDocument"
+            @add-new-form="addRelativeDocument"
             @close-window="docWindowVisible=false">
           </FormSearchWindow>
         </section>
@@ -218,26 +231,32 @@
         <div style="display: flex; justify-content: space-between; align-items:center;">
           <h2>文件產出</h2>
           <div style="display:flex; gap:.5rem;">
-            <!-- 不再寫「預覽」，這顆專門當正式文件下載 (Word) -->
             <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">
               {{ loading ? '產生中…' : '產生文件（Word）' }}
             </button>
-            <!-- <button @click="requestEIPAPI" class="layer-action-btn add">拋轉EIP</button> -->
+            <button @click="openEipWindow" :disabled="loading" class="layer-action-btn add" style="background-color: #2e7d32;">
+              {{ loading ? '處理中…' : '轉拋 EIP' }}
+            </button>
           </div>
         </div>
 
         <p v-if="errorMsg" style="color:#c00; margin:.5rem 0;">{{ errorMsg }}</p>
 
-        <!-- ✅ 這裡改成 DOCX 預覽 -->
         <div class="docx-viewer" style="margin-top: 1rem;">
           <div v-if="previewLoading">預覽產生中…</div>
           <WordPreview v-else-if="docxSrc" :file-url="docxSrc" />
           <small v-else style="color:#666;">尚未產生預覽。</small>
         </div>
       </div>
+
+      <EipReviewWindow 
+        v-if="eipWindowVisible" 
+        :form-data="form"
+        @confirm="handleEipConfirm"
+        @cancel="eipWindowVisible=false"
+      />
     </div>
   </div>
-  <!-- 右側浮動工具列 -->
   <div class="floating-tools">
     <button class="tool-btn" @click="$router.push('/home')" title="回首頁">⌂</button>
     <button class="tool-btn" @click="scrollToTop" title="回到最上層">↑</button>
@@ -247,8 +266,10 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'new-instruction' })
+
 import axios from 'axios'
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick, onActivated } from 'vue'
 import { useRoute } from 'vue-router'
 
 import ProjectListWindow from '@/components/ProjectListWindow.vue'
@@ -257,10 +278,9 @@ import ProcessFlowBlock from '@/components/ProcessFlowBlock.vue'
 import ManagementSpecificBlock from '@/components/ManagementSpecificBlock.vue'
 import DynamicEditorBlock from '@/components/DynamicEditorBlock.vue'
 import ManufacturingConditionRuleBlocks from '@/components/ManufacturingConditionRuleBlocks.vue'
-import DocSearchWindow from '@/components/DocSearchWindow.vue'
 import FormSearchWindow from '@/components/FormSearchWindow.vue'
-import PdfPreview from '@/components/PdfPreview.vue'
 import WordPreview from '@/components/WordPreview.vue'
+import EipReviewWindow from '@/components/EipReviewWindow.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
 import { loadPersonnel, initDoc, saveDraftAll, loadDraftAll, loadSnapshotDraftAll } from '@/api/docsApi'
 const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
@@ -275,15 +295,28 @@ const isSubmittedDoc = computed(() => mode.value === 'submitted')
 const rmsId = computed(() => route.query.rms_id || '')
 
 // ⭐ 判斷是不是變版模式
-const isRevisionDoc = computed(() => route.query.mode === 'revision')
+const isRevisionDoc = computed(() => form.documentVersion > 1);
+// const isRevisionDoc = computed(() => route.query.mode === 'revision')
 
 // --- ensure we have a server-side token row ---
+// 當組件被 keep-alive 喚醒時觸發
+onActivated(() => {
+  // 如果當前 URL 沒有 token，但我們手上有草稿 token (代表是點側邊欄切回來的)
+  if (!route.query.token && draftToken.value) {
+    // 把 token 補回 URL，這樣看起來才像是在編輯同一份文件
+    setToken(draftToken.value, { updateUrl: true })
+  }
+})
+
 const ensureDraftToken = async () => {
-  if (draftToken.value) return draftToken.value
+  if (draftToken.value) {
+    if (!route.query.token) setToken(draftToken.value, { updateUrl: true });
+    return draftToken.value;
+  }
   try {
     const res = await initDoc(0)
     if (res?.success && res.token) {
-      setToken(res.token, { updateUrl: false })
+      setToken(res.token, { updateUrl: true })
       return res.token
     }
     throw new Error(res?.message || 'init failed')
@@ -399,35 +432,34 @@ const goToStep = scrollToStep;
 // ---------- step 驗證狀態（只先做 Step1, Step2） ----------
 const isStep1Valid = computed(() => {
   // 版本：可能是 number 或 string，統一轉成 float
-  const versionNum = parseFloat(String(form.documentVersion ?? '0'))
+  const versionNum = parseFloat(String(form.documentVersion ?? '0'));
 
   // Left block 必填欄位
   const leftFields = [
     form.documentName,
     form.documentVersion,
     form.attribute.applyProject,
+    form.attribute.inputMachines,
     form.department,
     form.author,
     form.confirmer,
     form.approver,
-  ]
+  ];
 
   // 槽：選了機台才算有填
-  const hasMachines =
-    (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0) ||
-    (String(inputMachines.value ?? '').trim().length > 0)
+  const hasMachines = (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0);
 
   // 先檢查左邊欄位 & 機台
-  if (!hasMachines) return false
-  if (leftFields.some(v => !String(v ?? '').trim())) return false
+  if (!hasMachines) return false;
+  if (leftFields.some(v => !String(v ?? '').trim())) return false;
 
   // 版本 > 1.0 時，右側「變更理由」「變更要點」也變成必填
   if (versionNum > 1.0) {
-    if (!String(form.reviseReason ?? '').trim()) return false
-    if (!String(form.revisePoint ?? '').trim()) return false
+    if (!String(form.reviseReason ?? '').trim()) return false;
+    if (!String(form.revisePoint ?? '').trim()) return false;
   }
 
-  return true
+  return true;
 })
 const isStep2Valid = computed(() => {
   return String(form.documentPurpose ?? '').trim().length > 0
@@ -627,17 +659,138 @@ const stepStatusClass = (index) => {
   steps[index].status = true
   return 'step-ok'
 }
+/* 檢查單一層級 (Tier) 是否有效 */
+const isDynamicBlockValid = (block) => {
+  if (!block || !Array.isArray(block.data)) return false;
+
+  // 檢查該層級內的每一個欄位 (item)
+  return block.data.every(item => {
+    // Option 0: 文字編輯器
+    if (item.option === 0) {
+      const json = item.jsonContent;
+      // 檢查是否為空：沒有內容 OR 只有一個空段落
+      if (!json || !json.content) return false;
+      if (json.content.length === 1 && json.content[0].type === 'paragraph' && !json.content[0].content) return false;
+      return true;
+    }
+    // Option 1: 表格 (檢查是否有內容)
+    if (item.option === 1) {
+      // 只要有 table node 就算有內容 (空表格通常也會有結構)
+      return item.jsonContent && item.jsonContent.content && item.jsonContent.content.length > 0;
+    }
+    // Option 2: 圖片 (檢查是否有檔案)
+    if (item.option === 2) {
+      return Array.isArray(item.files) && item.files.length > 0;
+    }
+    return true;
+  });
+};
+const collectValidationErrors = () => {
+  const errors = [];
+
+  // --- Step 1: 基本屬性 ---
+  const ver = parseFloat(String(form.documentVersion ?? '0'));
+  if (!form.documentName) errors.push('【基本屬性】文件名稱未填寫');
+  if (!form.attribute.applyProject) errors.push('【基本屬性】適用工程未選擇');
+  if (!form.attribute.machines.length) errors.push('【基本屬性】適用機台未選擇');
+  if (!form.department) errors.push('【基本屬性】制訂單位未填寫');
+  if (!form.author) errors.push('【基本屬性】制訂者未填寫');
+  if (!form.confirmer) errors.push('【基本屬性】確認者未填寫');
+  if (!form.approver) errors.push('【基本屬性】承認者未填寫');
+  
+  if (ver > 1.0) {
+    if (!form.reviseReason) errors.push('【基本屬性】變更理由未填寫 (變版必填)');
+    if (!form.revisePoint) errors.push('【基本屬性】變更要點未填寫 (變版必填)');
+  }
+
+  // --- Step 2: 目的 ---
+  if (!form.documentPurpose?.trim()) errors.push('【1. 目的】內容未填寫');
+
+  // --- Step 3: 製造流程 ---
+  // 檢查 processFlowData
+  const pf = processFlowData.value;
+  let hasFlow = false;
+  if (pf.mode === 'image' && pf.file) hasFlow = true;
+  else if (pf.mode === 'table') {
+    // 簡單檢查: items 內是否有文字 (假設 items 是 TipTap doc 或 array)
+    // 這裡簡單沿用 isStep3Valid 的邏輯概念
+    try { hasNonEmptyFlowCell(pf.items) } catch { hasFlow = true }
+  }
+  if (!hasFlow) errors.push('【2. 製造流程】流程內容為空');
+
+  // --- Step 4: 管理條件 (原: 3. 管理條件) ---
+  const hasPmsS3 = hasPmsForStep3.value;
+  const dynBlocksS4 = managementBlocks.value; // 自訂區塊
+
+  // 1. 檢查 PMS (如果有的話)
+  if (hasPmsS3) {
+    if (!isPmsTableValid()) errors.push('【3. 管理條件】PMS 表格數值未填寫完整');
+  }
+
+  // 2. 檢查自訂區塊 (迴圈列出層級) [★ 修改處]
+  if (dynBlocksS4.length > 0) {
+    dynBlocksS4.forEach((blk, idx) => {
+      if (!isDynamicBlockValid(blk)) {
+        errors.push(`【3. 管理條件 - 層級 ${idx + 2}】內容未填寫完整`);
+      }
+    });
+  }
+
+  // --- Step 5: 製造條件參數 (MCR) ---
+  const hasCond = hasCondForMcr.value;
+  const hasPmsMcr = hasPmsForMcr.value;
+  
+  if (hasCond || hasPmsMcr) {
+    if (mcrBlocks.value.length === 0) {
+      errors.push('【4. 製造條件參數】至少需新增一個參數模塊');
+    } else {
+      mcrBlocks.value.forEach((blk, idx) => {
+        const prefix = `【4. 製造條件參數 - 層級 ${idx + 1}】`;
+        
+        // 檢查製程配號
+        const hasLinks = blk.data?.metadata?.programs?.length > 0 || blk.programLinks?.length > 0;
+        if (!hasLinks) errors.push(`${prefix} 未選擇製程`);
+
+        // 檢查條件表
+        if (hasCond && !isConditionTableValidForBlock(blk)) {
+          errors.push(`${prefix} 條件表格有未填寫的欄位`);
+        }
+        // 檢查 PMS 表
+        if (hasPmsMcr && !isParamTableValidForBlock(blk)) {
+          errors.push(`${prefix} PMS 參數表格數值未填寫完整或格式錯誤`);
+        }
+      });
+      
+      // 檢查重複
+      if (hasCond && hasConditionDuplicates(mcrBlocks.value)) errors.push('【4. 製造條件參數】存在重複的條件組合');
+      if (hasPmsMcr && hasParamTableDuplicates(mcrBlocks.value)) errors.push('【4. 製造條件參數】存在重複的參數設定');
+    }
+  }
+
+  // --- Step 6: 異常處置 (原: 5. 異常處置) ---
+  const dynBlocksS6 = exceptionBlocks.value;
+
+  // 檢查自訂區塊 (迴圈列出層級) [★ 修改處]
+  if (dynBlocksS6.length > 0) {
+    dynBlocksS6.forEach((blk, idx) => {
+      if (!isDynamicBlockValid(blk)) {
+        errors.push(`【5. 異常處置 - 層級 ${idx + 1}】內容未填寫完整`);
+      }
+    });
+  }
+
+  return errors;
+}
 
 // ---------- basic form ----------
 let itemID = 0
 const projectList = ref([]);
-const inputMachines = ref('');
 const form = reactive({
   documentType: 0,
   documentID: '',
   documentName: '',
   documentVersion: 1.0,
-  attribute: { applyProject: '', machines: [] },
+  attribute: { applyProject: '', machines: [], specifications: [], inputMachines: '', scopeUnits: "" },
   department: '',
   author_id: '',
   author: '',
@@ -654,86 +807,128 @@ const form = reactive({
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
 function applyProjectChange() {
-  form.attribute.machines = []
-  inputMachines.value = ""
-  processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null }
+  form.attribute.machines = [];
+  form.attribute.inputMachines = "";
+  processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null };
   flowVersion.value++;
 
-  managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } }
-  hasPmsForStep3.value = false
-  hasPmsForMcr.value  = false
-  hasCondForMcr.value = false
-  paramTemplate.value = null
-  condTemplate.value  = null
-  mcrBlocks.value     = []
+  managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } };
+  hasPmsForStep3.value = false;
+  hasPmsForMcr.value  = false;
+  hasCondForMcr.value = false;
+  paramTemplate.value = null;
+  condTemplate.value  = null;
+  mcrBlocks.value     = [];
 }
-const getProject = val => { if (val) form.attribute.applyProject = val }
-const groupSummary = ref({})  // groupCode -> { code, name, total }
+const getProject = val => { if (val) form.attribute.applyProject = val };
+const groupSummary = ref({});  // groupCode -> { code, name, total }
 const getMachines = async (payload) => {
   const machines = payload?.selected || [];
   groupSummary.value = payload?.groupsSummary || {};
 
-  form.attribute.machines = machines;
+  // form.attribute.machines = machines;
+  form.attribute.machines = machines.map(machine => machine.code);
+  let specifications = {};
+  machines.forEach(machine => { machine.specifications.forEach(specification => specifications[specification.code] = specification.name); });
+  form.attribute.specifications = Object.entries(specifications).map(([code, name]) => { return { code, name } });
+  form.attribute.inputMachines = machines.map(m => m.name).join(', ');
+  machines_tag.value = [...processMachineTag(form.attribute.machines, form.attribute.inputMachines)];
 
-  // 顯示在 input 內的機台名稱
-  inputMachines.value = machines.map(m => m.name).join(', ');
-
-  // 取得「新的第一台機台代碼」
-  let newFirstCode = '';
-  if (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0) {
-    const m0 = form.attribute.machines[0];
-    newFirstCode = m0.machineCode || m0.MACHINE_CODE || m0.code || '';
-  }
-
-  // ⚠️ 這裡是關鍵：
-  // 若「機台真的有變」（包括從空 -> 有機台），重置 Step3 的流程資料
-  if (newFirstCode !== lastMachineCodeForProcessFlow.value) {
-    // 重置流程資料成「完全空」，讓 ProcessFlowBlock 重新掛載時判定為「新狀態」→ 自動用 PMS 帶入
-    processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null }
-
-    // 記住目前流程綁的這台機台
-    lastMachineCodeForProcessFlow.value = newFirstCode
-
-    // ⭐ 通知流程區塊重新吃「空資料（或 PMS）」：子元件會自己判斷是否要載 PMS
-    flowVersion.value++
-  } else {
-    console.log('[Step3] machine unchanged, keep existing processFlowData')
-  }
+  // Process flow data update
+  processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null };
+  flowVersion.value++;
 
   // ---------- 以下維持你原本 Step4 / Step5 的 PMS / MCR ----------
-  if (Array.isArray(machines) && machines.length > 0) {
-    const code = machines[0].code
-
-    // 先處理 Step4 的 PMS
-    await loadPmsTemplate(code)
-
-    // 再處理 Step5 的 template & flag
-    await loadMcrTemplates(code)
+  if (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0) {
+    await loadPmsTemplate(form.attribute.machines[0]);  // Get management specification PMS
+    await loadMcrTemplates(form.attribute.machines[0]);  // Get manufacturing PMS
+    form.attribute.scopeUnits = await loadScopeUnits(form.attribute.machines);
 
     // 最後清空 mcrBlocks 讓子元件重建 Editor
-    mcrBlocks.value = []
+    mcrBlocks.value = [];
   } else {
     // 沒選機台 → 完全清空
-    managementSpecific.value = {
-      ...managementSpecific.value,
-      data: { jsonContent: null, arrayData: [] }
-    }
+    managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } };
+    await nextTick();  // Waiting props update to child component
+    ManagementSpecificBlockComponent.value.initOrReloadFromProps();
 
-    hasPmsForMcr.value  = false
-    hasCondForMcr.value = false
-    paramTemplate.value = null
-    condTemplate.value  = null
-    mcrBlocks.value     = []
+    hasPmsForMcr.value  = false;
+    hasCondForMcr.value = false;
+    paramTemplate.value = null;
+    condTemplate.value  = null;
+    mcrBlocks.value     = [];
   }
   // ★ 根據所選機台自動更新文件名稱
-  updateDocumentNameByMachines()
+  updateDocumentNameByMachines(machines || []);
 }
-const baseMachineCode = computed(() => {
-  const ms = form.attribute.machines || []
-  if (!ms.length) return ''
-  const m0 = ms[0]
-  return m0.machineCode || m0.MACHINE_CODE || m0.code || ''
-})
+
+const machines_tag = ref([]);
+const processMachineTag = (machines_id, machines_name, invalidIds = new Set()) => {
+  if (!machines_id || machines_id.length == 0) return [];
+  const names = machines_name.split(", ");
+  
+  return machines_id.map((id, index) => {
+    const isInvalid = invalidIds.has(id);
+    return { id, name: names[index] || id, isValid: !isInvalid}; 
+  });
+}
+// 驗證機台一致性
+const validateMachinesConsistency = async (machineCodes) => {
+  if (!machineCodes || machineCodes.length <= 1) return new Set();
+
+  const baselineCode = machineCodes[0]; // 拿第一台當基準
+  // 為了顯示名稱，我們嘗試從 machines_tag 或 inputMachines 找，找不到就用 code 代替
+  const baselineName = baselineCode;
+
+  try {
+    const API = import.meta.env.VITE_APP_API_BASE_URL;
+    // 呼叫 filter-by-baseline
+    const { data } = await axios.post(`${API}/mes/filter-by-baseline`, {
+      machine_code: baselineCode,
+      machine_name: baselineName, 
+      // 這裡不傳 project/keyword，因為我們只要驗證 "純粹的 PMS/Condition 一致性"
+    });
+
+    const groups = data?.data?.groups || {};
+    
+    // 收集所有符合 baseline 的機台代碼 (Valid Set)
+    const validSet = new Set();
+    Object.values(groups).forEach(group => {
+      if (group.machines) {
+        Object.keys(group.machines).forEach(code => validSet.add(code));
+      }
+    });
+
+    // 找出「在目前清單中」但「不在 validSet」的機台 -> 這些就是變更過或不相容的
+    const invalidIds = new Set();
+    machineCodes.forEach(code => {
+      if (!validSet.has(code)) {
+        invalidIds.add(code);
+      }
+    });
+
+    return invalidIds;
+
+  } catch (e) {
+    console.error("Machine consistency check failed:", e);
+    return new Set(); // 失敗時保守起見不報錯，或可選擇全部標紅
+  }
+}
+const removeMachineTag = (id) => {
+  machines_tag.value = machines_tag.value.filter(tag => tag.id != id);
+  form.attribute.machines = form.attribute.machines.filter(machine_id => machine_id != id);
+  form.attribute.inputMachines = machines_tag.value.map(tag => tag.name).join(', ');
+}
+
+const loadScopeUnits = async(machines) => {
+  try {
+    const API = import.meta.env.VITE_APP_API_BASE_URL;
+    const { data } = await axios.post(`${API}/mes/get-scope-units`, { machines });
+    return data.data.data.join(',');
+  } catch (e) {
+    console.error('loadPmsTemplate error:', e);
+  }
+}
 
 // --------- 機台命名工具 ---------
 // 棟別前綴：K#4F -> K#，A#1F -> A#
@@ -896,8 +1091,7 @@ function buildGroupMachineName(groupName, machines, groupTotal) {
 
   return allSegments.join('、')
 }
-function updateDocumentNameByMachines() {
-  const machines = form.attribute.machines || []
+function updateDocumentNameByMachines(machines) {
   if (!machines.length) return
 
   // 1) buildings set
@@ -1091,7 +1285,7 @@ function loadProcessFlowFromBlocks(resp) {
 
 // ---------- 管理條件 (step 4) ----------
 const ManagementSpecificBlockComponent = ref(null);
-const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonContent: null, arrayData: []}})
+const managementSpecific = ref({id: 0, step: 3, tier: 1, data: {jsonHeader: null, jsonContent: null, arrayData: []}})
 const hasPmsForStep3  = ref(false)   // Step 3 生產基本條件 PMS
 
 // 載入第一台機台的 PMS 模板
@@ -1103,25 +1297,17 @@ const loadPmsTemplate = async (machineCode) => {
 
   try {
     const API = import.meta.env.VITE_APP_API_BASE_URL
-    const { data } = await axios.get(`${API}/mes/pms/machine-parameters`, {
-      params: { machine_id: machineCode },
-    })
+    const { data } = await axios.get(`${API}/mes/pms/machine-parameters`, { params: { machine_id: machineCode } })
     
-    hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false
-    
-    const tableRows = data?.data?.table_rows || []
-
-    managementSpecific.value = {
-      ...managementSpecific.value,
-      data: {
-        ...managementSpecific.value.data,
-        arrayData: tableRows,     // 2D 陣列丟給子元件
-        jsonContent: null,        // 讓子元件用 arrayData 產生 TipTap 內容
-      },
-    }
+    hasPmsForStep3.value = (data.data.table_rows.length > 0) ? true : false;
+    const tableRows = data?.data?.table_rows || [];
+    managementSpecific.value = { ...managementSpecific.value, data: { ...managementSpecific.value.data, arrayData: tableRows, jsonContent: null } };
   } catch (e) {
     console.error('loadPmsTemplate error:', e)
   }
+  
+  await nextTick();  // Waiting props update to child component
+  ManagementSpecificBlockComponent.value.initOrReloadFromProps();
 }
 
 // handler for ManagementSpecificBlock
@@ -1135,11 +1321,12 @@ const managementBlocks = ref([])
 const addManagementLayer = () => {
   managementBlocks.value.push({
     id: ++itemID, step: 3, tier: managementBlocks.value.length + 2,
-    data: [{ content_id: null, client_temp_id: `tmp-${itemID}`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
+    data: [{ option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeManagementLayer = id => {
-  managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 1}));
+  console.log("managementBlocks: ", managementBlocks.value);
+  managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 2}));
 }
 const updateManagementBlockData = payload => {
   const idx = managementBlocks.value.findIndex(b => b.id === payload.id)
@@ -1151,13 +1338,14 @@ const serializeManagementToBlocks = () => {
   const out = []
 
   // 3.1 specific — treat as tier 1 with a single table (option=2)
+  if (ManagementSpecificBlockComponent.value) ManagementSpecificBlockComponent.value.exportTableData();
   if (managementSpecific.value?.data?.jsonContent) {
     out.push({
       step_type: 1,
       tier: managementSpecific.value.tier || 1,
       data: [{
         option: 2,
-        jsonHeader: null,
+        jsonHeader: managementSpecific.value.data.jsonHeader,
         jsonContent: managementSpecific.value.data.jsonContent,
         files: []
       }]
@@ -1195,8 +1383,6 @@ const loadManagementFromBlocks = async (payload) => {
         step: 3,
         tier: blk.tier,
         data: (blk.data || []).map(it => ({
-          content_id: null,
-          client_temp_id: null,
           option: it.option ?? 0,
           jsonHeader: it.jsonHeader || null,
           jsonContent: it.jsonContent || null,
@@ -1206,8 +1392,20 @@ const loadManagementFromBlocks = async (payload) => {
     }
   })
   
+  console.log("managementBlocks: ", managementBlocks.value);
   await nextTick();  // Waiting props update to child component
   ManagementSpecificBlockComponent.value.initOrReloadFromProps();
+  const {jsonHeader, arrayData, jsonContent, pmsData} = ManagementSpecificBlockComponent.value.exportTableData();
+  ManagementSpecificBlockComponent.value.syncPmsWithBackend();
+  // try{
+  //   const API = import.meta.env.VITE_APP_API_BASE_URL;
+  //   console.log("payload: ", { machine_id: form.attribute.machines[0], pmsData });
+  //   const { data } = await axios.post(`${API}/mes/pms/pms-match`, { machine_id: form.attribute.machines[0], pmsData });
+  //   console.log("load management from blocks pms match: ", data);
+  // }
+  // catch (e) {
+  //  console.log(e); 
+  // }
 }
 
 // ---------- Step4 驗證用 helper ----------
@@ -1233,6 +1431,10 @@ function extractPlainTextFromDocJson(doc) {
  *  - 沒有 PMS（hasPmsForStep3 = false 或 arrayData 太少）→ 回傳 null（代表「不適用」）
  *  - 有 PMS：每列第 3~7 欄都要「非空 & 數字」才算 valid
  */
+const getText = cellNode => {
+  const paragraphs = cellNode.content || [];
+  return paragraphs.map(pNode => { return (pNode.content || []).map(textNode => textNode.text || '').join('') }).join('\n');
+}
 function isPmsTableValid() {
   // 這台機本來就沒有 PMS → 不適用
   if (!hasPmsForStep3.value) return null
@@ -1244,9 +1446,7 @@ function isPmsTableValid() {
   }
 
   // 找第一個 table
-  const tables = Array.isArray(doc.content)
-    ? doc.content.filter(n => n.type === 'table')
-    : []
+  const tables = Array.isArray(doc.content) ? doc.content.filter(n => n.type === 'table') : []
   if (!tables.length) {
     // 有 PMS 設定但內容不是 table → 視為沒填完
     return false
@@ -1260,24 +1460,25 @@ function isPmsTableValid() {
     return false
   }
 
-  // 從第 2 列（index 1）開始檢查
   for (let r = 1; r < rows.length; r++) {
-    const rowNode = rows[r]
-    const cells = Array.isArray(rowNode.content) ? rowNode.content : []
+    const rowNode = rows[r];
+    const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
 
-    // 欄位 index 對應： 0 "項次", 1 "槽體", 2 "管理項目", 3 "規格下限(OOS-)", 4 "操作下限(OOC-)," 5 "設定值", 6 "操作上限(OOC+)", 7 "規格上限(OOS+)", 8 "單位"
-    for (let c = 3; c <= 7; c++) {
-      const cellNode = cells[c]
-      if (!cellNode) return false
+    // 欄位 index 對應： 0 "按鈕", 1 "項次", 2 "槽體", 3 "管理項目", 4 "規格下限(OOS-)", 5 "操作下限(OOC-)," 6 "設定值", 7 "操作上限(OOC+)", 8 "規格上限(OOS+)"
+    const cellStatus = cells.slice(4, 9).map(cell => {
+      const text = getText(cell);
+      let status = 'empty';
+      let val = Number(text);
+      if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+      return status;
+    });
 
-      const raw = extractPlainTextFromNode(cellNode).trim()
-      if (!raw) return false                     // 空白 → 未填完
-      const num = Number(raw)
-      if (!Number.isFinite(num)) return false   // 不是數字 → 無效
-    }
+    if (cellStatus.some(status => status == 'invalid')) return false;
+    if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+    if (cellStatus.every(status => status == 'empty')) return false;
   }
 
-  return true
+  return true;
 }
 
 /** Step4-2: 單一 DynamicEditorBlock 的某一 item 是否有效 */
@@ -1408,26 +1609,6 @@ const loadMcrTemplates = async (machineCode) => {
     condTemplate.value = null
   }
 }
-const specOptionsForMcr = computed(() => {
-  const machines = form.attribute?.machines || []
-  const map = new Map()  // code -> name
-
-  machines.forEach(m => {
-    const specs = Array.isArray(m.specifications) ? m.specifications : []
-    specs.forEach(spec => {
-      if (!spec || !spec.code) return
-      const code = spec.code
-      const name = spec.name || spec.code
-      if (!map.has(code)) {
-        map.set(code, name)
-      }
-    })
-  })
-
-  // 給子元件用：[{ code, name }]
-  return Array.from(map, ([code, name]) => ({ code, name }))
-})
-
 // ---------- Step5 驗證用 helper ----------
 // 保險轉成 2D array
 function normalize2DArray(arr) {
@@ -1486,37 +1667,48 @@ function hasConditionDuplicates(blocksArr) {
 function isParamTableValidForBlock(block) {
   if (!hasPmsForMcr.value) return null
 
-  const rows = normalize2DArray(block?.data?.arrayParameterData)
-  if (!rows.length) return false
-
-  const rowCount = rows.length
-  const colCount = rows[0].length || 0
-
-  // 至少 header + 1 列，且要有到第 6 欄 (index 6)
-  if (rowCount <= 1 || colCount <= 6) return false
-
-  for (let r = 1; r < rowCount; r++) {
-    const row = rows[r] || []
-    const values = []
-
-    // 參考 runParamValueValidation：檢查第 2~6 欄
-    for (let c = 2; c <= 6; c++) {
-      const raw = (row[c] ?? '').toString().trim()
-      if (!raw) return false
-      const num = Number(raw)
-      if (!Number.isFinite(num)) return false
-      values.push(num)
-    }
-
-    // 檢查單調性：前者 > 後者 就當 error
-    for (let i = 1; i < values.length; i++) {
-      if (values[i - 1] > values[i]) {
-        return false
-      }
-    }
+  const doc = block?.data?.jsonParameterContent;
+  if (!doc || typeof doc !== 'object') {
+    // 有 PMS 的機台，但還沒打開/編輯過管理條件 → 視為沒填
+    return false
   }
 
-  return true
+  // 找第一個 table
+  const tables = Array.isArray(doc.content) ? doc.content.filter(n => n.type === 'table') : []
+  if (!tables.length) {
+    // 有 PMS 設定但內容不是 table → 視為沒填完
+    return false
+  }
+
+  const tableNode = tables[0]
+  const rows = Array.isArray(tableNode.content) ? tableNode.content : []
+
+  // 至少要有表頭 + 1 列
+  if (rows.length <= 1) {
+    return false
+  }
+
+  for (let r = 1; r < rows.length; r++) {
+    const rowNode = rows[r];
+    const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
+    console.log("cells: ", cells);
+
+    // 欄位 index 對應： 0 "按鈕", 1 "項次", 2 "槽體", 3 "管理項目", 4 "規格下限(OOS-)", 5 "操作下限(OOC-)," 6 "設定值", 7 "操作上限(OOC+)", 8 "規格上限(OOS+)"
+    const cellStatus = cells.slice(2, 7).map(cell => {
+      const text = getText(cell);
+      let status = 'empty';
+      let val = Number(text);
+      if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+      return status;
+    });
+
+    // console.log(`row: ${r}, cellStatus: ${cellStatus}`);
+    if (cellStatus.some(status => status == 'invalid')) return false;
+    if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+    if (cellStatus.every(status => status == 'empty')) return false;
+  }
+
+  return true;
 }
 function hasParamTableDuplicates(blocksArr) {
   const sigs = []
@@ -1601,7 +1793,7 @@ const exceptionBlocks = ref([])
 const addExceptionLayer = () => {
   exceptionBlocks.value.push({
     id: ++itemID, step: 5, tier: exceptionBlocks.value.length + 1,
-    data: [{ content_id: null, client_temp_id: `"tmp-${itemID}"`, option: 0, jsonHeader: null, jsonContent: null, files: [] }],
+    data: [{ option: 0, jsonHeader: null, jsonContent: null, files: [] }],
   })
 }
 const removeExceptionLayer = id => {
@@ -1632,8 +1824,6 @@ const loadExceptionsFromBlocks = (payload) => {
     step: 5,
     tier: blk.tier,
     data: (blk.data || []).map(it => ({
-      content_id: null,
-      client_temp_id: null,
       option: it.option ?? 0,
       jsonHeader: it.jsonHeader || null,
       jsonContent: it.jsonContent || null,
@@ -1643,10 +1833,10 @@ const loadExceptionsFromBlocks = (payload) => {
 }
 
 // ---------- 相關文件 (step 7) ----------
-const docWindowVisible = ref(false)
-const relativeDocuments = ref([])
-const addRelativeDocument = ({ docId, docName }) => {
-  relativeDocuments.value.push({ id: itemID++, docId, docName });
+const docWindowVisible = ref(false);
+const relativeDocuments = ref([]);
+const addRelativeDocument = ({ formId, formName }) => {
+  relativeDocuments.value.push({ id: itemID++, docId: formId, docName: formName });
   docWindowVisible.value = false;
 }
 const relativeDocumentRemove = id => {
@@ -1654,8 +1844,8 @@ const relativeDocumentRemove = id => {
 }
 
 // ---------- 使用表單 (step 8) ----------
-const formWindowVisible = ref(false)
-const usedForms = ref([])
+const formWindowVisible = ref(false);
+const usedForms = ref([]);
 const addUsedForm = ({ formId, formName }) => {
   usedForms.value.push({ id: itemID++, formId, formName });
   formWindowVisible.value = false;
@@ -1665,43 +1855,43 @@ const formRemove = id => {
 }
 
 // ---------- 文件產出 (step 9) — skipped per your request ----------
-const loading  = ref(false)
-const errorMsg = ref('')
-// const captureId = ref('')
+const loading  = ref(false);
+const errorMsg = ref('');
+// const captureId = ref('');
 
 // ✅ DOCX 預覽相關
-const docxSrc = ref(null)          // blob URL
-const previewLoading = ref(false)
-let lastDocxUrl = null
+const docxSrc = ref(null);
+const previewLoading = ref(false);
+let lastDocxUrl = null;
 
 watch(currentStep, (val) => {
   if (val === 9) {
-    fetchPreviewDocx()
+    fetchPreviewDocx();
   }
 })
 watch(
   () => form.attribute.applyProject,
   async (newVal, oldVal) => {
-    if (!oldVal || newVal === oldVal) return
-    if (!form.documentID) return  // 沒文管編號就不用清
+    if (!oldVal || newVal === oldVal) return;
+    if (!form.documentID) return;
 
-    const ok = window.confirm('已存在文管編號，變更適用工程會清除現有文管編號，是否繼續？')
+    const ok = window.confirm('已存在文管編號，變更適用工程會清除現有文管編號，是否繼續？');
     if (!ok) {
       // 還原選擇
-      form.attribute.applyProject = oldVal
-      return
+      form.attribute.applyProject = oldVal;
+      return;
     }
 
     // 1) 清前端欄位
-    form.documentID = ''
+    form.documentID = '';
 
     // 2) 通知後端清空 document_id
-    const t = await ensureDraftToken()
+    const t = await ensureDraftToken();
     if (t) {
       try {
-        await clearDocId(t)
+        await clearDocId(t);
       } catch (e) {
-        console.error('clearDocId failed', e)
+        console.error('clearDocId failed', e);
       }
     }
   }
@@ -1765,57 +1955,14 @@ async function fetchPreviewDocx() {
     previewLoading.value = false
   }
 }
-function extractErrorMessage(e, fallback = '文件產出失敗，請稍後再試') {
-  console.error('generate word error:', e)
-
-  let msg = fallback
-
-  const resp = e?.response
-  if (resp) {
-    const ct = (resp.headers?.['content-type'] || '').toLowerCase()
-
-    // axios 設了 responseType: 'blob'，後端 JSON 會被包成 Blob
-    if (resp.data instanceof Blob) {
-      // 這裡不能用 sync，要在呼叫端 await
-      return resp.data.text().then((text) => {
-        let parsedMsg = text || fallback
-
-        // 嘗試當 JSON parse，再抓 message
-        try {
-          const obj = JSON.parse(text)
-          if (obj && typeof obj === 'object' && obj.message) {
-            parsedMsg = String(obj.message)
-          }
-        } catch {
-          // 不是 JSON 就維持原本 text
-        }
-
-        // 如果含有 ORA-01031，替換成比較友善的說明
-        if (parsedMsg.includes('ORA-01031')) {
-          parsedMsg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
-        }
-
-        // 把 \n 換成真正換行（如果你之後改成 <pre> 或 white-space: pre-wrap 會生效）
-        return parsedMsg.replace(/\\n/g, '\n')
-      })
-    }
-
-    // 如果不是 Blob（例如後端沒包成 Blob）
-    if (resp.data && typeof resp.data === 'object' && 'message' in resp.data) {
-      msg = String(resp.data.message)
-    }
-  }
-
-  return Promise.resolve(msg)
-}
 async function generateAndDownloadDocx() {
   if (steps.some(step => !step.status)) {
-    alert('請把內容完成才可下載')
-    return
+    alert('請把內容完成才可下載');
+    return;
   }
 
-  loading.value = true
-  errorMsg.value = ''
+  loading.value = true;
+  errorMsg.value = '';
   try {
     const payload = {
       token: draftToken.value,
@@ -1843,66 +1990,108 @@ async function generateAndDownloadDocx() {
     const success = await saveDraft();
     if (success == false) return;
 
-    const url = `${API_BASE_URL}/docs/generate/word`
-    const res = await axios.post(url, payload, { responseType: 'blob' })
-    const docIdFromHeader = res.headers['x-document-id']
-    if (docIdFromHeader) {
-      form.documentID = docIdFromHeader
-    }
+    const url = `${API_BASE_URL}/docs/generate/word`;
+    const res = await axios.post(url, payload, { responseType: 'blob' });
+    const docIdFromHeader = res.headers['x-document-id'];
+    if (docIdFromHeader) form.documentID = docIdFromHeader;
 
-    const blob = new Blob([res.data], {
-      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    })
-    const urlBlob = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = urlBlob
+    const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const urlBlob = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = urlBlob;
 
-    const versionStr = Number(form.documentVersion ?? 1).toFixed(1)
-    a.download = `${form.documentName || 'document'}${versionStr}.docx`
+    const versionStr = Number(form.documentVersion ?? 1).toFixed(1);
+    a.download = `${form.documentName || 'document'}${versionStr}.docx`;
 
     a.click()
-    URL.revokeObjectURL(urlBlob)
+    URL.revokeObjectURL(urlBlob);
   } catch (e) {
-    console.error(e)
+    console.error(e);
 
     if (e?.response?.data instanceof Blob) {
       try {
-        const text = await e.response.data.text()
-        let msg = text || e.message || '文件產出失敗，請稍後再試'
+        const text = await e.response.data.text();
+        let msg = text || e.message || '文件產出失敗，請稍後再試';
 
         // 嘗試 parse JSON 抓 message
         try {
-          const obj = JSON.parse(text)
-          if (obj && typeof obj === 'object' && obj.message) {
-            msg = String(obj.message)
-          }
-        } catch {
-          // 不是 JSON 就維持原樣
-        }
+          const obj = JSON.parse(text);
+          if (obj && typeof obj === 'object' && obj.message) msg = String(obj.message);
+        } catch { }
 
-        if (msg.includes('ORA-01031')) {
-          msg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
-        }
-
-        errorMsg.value = msg.replace(/\\n/g, '\n')
+        errorMsg.value = msg.replace(/\\n/g, '\n');
       } catch {
-        errorMsg.value = e?.message || '文件產出失敗，請稍後再試'
+        errorMsg.value = e?.message || '文件產出失敗，請稍後再試';
       }
     } else {
-      const msg = e?.response?.data?.message || e?.message || '文件產出失敗，請稍後再試'
+      const msg = e?.response?.data?.message || e?.message || '文件產出失敗，請稍後再試';
       errorMsg.value = msg;
     }
   } finally {
-    loading.value = false
+    loading.value = false;
+  }
+}
+const eipWindowVisible = ref(false)
+// 用於開啟 EIP 視窗的函式
+const openEipWindow = () => {
+  // 1. 執行詳細檢查
+  const errors = collectValidationErrors();
+
+  // 2. 如果有錯誤，顯示 Alert 並中止
+  if (errors.length > 0) {
+    alert("檢測到以下內容未完成，無法進行轉拋：\n\n" + errors.join('\n'));
+    return;
+  }
+
+  // 3. 檢查通過，開啟 EIP 視窗
+  eipWindowVisible.value = true;
+}
+
+// 處理 EIP 確認 (目前先做空殼，之後接 API)
+const handleEipConfirm = async () => {
+  if(!confirm("確定要轉拋至 EIP 系統嗎？")) return;
+
+  // 模擬 loading
+  loading.value = true;
+  try {
+     // TODO: Call API /docs/transfer-to-eip
+     await new Promise(r => setTimeout(r, 1000)); 
+     alert("轉拋成功！(模擬)");
+     eipWindowVisible.value = false;
+  } catch(e) {
+     alert("轉拋失敗");
+  } finally {
+     loading.value = false;
   }
 }
 
-// ---------- saving ----------
-const isSaving = ref(false)
+// ---------- loading & saving ----------
+const isSaving = ref(false);
 const applyLoadedData = async (snapshot, { isSnapshot }) => {
   // 1) attributes
   if (snapshot.attributes?.success) {
     Object.assign(form, snapshot.attributes.form || {});
+    console.log("load data process machine tag form: ", form);
+    // --- ★ 修改開始：加入驗證邏輯 ---
+    let invalidSet = new Set();
+    
+    // 如果有選機台，且是大於 1 台才需要比對 (或你想連第 1 台都驗證是否符合目前 MES 亦可，但通常 filter-by-baseline 包含自身)
+    if (form.attribute.machines && form.attribute.machines.length > 0) {
+       // 呼叫驗證 API
+       invalidSet = await validateMachinesConsistency(form.attribute.machines);
+       
+       if (invalidSet.size > 0) {
+         // 可以選擇跳 Alert 提醒
+         alert(`警告：檢測到部分機台 (共${invalidSet.size}台) 的 PMS 或條件參數與基準機台(${form.attribute.machines[0]})不一致。\n請檢查紅色標記的機台。`);
+       }
+    }
+
+    // 更新 machines_tag (注意：原本您的 code 是 machines_tag = ...，建議改為 machines_tag.value = ...)
+    machines_tag.value = processMachineTag(
+      form.attribute.machines, 
+      form.attribute.inputMachines, 
+      invalidSet // 傳入不符合的清單
+    );
   }
 
   // 如果是 snapshot，你可以考慮「不覆蓋作者、部門」或標記 read-only
@@ -1913,17 +2102,11 @@ const applyLoadedData = async (snapshot, { isSnapshot }) => {
   // 機台 / personnel etc... 都照你原本邏輯即可
   // 顯示在 input 內的機台名稱
   if (form.attribute.machines && form.attribute.machines.length > 0){
-      inputMachines.value = form.attribute.machines.map(machine => machine.name).join(", ");
-      hasCondForMcr.value = true;
-      hasPmsForMcr.value = true;
-      hasPmsForStep3.value = true;
-      updateDocumentNameByMachines();
-
-      // 先處理 Step4 的 PMS
-      await loadPmsTemplate(form.attribute.machines[0].code);
-
-      // 再處理 Step5 的 template & flag
-      await loadMcrTemplates(form.attribute.machines[0].code);
+    await loadPmsTemplate(form.attribute.machines[0]);
+    await loadMcrTemplates(form.attribute.machines[0]);
+    hasCondForMcr.value = true;
+    hasPmsForMcr.value = true;
+    hasPmsForStep3.value = true;
   }
   else {
     form.attribute.machines = [];
@@ -1944,12 +2127,14 @@ const applyLoadedData = async (snapshot, { isSnapshot }) => {
   // 3) management
   const mgResp = snapshot.blocks?.['1'];
   if (mgResp?.success) {
+    console.log("mgResp: ", mgResp);
     await loadManagementFromBlocks(mgResp);
   }
 
   // 4) MCR params
   const mpResp = snapshot.params?.['2'];
   if (mpResp?.success && (mpResp.blocks || []).length > 0) {
+    console.log("mpResp: ", mpResp);
     loadMCRFromParams(mpResp);
   } else if (!isSnapshot) {
     // 草稿沒有舊資料時才載 template，snapshot 情境就保持原樣
@@ -2090,89 +2275,22 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
+  justify-content: space-between;
   border-bottom: 1px solid #eee;
   transition: all 0.2s ease;
 }
-
-.steps-navigation.collapsed {
-  padding: 6px 12px;
-  transform: translateY(-4px);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-}
-
-.step-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 999px;
-  transition: background 0.15s, transform 0.15s;
-}
-
-.steps-navigation.collapsed .step-item {
-  transform: scale(0.92);
-}
-
-.step-item.active {
-  background: #1f6feb;
-  color: #fff;
-}
-
-/* .step-item.completed {
-  background: #e5f1ff;
-} */
-
-.step-circle {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size: 13px;
-  background: rgba(0,0,0,0.05);
-}
-
-.step-item.active .step-circle {
-  background: rgba(255,255,255,0.2);
-}
-
-.step-label {
-  font-size: 14px;
-}
-
-.steps-navigation.collapsed .step-circle {
-  width: 20px;
-  height: 20px;
-  font-size: 12px;
-}
-
-.steps-navigation.collapsed .step-label {
-  font-size: 13px;
-}
-
-.step-item.step-error {
-  background-color: #ffe5e5;
-  border-color: #e74c3c;
-  color: #000000;
-}
-
-.step-item.step-ok {
-  background-color: #e6f9e8;
-  border-color: #27ae60;
-  color: #000000;
-}
-
-.step-section h2 {
-  font-size: 22px;
-  color: #333;
-  margin-top: 40px;
-  margin-bottom: 20px;
-  padding-bottom: 10px;
-  border-bottom: 2px solid #007bff;
-  display: inline-block;
-}
+.steps-navigation.collapsed { padding: 6px 12px; transform: translateY(-4px); box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+.step-item { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 8px; border-radius: 999px; transition: background 0.15s, transform 0.15s; }
+.steps-navigation.collapsed .step-item { transform: scale(0.92); }
+.step-item.active { background: #1f6feb; color: #fff; }
+.step-circle { width: 24px; height: 24px; border-radius: 999px; display:flex; align-items:center; justify-content:center; font-size: 13px; background: rgba(0,0,0,0.05); }
+.step-item.active .step-circle { background: rgba(255,255,255,0.2); }
+.step-label { font-size: 16px; }
+.steps-navigation.collapsed .step-circle { width: 20px; height: 20px; font-size: 14px; }
+.steps-navigation.collapsed .step-label { font-size: 13px; }
+.step-item.step-error { background-color: #ffe5e5; border-color: #e74c3c; color: #000000; }
+.step-item.step-ok { background-color: #e6f9e8; border-color: #27ae60; color: #000000; }
+.step-section h2 { font-size: 22px; color: #333; margin-top: 40px; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #007bff; display: inline-block; }
 
 .fundamental-attribute-block { display: flex; border: unset; padding: 0px; }
 .fundamental-attribute-block .attribute { display: flex; flex-direction: column; width: 100%; }
@@ -2184,6 +2302,15 @@ onMounted(async () => {
 .form-group textarea { resize: vertical; min-height: 80px; }
 .form-group input[readonly] { background-color: #e9ecef; color: #495057; cursor: not-allowed; }
 .form-group input.input-machine { background: white; cursor: pointer; }
+
+.machine-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.machine-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #eef4ff; border: 1px solid #c3d3ff; font-size: 12px; }
+.tag-name { font-weight: 600; color: #1a3d8f; }
+.tag-remove { border: none; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; color: #888; }
+.tag-remove:hover { color: #c62828; }
+/* 新增樣式：不一致的機台顯示紅色 */
+.machine-tag.invalid { background-color: #ffe5e5; border-color: #ff4d4f; color: #ff4d4f; }
+.machine-tag.invalid .tag-name { color: #d9363e; }
 
 .form-actions { display: flex; justify-content: flex-end; margin-top: 30px; gap: 15px; }
 
@@ -2280,6 +2407,5 @@ onMounted(async () => {
   opacity: 0.6;
   cursor: default;
 }
-
 
 </style>

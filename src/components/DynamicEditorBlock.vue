@@ -1,64 +1,64 @@
 <template>
-    <div class="block-container">
-        <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem.client_temp_id" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
-            <div class="block-header">
-                <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
-                
-                <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
+  <div class="block-container">
+    <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
+      <div class="block-header">
+        <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
+        
+        <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
 
-                <div v-if="allowColor" class="menu color">
-                    <div class="font-color blue" @click="setGenericColor('blue')"></div>
-                    <div class="font-color black" @click="setGenericColor(null)"></div>
-                </div>
-
-                <div :class="`menu content-type-option-${step}-${tier}-${blockIndex}`">
-                    <label><input type="radio" v-model="blockItem.option" :value=0 @change="radioInputChange(blockIndex)">無</label>
-                    <label><input type="radio" v-model="blockItem.option" :value=1 @change="radioInputChange(blockIndex)">文字框 or 圖</label>
-                    <label><input type="radio" v-model="blockItem.option" :value=2 @change="radioInputChange(blockIndex)">表格</label>
-                </div>
-
-                <div class="action-buttons">
-                    <button v-if="blockIndex === 0" @click="addSmallBlock">新增下一層</button>
-                    <button v-else @click="removeSmallBlock(blockIndex)">刪除</button>
-                    <button v-if="blockIndex === 0" @click="emitDelete">刪除</button>
-                </div>
-            </div>
-
-            <div class="editor-body">
-                <div class="menu-bar" v-if="blockItem.option !== 0">
-                    <template v-if="blockItem.option === 2">
-                      <button @click="addRow(blockIndex)" class="menu-btn" title="表格：新增列">新增列</button>
-                      <button @click="addColumn(blockIndex)" class="menu-btn" title="表格：新增行">新增行</button>
-
-                      <button @click="deleteRow(blockIndex)" class="menu-btn" :disabled="!canDeleteRow(blockIndex)" title="表格：刪除列">刪除列</button>
-                      <button @click="deleteColumn(blockIndex)" class="menu-btn" :disabled="!canDeleteColumn(blockIndex)" title="表格：刪除行">刪除行</button>
-
-                      <button @click="mergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：合併儲存格">合併儲存格</button>
-                      <button @click="unmergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：解除合併">取消合併</button>
-
-                      <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
-                      </template>
-
-                    <input type="file" :ref="el => fileInputRefs[blockIndex] = el" @change="handleImageUpload($event, blockIndex)" accept="image/*" style="display: none;">
-                    <button @click="triggerFileInput(blockIndex)" class="menu-btn" title="插入圖片">插入圖片</button>
-                </div>
-                
-                <EditorContent v-if="blockItem.option !== 0" :editor="editors[blockIndex]" class="editor-content" />
-                <div v-if="blockItem.option == 1 && blockItem.files.length > 0" class="files-block">
-                    <ul class="preview-grid">
-                        <li v-for="(fileItem, index) in blockItem.files" :key="index" class="preview-item">
-                            <img :src="imgUrl(fileItem.path_to_save)" alt="圖片預覽" class="preview-thumbnail">
-                            <button @click="removeFile(blockIndex, index)" class="remove-btn">X</button>
-                            <div class="file-info">
-                                <span>{{ fileItem.name }}</span> 
-                                <span>({{ (fileItem.size / 1024 / 1024).toFixed(2) }} MB)</span>
-                            </div>
-                        </li>
-                    </ul>
-                </div>
-            </div>
+        <div v-if="allowColor" class="menu color">
+          <div class="font-color blue" @click="setGenericColor('blue')"></div>
+          <div class="font-color black" @click="setGenericColor(null)"></div>
         </div>
+
+        <div :class="`menu content-type-option-${step}-${tier}-${blockIndex}`">
+          <label><input type="radio" v-model="blockItem.option" :value=0 @change="radioInputChange(blockIndex)">無</label>
+          <label><input type="radio" v-model="blockItem.option" :value=1 @change="radioInputChange(blockIndex)">文字框 or 圖</label>
+          <label><input type="radio" v-model="blockItem.option" :value=2 @change="radioInputChange(blockIndex)">表格</label>
+        </div>
+
+        <div class="action-buttons">
+          <button v-if="blockIndex === 0" @click="emitAddBlock">新增同層</button>
+          <button @click="addSmallBlock">{{ (blockIndex) === 0 ? "新增下一層" : "新增同層" }}</button>
+          <button @click="(blockIndex === 0) ? emitDelete() : removeSmallBlock(blockIndex)">刪除</button> 
+        </div>
+      </div>
+
+      <div class="editor-body">
+        <div class="menu-bar" v-if="blockItem.option !== 0">
+          <template v-if="blockItem.option === 2">
+          <button @click="addRow(blockIndex)" class="menu-btn" title="表格：新增列">新增列</button>
+          <button @click="addColumn(blockIndex)" class="menu-btn" title="表格：新增行">新增行</button>
+
+          <button @click="deleteRow(blockIndex)" class="menu-btn" :disabled="!canDeleteRow(blockIndex)" title="表格：刪除列">刪除列</button>
+          <button @click="deleteColumn(blockIndex)" class="menu-btn" :disabled="!canDeleteColumn(blockIndex)" title="表格：刪除行">刪除行</button>
+
+          <button @click="mergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：合併儲存格">合併儲存格</button>
+          <button @click="unmergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：解除合併">取消合併</button>
+
+          <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
+          </template>
+
+          <input type="file" :ref="el => fileInputRefs[blockIndex] = el" @change="handleImageUpload($event, blockIndex)" accept="image/*" style="display: none;">
+          <button @click="triggerFileInput(blockIndex)" class="menu-btn" title="插入圖片">插入圖片</button>
+        </div>
+        
+        <EditorContent v-if="blockItem.option !== 0" :editor="editors[blockIndex]" class="editor-content" />
+        <div v-if="blockItem.option == 1 && blockItem.files.length > 0" class="files-block">
+          <ul class="preview-grid">
+            <li v-for="(fileItem, index) in blockItem.files" :key="index" class="preview-item">
+              <img :src="imgUrl(fileItem.path_to_save)" alt="圖片預覽" class="preview-thumbnail">
+              <button @click="removeFile(blockIndex, index)" class="remove-btn">X</button>
+              <div class="file-info">
+                <span>{{ fileItem.name }}</span> 
+                <span>({{ (fileItem.size / 1024 / 1024).toFixed(2) }} MB)</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
+  </div>
 </template>
 
 <script setup>
@@ -76,6 +76,8 @@ import { TableCell } from '@tiptap/extension-table-cell'
 import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Image } from '@tiptap/extension-image'
+import { Focus } from '@tiptap/extensions'
+import { CellSelection, selectedRect } from 'prosemirror-tables'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 const STATIC_BASE_URL = import.meta.env.VITE_APP_STATIC_BASE_URL || ''
@@ -85,7 +87,7 @@ const props = defineProps({
   blockEditors: { type: Object, required: true }, // { step, tier, data:[{option, header, jsonContent, files:[]}, ...] }
   allowColor: {type: Boolean, default: true}
 })
-const emit = defineEmits(['update-block', 'delete-block'])
+const emit = defineEmits(['add-block', 'update-block', 'delete-block'])
 
 // ---------- state ----------
 const step = ref(props.blockEditors.step)
@@ -101,7 +103,7 @@ const fileInputRefs = ref([])        // array-style refs per block index
 const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
 const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, Placeholder.configure({ placeholder: '請輸入標題' })]
 const textExt  = [Document, ...baseExt, Placeholder.configure({ placeholder: '請輸入文字內容' }), Image.configure({ inline: true, allowBase64: true })]
-const tableExt = [Document.extend({ content: 'table' }), ...baseExt, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ inline: true, allowBase64: true })]
+const tableExt = [Document.extend({ content: 'table' }), ...baseExt, Focus.configure({ className: 'has-focus', mode: 'all' }),, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ inline: true, allowBase64: true })]
 
 // ---------- helpers ----------
 const deepClone = v => (v == null ? v : JSON.parse(JSON.stringify(v)))
@@ -156,7 +158,6 @@ const canDeleteColumn = idx => {
   }
 }
 
-
 // ---------- editor init / lifecycle ----------
 const initTitleEditor = (idx) => {
   titleEditor[idx]?.destroy()
@@ -173,12 +174,11 @@ const initTitleEditor = (idx) => {
       content = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }] }
     }
   }
-  console.log(content)
 
   const ed = new Editor({
     content: deepClone(content),
     extensions: titleExt,
-    editorProps: { attributes: { class: 'title-editor-content' } },
+    editorProps: { attributes: { class: 'title-editor-content' }, handlePaste: (view, event) => handleTextPaste(view, event) },
     onFocus: ({ editor }) => setActiveEditor(editor), 
     onUpdate: ({ editor }) => { 
       // 綁定 JSON 內容回資料模型
@@ -203,10 +203,28 @@ const initBlockEditor = (idx, option) => {
   const defaultContent = option === 1 ? initialDoc() : initialTableDoc()
   const content = localBlockContents.data[idx].jsonContent || defaultContent
 
+  let specificEditorProps = { attributes: { class: 'editor-content' } };
+
+  if (option === 1) {
+    // --- 文字模式 (Text Mode) ---
+    specificEditorProps = { attributes: { class: 'editor-content' }, handlePaste: (view, event) => handleTextPaste(view, event) }
+  } else if (option === 2) {
+    // --- 表格模式 (Table Mode) ---
+    specificEditorProps = {
+      attributes: { class: 'editor-content' },
+      // 掛載複製事件
+      handleDOMEvents: {
+        copy: (view, event) => handleCopy(view, event),
+        paste: (view, event) => handleTablePaste(view, event),
+        mousedown: (view, event) => handelMousedown(view, event)
+      }
+    }
+  }
+
   const ed = new Editor({
     content: deepClone(content),
     extensions: ext,
-    editorProps: { attributes: { class: 'editor-content' } },
+    editorProps: specificEditorProps,
     onFocus: ({ editor }) => setActiveEditor(editor),
     onUpdate: ({ editor }) => { localBlockContents.data[idx].jsonContent = editor.getJSON() },
   })
@@ -218,11 +236,261 @@ const initBlockEditor = (idx, option) => {
   }
 }
 
-onMounted(() => {
-  localBlockContents.data.forEach(bd => {
-    bd.client_temp_id = `temp-${uuidv1()}`
+const range = (a, b) => Array.from({length: b - a}, (v, i) => i + a);
+const getText = cellNode => {
+  const paragraphs = cellNode.content?.content || [];
+  return paragraphs.map(pNode => { return (pNode.content?.content || []).map(textNode => textNode.text || '').join('') }).join('\n');
+}
+// Parse Excel and Word format
+function parseExcelClipboard(str) {
+  // 移除字串末端多餘的換行
+  str = str.replace(/(\r\n|\n|\r)$/, '');
+
+  const rows = [];
+  let currentRow = [];
+  let currentCell = "";
+  let inQuote = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    const nextChar = str[i+1];
+
+    if (inQuote) {
+      if (char === '"') {
+        if (nextChar === '"') {
+          currentCell += '"'; // 雙引號跳脫
+          i++; 
+        } else {
+          inQuote = false; // 結束引號
+        }
+      } else {
+        currentCell += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuote = true;
+      } else if (char === '\t') {
+        currentRow.push(currentCell);
+        currentCell = "";
+      } else if (char === '\n' || (char === '\r')) {
+        if (char === '\r' && nextChar === '\n') i++;
+        currentRow.push(currentCell);
+        rows.push(currentRow);
+        currentRow = [];
+        currentCell = "";
+      } else {
+        currentCell += char;
+      }
+    }
+  }
+  if (currentCell || currentRow.length > 0) {
+    currentRow.push(currentCell);
+    rows.push(currentRow);
+  }
+  return rows;
+}
+// Copy Process
+function handleCopy(view, event) {
+  const { state } = view;
+  const sel = state.selection;
+  if (!(sel instanceof CellSelection)) {
+    const slice = sel.content();
+    const text = slice.content.textBetween(0, slice.content.size, '\n', '\n');
+
+    if (event.clipboardData) {
+      event.clipboardData.setData('text/plain', text);
+      event.preventDefault(); // 阻止 Tiptap 預設行為
+      return true;
+    }
+    return false;
+  }
+
+  const rect = selectedRect(state);
+  const table = rect.table;
+  const rows = [];
+
+  for (let r = rect.top; r < rect.bottom; r++) {
+    const rowNode = table.child(r);
+    const cols = Array.from({length: rect.right - rect.left}, (_, i) => i + rect.left).map(col => {
+      const text = getText(rowNode.child(col)).replace(/"/g, '""');
+      return `"${text}"`;
+    })
+    rows.push(cols.join('\t')); // 欄位用 Tab 分隔
+  }
+
+  const clipboardText = rows.join('\r\n');
+
+  if (event.clipboardData) {
+    event.clipboardData.setData('text/plain', clipboardText);
+    event.preventDefault();
+    return true;
+  }
+  return false;
+}
+// Paste Process
+function handleTablePaste(view, event) {
+  const { state, dispatch } = view;
+  const sel = state.selection;
+  
+  // 1. 取得並解析內容
+  const raw = event.clipboardData?.getData('text/plain') || '';
+  if (!raw) return false;
+
+  const matrix = parseExcelClipboard(raw);
+  if (!matrix.length) return true;
+
+  // 2. 定位 Table & Row / 計算起點
+  let tableNode = view.state.doc.content.firstChild;
+  let startRowIndex = view.state.selection.$anchor.path[4];
+  let startColIndex = view.state.selection.$anchor.path[7];
+
+  if (!(sel instanceof CellSelection)) {
+    let textToPaste = raw;
+
+    textToPaste = textToPaste.replace(/(\r\n|\n|\r)+$/, '');
+
+    if (textToPaste.length >= 2 && textToPaste.startsWith('"') && textToPaste.endsWith('"')) {
+       textToPaste = textToPaste.slice(1, -1);
+       textToPaste = textToPaste.replace(/""/g, '"');
+    }
+
+    textToPaste = textToPaste.replace(/\r\n/g, '\n');
+    dispatch(state.tr.insertText(textToPaste));
+
+    // 阻止瀏覽器原生貼上 (避免重複)
+    event.preventDefault(); 
+    return true; 
+  }
+
+  const rect = selectedRect(state);
+  startRowIndex = rect.top;
+  startColIndex = rect.left;
+
+  // [保護] 禁止貼在 Index 0
+  if (startColIndex === 0 || startRowIndex < 0 || startColIndex < 0) return false;
+
+  // 3. 紀錄貼上的欄位
+  let M = view.state.selection.$anchor.node(1).childCount;
+  let N = view.state.selection.$anchor.node(2).childCount;
+
+  let rowsPos = [1];
+  for(let rowIndex = 0; rowIndex < tableNode.childCount; rowIndex++) rowsPos.push(rowsPos.at(-1) + tableNode.content.child(rowIndex).nodeSize);
+
+  const targets = [];
+  const impactedRowIndexes = range(startRowIndex, Math.min(M, startRowIndex + matrix.length));
+  range(startRowIndex, startRowIndex + matrix.length).forEach((rowIndex, rIndex) => {
+    if (rowIndex >= M) return;
+
+    const rowNode = view.state.selection.$anchor.node(1).content.child(rowIndex);
+    const rowPos = rowsPos[rowIndex];
+    const cells = rowNode.content;
+    const sourceRowData = matrix[rIndex] || [];
+
+    const cellPos = [rowPos + 1];
+    for(let index = 0; index < N - 1; index++) cellPos.push(cellPos.at(-1) + cells.child(index).nodeSize);
+
+    range(startColIndex, startColIndex + sourceRowData.length).forEach((colIndex, cIndex) => {
+      if (colIndex >= N) return;
+      const cellNode = cells.child(colIndex);
+      targets.push({ cellPos: cellPos[colIndex], cellSize: cellNode.nodeSize, type: cellNode.type, attrs: cellNode.attrs, text: sourceRowData[cIndex].toString() });
+    })
   })
-//   console.log("localBlockContents: ", localBlockContents)
+
+  // 4. 從尾部節點開始更新欄位
+  if (targets.length === 0) return true;
+  targets.sort((a, b) => b.cellPos - a.cellPos);
+
+  let tr = state.tr;
+  const schema = state.schema;
+
+  for (const t of targets) {
+    const lines = t.text.split('\n');
+    const contentNodes = lines.map(line => schema.nodes.paragraph.create({}, line ? [schema.text(line)] : []));
+    const newCell = t.type.create(t.attrs, contentNodes);
+    tr = tr.replaceWith(t.cellPos, t.cellPos + t.cellSize, newCell);
+  }
+
+  if (tr.docChanged) dispatch(tr.scrollIntoView());
+
+  event.preventDefault();
+  return true;
+}
+function handleTextPaste(view, event) {
+  const text = event.clipboardData?.getData('text/plain');
+  if (text) {
+    view.dispatch(view.state.tr.insertText(text));
+    event.preventDefault();
+    return true;
+  }
+  return false;
+}
+// Mouse click Process
+function handelMousedown(view, event) {
+  // 1. 忽略按鈕
+  if (event.target.closest('button')) return false;
+
+  // 2. 找出點擊的儲存格 DOM
+  const cellDOM = event.target.closest('td, th');
+  if (!cellDOM) return false;
+
+  // 3. 取得該儲存格在文件中的位置
+  const pos = view.posAtDOM(cellDOM, 0);
+  if (pos === null) return false;
+
+  const cellPos = view.state.doc.resolve(pos).before(3);
+
+  // 4. 判斷是否為「第二次點擊」(進入編輯模式)
+  const { selection } = view.state;
+  if (selection instanceof CellSelection) {
+    // 如果已經單選了這一格，且再次點擊 -> 放行事件，讓使用者進入編輯模式
+    if (selection.$anchorCell.pos === cellPos && selection.$headCell.pos === cellPos) {
+      return false; 
+    }
+  }
+
+  // [情境：第一次點擊] -> 手動實作「點擊選取」與「拖曳框選」
+  view.dispatch(view.state.tr.setSelection(CellSelection.create(view.state.doc, view.state.doc.resolve(cellPos).pos)));
+  if (!view.hasFocus()) view.focus();
+  event.preventDefault();
+
+  // C. 手動啟動拖曳監聽 (因為 preventDefault 殺死了插件的拖曳功能)
+  const startAnchorPos = cellPos;
+  let currentHeadPos = cellPos;
+
+  const moveHandler = (moveEvent) => {
+    // 1. 找出滑鼠當前位置下的 Cell
+    const posObj = view.posAtCoords({ left: moveEvent.clientX, top: moveEvent.clientY });
+    if (!posObj) return;
+
+    const $currPos = view.state.doc.resolve(posObj.pos);
+    let foundCellPos = $currPos.before(3);
+
+    // 2. 如果滑鼠移到了新的格子，且位置合法，更新選取範圍
+    if (foundCellPos !== null && foundCellPos !== currentHeadPos) {
+      currentHeadPos = foundCellPos;
+      try {
+        // 使用 CellSelection.create 自動計算矩形範圍，注意：必須確保 anchor 和 head 在同一個 table 內，否則 create 會報錯，這裡用 try-catch 保護
+        const newSelection = CellSelection.create(view.state.doc, startAnchorPos, foundCellPos);
+        view.dispatch(view.state.tr.setSelection(newSelection));
+      } catch (e) { }
+    }
+  };
+
+  const upHandler = () => {
+    // 滑鼠放開時，移除監聽
+    window.removeEventListener('mousemove', moveHandler);
+    window.removeEventListener('mouseup', upHandler);
+  };
+
+  // D. 掛載監聽器到 window (確保拖曳出表格也能感應)
+  window.addEventListener('mousemove', moveHandler);
+  window.addEventListener('mouseup', upHandler);
+
+  // E. 回傳 true，表示我們完全接管了這個事件
+  return true; 
+}
+
+onMounted(() => {
   // lazy init only for active options
   nextTick(() => {
     localBlockContents.data.forEach((blk, i) => { initTitleEditor(i) })
@@ -244,7 +512,7 @@ watch(() => props.blockEditors.tier, t => {
 
 // ---------- UI handlers ----------
 const addSmallBlock = () => {
-  localBlockContents.data.push({ content_id: null, client_temp_id: `temp-${uuidv1()}`, option: 0, jsonHeader: null, jsonContent: null, files: [] })
+  localBlockContents.data.push({ option: 0, jsonHeader: null, jsonContent: null, files: [] })
   initTitleEditor(localBlockContents.data.length - 1)
 }
 const removeSmallBlock = (idx) => {
@@ -257,15 +525,18 @@ const removeSmallBlock = (idx) => {
 }
 
 const radioInputChange = (idx) => {
-  const opt = localBlockContents.data[idx].option
-  localBlockContents.data[idx].jsonContent = null
-  if (opt !== 1) localBlockContents.data[idx].files = []
-  nextTick(() => initBlockEditor(idx, opt))
+  const opt = localBlockContents.data[idx].option;
+  localBlockContents.data[idx].jsonContent = null;
+  if (opt !== 1) localBlockContents.data[idx].files = [];
+  nextTick(() => initBlockEditor(idx, opt));
 }
+
+const emitAddBlock = () => { emit('add-block'); }
 
 const emitDelete = () => {
   if (!confirm('確定要刪除此區塊?')) return
-  emit('delete-block', localBlockContents.id)
+  console.log("Emit delete");
+  emit('delete-block', localBlockContents.id);
 }
 
 const addRow = idx => editors[idx]?.chain().focus().addRowAfter().run()
@@ -328,14 +599,14 @@ const handleImageUpload = async (evt, idx) => {
 /* 動作按鈕樣式 */
 .action-buttons { display: flex; gap: 10px; flex-shrink: 0; }
 .action-buttons button {
-padding: 8px 12px;
-border: none;
-border-radius: 4px;
-cursor: pointer;
-background-color: #007bff;
-color: white;
-font-size: 0.9em;
-transition: background-color 0.2s ease;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+  font-size: 0.9em;
+  transition: background-color 0.2s ease;
 }
 .action-buttons button:hover { background-color: #0056b3; }
 
@@ -362,16 +633,16 @@ transition: background-color 0.2s ease;
 /* TipTap Table 樣式 */
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
 .editor-content :deep(th) { position:sticky; top:35px; z-index:5; }
-.editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: center; vertical-align: top; }
+.editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: center; vertical-align: middle; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px auto; cursor: pointer; border: 2px solid transparent; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px 0; cursor: pointer; border: 2px solid transparent; }
 
 
 /* TipTap Placeholder & Selection 樣式 (沿用您原本的樣式) */
 .editor-content :deep(.ProseMirror) p.is-editor-empty::before { content: attr(data-placeholder); float: left; color: #adb5bd; height: 0; }
-.editor-content :deep(td.selectedCell),
-.editor-content :deep(th.selectedCell) { border: 2px solid #ccc; background-color: #cce7ff; box-shadow: 0 0 0 3px #4a90e2 inset; border-color: transparent; opacity: 1; }
-
+.editor-content :deep(.ProseMirror-focused td.selectedCell),
+.editor-content :deep(.ProseMirror-focused th.selectedCell) { border: 2px solid #ccc; background-color: #cce7ff; box-shadow: 0 0 0 3px #4a90e2 inset; border-color: transparent; opacity: 1; }
+.editor-content :deep(th.has-focus), .editor-content :deep(td.has-focus) { background-color:#fff7cc; box-shadow: inset 0 0 0 2px #ff9800; }
 
 /* 工具列樣式 */
 .menu-bar { margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; background-color: #f0f8ff; }
@@ -395,36 +666,36 @@ transition: background-color 0.2s ease;
 }
 
 .preview-item {
-    position: relative;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    overflow: hidden;
-    padding: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    align-items: center;
-    text-align: center;
+  position: relative;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 5px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  align-items: center;
+  text-align: center;
 }
 
 .preview-thumbnail {
-    width: 80px;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 4px;
-    margin-bottom: 5px;
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-bottom: 5px;
 }
 
 .remove-btn {
-    position: absolute;
-    top: 0px;
-    right: 0px;
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.2s ease;
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
 }
 
 .remove-btn:hover { background-color: #c82333; transform: scale(1.1); }
