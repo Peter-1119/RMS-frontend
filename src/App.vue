@@ -1,7 +1,7 @@
 <template>
   <div id="app" :class="{ 'menu-collapsed': isMenuCollapsed }">
     <div class="app-wrapper">
-      <SideMenu v-if="!$route.meta.hideChrome" :is-collapsed="isMenuCollapsed" @toggle-menu="toggleMenu"/>
+      <SideMenu v-if="!$route.meta.hideChrome" :is-collapsed="isMenuCollapsed" :tabs="tabs" @toggle-menu="toggleMenu"/>
       <div class="page-content-container">
         <header class="top-bar" v-if="!$route.meta.hideChrome">
           <div class="top-header">
@@ -84,9 +84,14 @@ export default {
       sessionStorage.removeItem('loggedInUserdeptDesc');
       sessionStorage.removeItem('userToken');
 
+      localStorage.removeItem('rms:draft:new-instruction');
+      localStorage.removeItem('rms:draft:new-specification'); // 假設這是式樣書的 key
+
       // ✅ 登出時順便清空 tabs
       this.tabs = [];
       this.activeTabFullPath = '';
+
+      this.cachedViews = [];
 
       alert('您已登出！');
       this.$router.push('/login');
@@ -202,7 +207,7 @@ export default {
 
 <style scoped>
 
-.app-wrapper { display: flex; flex-direction: row;}
+.app-wrapper { display: flex; flex-direction: row; min-height: 100vh}
 .page-content-container { width: 100%; }
 .top-bar { display: flex; flex-direction: row; justify-content: space-between; align-items: center; background-color: #023b64; color: white; padding: 15px; border-bottom: 1px solid #e0e0e0; }
 .top-header { display: flex; flex-direction: row; }
@@ -248,6 +253,6 @@ body, html { margin: 0; padding: 0; font-family: Arial, sans-serif; }
 </style>
 
 <style>
-body { font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body { font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; margin: 0px; }
 input, button, textarea, select { font-family: inherit; }
 </style>

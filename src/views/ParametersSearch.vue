@@ -1,7 +1,5 @@
-<!-- ParameterSearch.vue -->
 <template>
   <div class="parameters-search-container">
-    <!-- ===== Block 1：基本查詢條件 ===== -->
     <div class="header-block">
       <div class="header">
         <h1>配方檢索</h1>
@@ -32,16 +30,14 @@
               </div>
             </div>
 
-            <!-- Step2：依機台動態產生條件 select -->
-            <div class="condition-attribute">
+            <div class="condition-attribute" v-if="form.machineCode && !form.item">
               <div v-for="condition in conditions" :key="condition.id" class="form-group">
                 <label>{{ condition.name }}：</label>
-                <select v-model="selectedConditions[condition.id]">
+                <select v-model="selectedConditions[condition.name]">
                   <option value=""></option>
                   <option v-for="p in condition.parameters" :key="p" :value="p">{{ p }}</option>
                 </select>
               </div>
-
               <p v-if="form.machineCode && !conditions.length" style="margin-top: 12px; color: #666;">此機台目前尚未設定任何條件。</p>
             </div>
           </div>
@@ -49,110 +45,72 @@
 
         <div class="header-right-panel">
           <button class="btn clear" @click="searchConditionClear">清空</button>
-          <button class="btn search" @click="parameterSearch">查詢</button>
+          <button class="btn search" @click="parameterSearch(false)">查詢</button>
         </div>
       </div>
     </div>
 
-    <!-- ===== Block 2：配方清單 (Step3) ===== -->
-    <div class="result-block">
-      <h2>配方清單</h2>
+    <div class="result-block" v-if="hasSearched">
+      <div class="result-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h2>檢索結果 (共 {{ totalCount }} 筆)</h2>
+        
+        <div class="pagination-controls" v-if="totalCount > 0">
+          <button class="btn page-btn" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">上一頁</button>
+          <span style="margin: 0 10px;">第 {{ currentPage }} / {{ totalPages }} 頁</span>
+          <button class="btn page-btn" :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">下一頁</button>
+        </div>
+      </div>
 
-      <table class="result-table" v-if="results.length">
-        <thead>
-          <tr>
-            <th style="width: 40px;"></th>
-            <th>適用工程</th>
-            <th>機台</th>
-            <th>品目</th>
-            <th v-for="header in conditionHeaders" :key="header">{{ header }}</th>
-            <th>程式代碼</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="(row, idx) in paginatedResults"
-            :key="row.document_token + '-' + row.program_code + '-' + idx" 
-            :class="{ active: selectedResultIndex === (resultPageStartIndex + idx) }"
-            @click="selectResult(resultPageStartIndex + idx, row)"
-          >
-            <td>
-              <input type="radio" :checked="selectedResultIndex === (resultPageStartIndex + idx)"/>
-            </td>
-            <td>{{ row.specific_name }}</td>
-            <td>{{ row.machine_code }}</td> <td>{{ row.item_code }}</td>
-            
-            <td v-for="header in conditionHeaders" :key="header">
-              {{ (row.conditions && row.conditions[header]) || '' }}
-            </td>
-            
-            <td>{{ row.program_code }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <p v-else class="empty-text">尚未有查詢結果</p>
-
-      <!-- 簡易分頁 -->
-      <div class="page-action-block" v-if="results.length">
-        <!-- ... 一樣 ... -->
+      <div class="table-container">
+        <table class="result-table">
+          <thead>
+            <tr>
+              <th>製程</th>
+              <th>機台</th>
+              <th>品目</th>
+              <th>程式代碼</th>
+              <th v-for="header in dynamicConditionHeaders" :key="header" class="cond-header">
+                {{ header }}
+              </th>
+              <th>文件名稱</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, idx) in results" :key="idx" :class="{ active: idx === selectedResultIndex }" @click="selectResult(idx, row)">
+              <td>{{ row.process }}</td>
+              <td>{{ row.machine }}</td>
+              <td>{{ row.item || '-' }}</td>
+              <td>{{ row.program_code }}</td>
+              <td v-for="header in dynamicConditionHeaders" :key="header">
+                {{ row.conditions[header] || '' }}
+              </td>
+              <td>
+                  <a href="#" @click.prevent="viewDoc(row)">{{ row.document_name }}</a>
+              </td>
+            </tr>
+            <tr v-if="results.length === 0">
+              <td :colspan="5 + dynamicConditionHeaders.length" class="empty-text">
+                查無資料
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- ===== Block 3：參數表 (Step4) ===== -->
     <div class="parameter-block">
       <h2>參數</h2>
-
       <table class="param-table" v-if="parameterRows.length">
-        <thead>
-          <tr><th>槽體名稱</th><th>參數名稱</th><th>規格上限</th><th>操作上限</th><th>中值</th><th>操作下限</th><th>規格下限</th><th>單位</th><th>參數下放</th><th>說明</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(p, i) in parameterRows" :key="i">
-            <td>{{ p.tank_name }}</td>
-            <td>{{ p.param_name }}</td>
-            <td>{{ p.spec_upper }}</td>
-            <td>{{ p.op_upper }}</td>
-            <td>{{ p.center }}</td>
-            <td>{{ p.op_lower }}</td>
-            <td>{{ p.spec_lower }}</td>
-            <td>{{ p.unit }}</td>
-            <td>{{ p.down_flag }}</td>
-            <td>{{ p.remark }}</td>
-          </tr>
-        </tbody>
+        <thead><tr><th v-for="cell in parameterRows[0]">{{ cell }}</th></tr></thead>
+        <tbody><tr v-for="row in parameterRows.slice(1)"><td v-for="cell in row">{{ cell }}</td></tr></tbody>
       </table>
-
       <p v-else class="empty-text">請先在上方選擇一筆配方</p>
     </div>
   </div>
 
-  <!-- ===== 三個彈窗 ===== -->
-  <SpecificListWindow
-    v-if="specificsListVisible"
-    :machineCode="form.machineCode"
-    :itemCode = "form.item"
-    :machineKeyword="machineKeyword"
-    @selectSpecific="getSpecific"
-    @cancel="specificsListVisible = false"
-  />
-
-  <GroupMachinesListWindow
-    v-if="machineWindowVisable"
-    :specific-code="form.specificCode"
-    :item-code="form.item"
-    @select-machine="getMachine"
-    @cancel="machineWindowVisable = false"
-  />
-
-  <ItemListWindow
-    v-if="itemWindowVisable"
-    :specificCode="form.specificCode"
-    :machineCode="form.machineCode"
-    @selectItem="getItemType"
-    @cancel="itemWindowVisable = false"
-  />
+  <SpecificListWindow v-if="specificsListVisible" :machineCode="form.machineCode" :itemCode="form.item" :machineKeyword="machineKeyword" @selectSpecific="getSpecific" @cancel="specificsListVisible = false" />
+  <GroupMachinesListWindow v-if="machineWindowVisable" :specific-code="form.specificCode" :item-code="form.item" @select-machine="getMachine" @cancel="machineWindowVisable = false" />
+  <ItemListWindow v-if="itemWindowVisable" :specificCode="form.specificCode" :machineCode="form.machineCode" @selectItem="getItemType" @cancel="itemWindowVisable = false" />
 </template>
 
 <script>
@@ -176,54 +134,49 @@ export default {
 
       machineKeyword: '',
       specificKeyword: '',
+      
+      hasSearched: false,
+
+      // 分頁狀態
+      currentPage: 1,
+      pageSize: 10,
+      totalCount: 0,
+      totalPages: 1,
 
       form: {
         specific: '',
-        specificCode: '',
+        specificCode: '', // 搜尋用 Code
         machine: '',
-        machineCode: '',
+        machineCode: '',  // 搜尋用 Code
         item: '',
         code: '',
       },
 
       // Step2：動態條件
-      conditions: [],          // [{id, name, parameters:[...]}]
-      selectedConditions: {},  // { [condition_id]: parameter_name }
+      conditions: [],          
+      selectedConditions: {},  // { [condition_name]: parameter_value }
 
       // Step3：搜尋結果
-      results: [],
-      resultPage: 1,
-      resultPageSize: 10,
+      results: [], 
       selectedResultIndex: -1,
-
-      // 後端給的條件欄位（每台機台的欄位集合）
-      conditionHeadersFromAPI: [],
 
       // Step4：參數表
       parameterRows: [],
     }
   },
   computed: {
-    totalResultPages() {
-      if (!this.results.length) return 1
-      return Math.ceil(this.results.length / this.resultPageSize)
-    },
-    resultPageStartIndex() {
-      return (this.resultPage - 1) * this.resultPageSize
-    },
-    paginatedResults() {
-      const start = this.resultPageStartIndex
-      return this.results.slice(start, start + this.resultPageSize)
-    },
-
-    // 動態條件欄位：直接用後端傳回來的 condition_headers
-    conditionHeaders() {
-      return this.conditionHeadersFromAPI || []
-    },
+    dynamicConditionHeaders() {
+      const headers = new Set()
+      this.results.forEach(row => {
+        if (row.conditions) {
+          Object.keys(row.conditions).forEach(k => headers.add(k))
+        }
+      })
+      return Array.from(headers).sort() 
+    }
   },
   methods: {
     searchConditionClear() {
-      // 1) 清空基本條件
       this.form = {
         specific: '',
         specificCode: '',
@@ -232,33 +185,24 @@ export default {
         item: '',
         code: '',
       }
-
-      // 2) 關聯用的 keyword 也清掉
       this.specificKeyword = ''
       this.machineKeyword = ''
-
-      // 3) 動態條件：欄位 & 已選值全部清空
       this.conditions = []
       this.selectedConditions = {}
-
-      // 4) 查詢結果 & 分頁 & 選取記錄清空
+      
       this.results = []
-      this.resultPage = 1
+      this.hasSearched = false
       this.selectedResultIndex = -1
-
-      // 5) 後端給的條件欄位 & 下方參數表清空
-      this.conditionHeadersFromAPI = []
       this.parameterRows = []
+      
+      // 重置分頁
+      this.currentPage = 1
+      this.totalCount = 0
+      this.totalPages = 1
     },
 
-    saveDraft() {
-      console.log('TODO: 回首頁')
-    },
-
-    // ===== Step1：三個選單回來的值 =====
     getSpecific(payload) {
       if (payload) {
-        // 假設 payload 是 { specific: '顯示文字', code: 'RE233-01' }
         this.form.specific = payload.specific || payload
         this.form.specificCode = payload.code || ''
         this.specificKeyword = this.form.specific
@@ -269,13 +213,11 @@ export default {
       }
     },
 
-    // GroupMachinesListWindow emit: { code, name }
     async getMachine(payload) {
       if (payload) {
         this.form.machine = payload.name || ''
         this.form.machineCode = payload.code || ''
         this.machineKeyword = this.form.machine
-        // 選完機台 → 依機台載入條件
         await this.loadConditionsForMachine(this.form.machineCode)
       } else {
         this.form.machine = ''
@@ -284,10 +226,8 @@ export default {
         this.conditions = []
         this.selectedConditions = {}
       }
-      console.log("form: ", this.form)
     },
 
-    // ItemListWindow emit: { matnr, ... }
     getItemType(payload) {
       if (payload) {
         this.form.item = payload || ''
@@ -296,7 +236,6 @@ export default {
       }
     },
 
-    // ===== Step2：依機台查條件 (conditions.py) =====
     async loadConditionsForMachine(machineCode) {
       if (!machineCode) {
         this.conditions = []
@@ -312,8 +251,9 @@ export default {
         const list = (data && data.data && data.data.conditions) || []
         this.conditions = list
         this.selectedConditions = {}
+        // 初始化條件選擇
         this.conditions.forEach(c => {
-          this.selectedConditions[c.id] = ''
+           if(c.name) this.selectedConditions[c.name] = ''
         })
       } catch (e) {
         console.error('loadConditionsForMachine error:', e)
@@ -322,82 +262,108 @@ export default {
       }
     },
 
-    // ===== Step3：按下查詢，搜尋 rms_document_attributes / rms_block_content =====
-    async parameterSearch() {
+    // 換頁函式
+    changePage(page) {
+      if (page < 1 || page > this.totalPages) return
+      this.currentPage = page
+      this.parameterSearch(true) // true 代表是換頁操作
+    },
+
+    // ===== Step3：查詢 =====
+    async parameterSearch(isPageChange = false) {
+      if (!isPageChange) {
+        this.currentPage = 1 // 若非換頁（按下查詢按鈕），重置為第一頁
+      }
+
+      this.results = []
+      this.hasSearched = false
+      this.parameterRows = []
+      this.selectedResultIndex = -1
+
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ""
         
-        // 構建 Payload
-        const payload = {
-          status: 2, 
-          specific_code: this.form.specificCode || null,
-          machine_code:  this.form.machineCode  || null,
-          item_code:     this.form.item         || null,
-          program_code:  this.form.code         || null,
-          
-          // 處理選中的動態條件
-          conditions: Object.entries(this.selectedConditions)
-            .filter(([cid, val]) => val) // 過濾掉空值
-            .map(([cid, val]) => {
-              const cond = this.conditions.find(c => c.id === Number(cid))
-              return {
-                condition_id: Number(cid),
-                condition_name: cond?.name || null,
-                parameter_name: val
-              }
-            }),
-          page: this.resultPage,
-          page_size: this.resultPageSize,
+        // 準備 API 參數
+        const params = {
+          specific: this.form.specific, // 用名稱搜尋，因為後端用 JSON_SEARCH
+          machine:  this.form.machineCode, // 機台用 Code
+          item:     this.form.item,
+          code:     this.form.code,
+          page:     this.currentPage,
+          pageSize: this.pageSize
         }
 
-        const { data } = await axios.post(`${API_BASE_URL}/parameters/search`, payload)
-        const res = (data && data.data) || {}
+        // 邏輯控制：只有在 (有機台 且 無品目) 時才傳送動態條件
+        // 這與 Template 的 v-if 邏輯一致，也與後端邏輯一致
+        if (this.form.machineCode && !this.form.item) {
+            Object.keys(this.selectedConditions).forEach(key => {
+                const val = this.selectedConditions[key]
+                if (val) {
+                    params[key] = val
+                }
+            })
+        }
 
-        console.log("res: ", res);
+        // 移除空值
+        Object.keys(params).forEach(key => {
+            if (!params[key]) delete params[key]
+        })
 
-        // 更新 Headers (這決定了 Table 中間會出現哪些條件欄位)
-        // 如果使用者選了機台，後端會回傳該機台的所有條件名稱
-        this.conditionHeadersFromAPI = res.condition_headers || []
-
-        this.results = res.items || []
-        this.resultPage = 1
-        this.selectedResultIndex = -1
-        this.parameterRows = []
-
+        const { data } = await axios.get(`${API_BASE_URL}/parameters/search`, { params })
+        
+        if (data.success) {
+            this.results = data.data.items || []
+            this.totalCount = data.data.total || 0
+            this.totalPages = data.data.totalPages || 1
+            this.currentPage = data.data.page || 1
+        } else {
+            alert(data.message || '查詢失敗')
+        }
       } catch (e) {
         console.error('parameterSearch error:', e)
-        this.results = []
-        this.parameterRows = []
-        this.conditionHeadersFromAPI = []
+        alert('系統發生錯誤')
+      } finally {
+        this.hasSearched = true
       }
     },
-    // ===== Step4：點一筆配方，載入參數表 =====
+
+    // ===== Step4：載入參數表 =====
     async selectResult(index, row) {
       this.selectedResultIndex = index
       this.parameterRows = []
 
-      if (!row || !row.document_token) return
+      // 檢查 content_id
+      if (!row || !row.content_id) {
+          console.error("Missing content_id:", row)
+          return
+      }
 
       try {
         const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ""
-
-        // ★ 用 document_type 決定要打哪一個 step
-        const stepType = row.document_type === 1 ? 5 : 2
-
-        const { data } = await axios.get(`${API_BASE_URL}/parameters/${row.document_token}/blocks`, { params: { step_type: stepType } })
-
-        this.parameterRows = (data && data.data && data.data.rows) || []
+        // 呼叫新 API (使用 content_id)
+        const { data } = await axios.get(`${API_BASE_URL}/parameters/block/${row.content_id}`)
+        
+        if (data.success) {
+            this.parameterRows = data.data.rows || []
+        } else {
+            alert(data.message || '讀取失敗')
+        }
       } catch (e) {
         console.error('load parameter rows error:', e)
         this.parameterRows = []
       }
+    },
+    
+    viewDoc(row) {
+        console.log("View Doc", row)
+        // 這裡可以實作開啟文件預覽的邏輯
     }
-
   },
 }
 </script>
 
 <style scoped>
+/* 樣式保持不變，新增分頁按鈕樣式 */
 .parameters-search-container { width: 95%; margin: auto; justify-content: center; padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }
 .header-block { margin-bottom: 20px; padding: 8px; }
 .header-panel { display: flex; }
@@ -407,41 +373,36 @@ export default {
 .header-right-panel .btn:hover { background-color: #0056b3; }
 .header-right-panel .btn.clear { background-color: #BBBBBB; color: black; }
 .header-right-panel .btn.clear:hover { background-color: #999999; color: black; }
-
 .header { display: flex; justify-content: space-between; border-radius: 5px; margin-bottom: 14px; }
-.header h1 { margin: 0; }
-.header button { display: flex; background-color: #ffffff; padding: 10px 18px; gap: 5px; border: 1px solid #000; border-radius: 6px; }
-.header img { width: 18px; height: 18px; }
-
 .fundamental-attribute { display: flex; }
 .form-group { display: flex; margin-right: 12px; align-items: center; }
 .form-group label { width: 60%; }
-.form-group input,
-.form-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+.form-group input, .form-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
 .form-group .window-input { cursor: pointer; }
-
 .condition-attribute { display: flex; flex-wrap: wrap; }
 .condition-attribute .form-group { display: flex; margin-top: 12px; }
-
 .result-block { margin-top: 10px; padding: 10px 0; }
-.result-block h2 { margin: 10px 0; }
 .result-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-.result-table th,
-.result-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
+.result-table th, .result-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
 .result-table tbody tr.active { background-color: #eef6ff; }
-.result-table tbody tr:hover { background-color: #f2f8ff; }
-
-.empty-text { color: #888; margin: 8px 0; }
-
+.result-table tbody tr:hover { background-color: #f2f8ff; cursor: pointer; }
+.empty-text { color: #888; margin: 8px 0; text-align: center; }
 .parameter-block { margin-top: 20px; padding: 10px 0 20px; }
-.parameter-block h2 { margin: 10px 0; }
 .param-table { width: 100%; border-collapse: collapse; }
-.param-table th,
-.param-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
+.param-table th, .param-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; word-wrap: break-word; }
+.cond-header { background-color: #eaf4ff; color: #0056b3; }
 
-.page-action-block { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 0; }
-.icon-item { background: #eee; padding: 4px 8px; border-radius: 4px; cursor: pointer; user-select: none; }
-.icon-item:hover { background: #ddd; }
-.icon-item.disabled { opacity: .5; pointer-events: none; }
-.page-input { width: 72px; padding: 2px 6px; }
+/* 分頁按鈕樣式 */
+.page-btn {
+  padding: 4px 10px;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.page-btn:disabled {
+  background-color: #f5f5f5;
+  color: #aaa;
+  cursor: not-allowed;
+}
 </style>

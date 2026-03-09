@@ -13,6 +13,7 @@ import SpecificationChangePage from '@/views/SpecificationChangePage.vue';
 import ParametersSearch from '@/views/ParametersSearch.vue';
 import SpecificationViewPage from '@/views/SpecificationViewPage.vue';
 import DocxPreviewPage from '@/views/DocxPreviewPage.vue'
+import ItemViewPage from '@/views/ItemViewPage.vue'
 
 const routes = [
   { path: '/',                       redirect: '/login' },
@@ -32,6 +33,7 @@ const routes = [
   { path: '/SubmittedDocuments',     name: 'SubmittedDocuments',    component: SubmittedDocuments,     meta: { requiresAuth: true, title: '文件狀態' } },
   { path: '/ParametersSearch',       name: 'ParametersSearch',      component: ParametersSearch,       meta: { requiresAuth: true, title: '配方檢索', keepAlive: true, } },
   { path: '/project-specification',  name: 'SpecificationViewPage', component: SpecificationViewPage,  meta: { requiresAuth: true, title: '適用工程一覽表', keepAlive: true, } },
+  { path: '/item-view',              name: 'ItemViewPage',          component: ItemViewPage,           meta: { requiresAuth: true, title: '式樣書確認一覽表', keepAlive: true } },
 
   // 預覽畫面：隱藏 chrome + 不放進 tab
   { path: '/docs/preview/:token',    name: 'docx-preview',          component: DocxPreviewPage,        meta: { hideChrome: true, title: '文件預覽' }, props: true },

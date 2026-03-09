@@ -55,7 +55,7 @@
                 </div>
               </div>
               
-              <div class="form-group"><label for="scope-units">適用單位：</label><input class="scope-units" type="text" id="scope-units" v-model="form.attribute.scopeUnits" readonly/></div>
+              <!-- <div class="form-group"><label for="scope-units">適用單位：</label><input class="scope-units" type="text" id="scope-units" v-model="form.attribute.scopeUnits" readonly/></div> -->
               <div class="form-group"><label for="department">制訂單位：</label><input type="text" id="department" v-model="form.department" readonly/></div>
               <div class="form-group"><label for="author">制訂者：</label><input type="text" id="author" v-model="form.author" readonly/></div>
               <div class="form-group"><label for="confirmer">確認者：</label><input type="text" id="confirmer" v-model="form.confirmer"/></div>
@@ -193,7 +193,7 @@
             v-if="docWindowVisible"
             headerName="相關文件選取"
             documentType="doc"
-            @add-new-form="addRelativeDocument"
+            @add-new-forms="addRelativeDocument" 
             @close-window="docWindowVisible=false">
           </FormSearchWindow>
         </section>
@@ -220,7 +220,7 @@
             v-if="formWindowVisible"
             headerName="表單選取"
             documentType="form"
-            @add-new-form="addUsedForm"
+            @add-new-forms="addUsedForm" 
             @close-window="formWindowVisible=false">
           </FormSearchWindow>
         </section>
@@ -231,12 +231,8 @@
         <div style="display: flex; justify-content: space-between; align-items:center;">
           <h2>文件產出</h2>
           <div style="display:flex; gap:.5rem;">
-            <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">
-              {{ loading ? '產生中…' : '產生文件（Word）' }}
-            </button>
-            <button @click="openEipWindow" :disabled="loading" class="layer-action-btn add" style="background-color: #2e7d32;">
-              {{ loading ? '處理中…' : '轉拋 EIP' }}
-            </button>
+            <button @click="generateAndDownloadDocx" :disabled="loading" class="layer-action-btn add">{{ loading ? '產生中…' : '產生文件（Word）' }}</button>
+            <!-- <button @click="openEipWindow" :disabled="loading" class="layer-action-btn add" style="background-color: #2e7d32;">{{ loading ? '處理中…' : '轉拋 EIP' }}</button> -->
           </div>
         </div>
 
@@ -392,7 +388,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('scroll', handleScroll);
+  if(confirm("請問是否要保存內容")) {
+    saveDraft();
+  }
 })
 
 const scrollToTop = () => {
@@ -979,20 +978,24 @@ function stripCodePrefix(raw) {
 
 /**
  * 單一群組命名：
- *   groupName: 這個群組名稱（例如 "RTR 乾膜前處理線"）
- *   machines:  該群組被選取的機台陣列（都屬於同一 groupCode）
- *   groupTotal: 這個群組母群台數（來自 groupsSummary）
+ * groupName: 這個群組名稱（例如 "RTR 乾膜前處理線"）
+ * machines:  該群組被選取的機台陣列（都屬於同一 groupCode）
+ * groupTotal: 這個群組母群台數（來自 groupsSummary） - 【註：取消滿編邏輯後，此參數其實可以不用了，但保留不影響】
  */
 function buildGroupMachineName(groupName, machines, groupTotal) {
   if (!machines.length) return ''
 
-  // === 3.2 / 3.3：整群被選 → 直接用「去掉前綴 code」的群組名稱 ===
-  const cleanGroupName = stripCodePrefix(groupName || '')
-  if (groupTotal && machines.length >= groupTotal) {
-    return cleanGroupName || stripCodePrefix(machines[0].name)
-  }
+  // =========================================================================
+  // 【修改重點】：把原本「3.2 / 3.3 整群被選」的邏輯註解/移除
+  // 這樣就不會只顯示群組名稱，而是強制進入下方解析號碼的邏輯。
+  //
+  // const cleanGroupName = stripCodePrefix(groupName || '')
+  // if (groupTotal && machines.length >= groupTotal) {
+  //   return cleanGroupName || stripCodePrefix(machines[0].name)
+  // }
+  // =========================================================================
 
-  // --- 3.4.x：部分選 → 先解析每一台，再依 prefix 拆成多個 cluster 各自合併 ---
+  // --- 3.4.x：先解析每一台，再依 prefix 拆成多個 cluster 各自合併 ---
 
   const parsed = machines.map(m => {
     const raw = m.name || ''
@@ -1004,6 +1007,7 @@ function buildGroupMachineName(groupName, machines, groupTotal) {
     let num = null
     let suffix = null
 
+    // 依據分隔符解析出 prefix (前綴), num (數字), suffix (後綴)
     if (parts.length >= 3) {
       prefix = parts.slice(0, -2).join('-')   // "蝕刻線-03-A" -> "蝕刻線"
       num = parts[parts.length - 2]           // "03"
@@ -1023,9 +1027,7 @@ function buildGroupMachineName(groupName, machines, groupTotal) {
     return uniq.join('、')
   }
 
-  // 依 prefix 分 cluster，例如：
-  //   cluster1: prefix="蝕刻線" → 01-A, 02-A, 03-A
-  //   cluster2: prefix="RTR 蝕刻線" → 04-A
+  // 依 prefix 分 cluster
   const clusters = new Map()
   parsed.forEach(p => {
     if (!clusters.has(p.prefix)) clusters.set(p.prefix, [])
@@ -1054,13 +1056,15 @@ function buildGroupMachineName(groupName, machines, groupTotal) {
     })
     const partialNums = allNums.filter(num => !fullNums.includes(num))
 
-    // 3.4.1 / 3.4.3：01-A + 01-B → "01"，多個 full num → "01、02"
+    // 處理 fullNums (例如 01-A + 01-B -> 01)
     if (fullNums.length) {
       fullNums.sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+      // 這裡如果號碼連續，原本是平列，如果有需要也可以套用 compressNumberRanges
+      // 為了保持您原本邏輯不變，這裡維持平列 (join('、'))
       segments.push(fullNums.join('、'))
     }
 
-    // 3.4.4 / 3.4.5：對 partial num 做 01~03 / 01~02、04
+    // 處理 partialNums (例如做 01~03 / 01~02、04)
     const bySuffix = new Map()
     list.forEach(p => {
       if (!partialNums.includes(p.num)) return
@@ -1091,6 +1095,7 @@ function buildGroupMachineName(groupName, machines, groupTotal) {
 
   return allSegments.join('、')
 }
+
 function updateDocumentNameByMachines(machines) {
   if (!machines.length) return
 
@@ -1312,7 +1317,8 @@ const loadPmsTemplate = async (machineCode) => {
 
 // handler for ManagementSpecificBlock
 const updateManagementTableData = (payload) => {
-  managementSpecific.value = payload
+  console.log("updateManagementTableData: ", payload);
+  managementSpecific.value = payload;
 }
 
 const managementBlocks = ref([])
@@ -1465,7 +1471,7 @@ function isPmsTableValid() {
     const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
 
     // 欄位 index 對應： 0 "按鈕", 1 "項次", 2 "槽體", 3 "管理項目", 4 "規格下限(OOS-)", 5 "操作下限(OOC-)," 6 "設定值", 7 "操作上限(OOC+)", 8 "規格上限(OOS+)"
-    const cellStatus = cells.slice(4, 9).map(cell => {
+    const cellStatus = cells.slice(3, 8).map(cell => {
       const text = getText(cell);
       let status = 'empty';
       let val = Number(text);
@@ -1582,8 +1588,8 @@ const loadMcrTemplates = async (machineCode) => {
       }),
     ])
 
-    hasPmsForMcr.value = (pmsRes.data.data.table_rows.length > 0) ? true : false
-    hasCondForMcr.value = (condRes.data.data.conditions.length > 0) ? true : false
+    hasPmsForMcr.value = pmsRes.data.data.table_rows.length > 0
+    hasCondForMcr.value = condRes.data.data.conditions.length > 0
 
     // 1) PMS → parameter table template
     const tableRows = pmsRes?.data?.data?.table_rows || []
@@ -1835,8 +1841,21 @@ const loadExceptionsFromBlocks = (payload) => {
 // ---------- 相關文件 (step 7) ----------
 const docWindowVisible = ref(false);
 const relativeDocuments = ref([]);
-const addRelativeDocument = ({ formId, formName }) => {
-  relativeDocuments.value.push({ id: itemID++, docId: formId, docName: formName });
+// const addRelativeDocument = ({ formId, formName }) => {
+//   relativeDocuments.value.push({ id: itemID++, docId: formId, docName: formName });
+//   docWindowVisible.value = false;
+// }
+const addRelativeDocument = (selectedDocs) => {
+  selectedDocs.forEach(doc => {
+    // 檢查是否已經存在，避免重複加入
+    if (!relativeDocuments.value.some(d => d.docId === doc.formId)) {
+      relativeDocuments.value.push({ 
+        id: itemID++, 
+        docId: doc.formId, 
+        docName: doc.formName 
+      });
+    }
+  });
   docWindowVisible.value = false;
 }
 const relativeDocumentRemove = id => {
@@ -1846,8 +1865,21 @@ const relativeDocumentRemove = id => {
 // ---------- 使用表單 (step 8) ----------
 const formWindowVisible = ref(false);
 const usedForms = ref([]);
-const addUsedForm = ({ formId, formName }) => {
-  usedForms.value.push({ id: itemID++, formId, formName });
+// const addUsedForm = ({ formId, formName }) => {
+//   usedForms.value.push({ id: itemID++, formId, formName });
+//   formWindowVisible.value = false;
+// }
+const addUsedForm = (selectedForms) => {
+  selectedForms.forEach(form => {
+    // 檢查是否已經存在，避免重複加入
+    if (!usedForms.value.some(f => f.formId === form.formId)) {
+      usedForms.value.push({ 
+        id: itemID++, 
+        formId: form.formId, 
+        formName: form.formName 
+      });
+    }
+  });
   formWindowVisible.value = false;
 }
 const formRemove = id => {
@@ -2104,9 +2136,9 @@ const applyLoadedData = async (snapshot, { isSnapshot }) => {
   if (form.attribute.machines && form.attribute.machines.length > 0){
     await loadPmsTemplate(form.attribute.machines[0]);
     await loadMcrTemplates(form.attribute.machines[0]);
-    hasCondForMcr.value = true;
-    hasPmsForMcr.value = true;
-    hasPmsForStep3.value = true;
+    // hasCondForMcr.value = true;
+    // hasPmsForMcr.value = true;
+    // hasPmsForStep3.value = true;
   }
   else {
     form.attribute.machines = [];

@@ -187,7 +187,7 @@ const hasAnyMachineGroup = computed(() => Object.keys(groups.value || {}).length
 const groupKeys = computed(() => Object.entries(groups.value));
 
 /* ===== PMS table template ===== */
-const LOCK_COLS = [0, 1, 2, 8];
+const LOCK_COLS = [0, 1, 2];
 function buildParamDocFromRows (rows) {
   const trows = rows.map((row, rIdx) => ({
     type: 'tableRow',
@@ -425,69 +425,71 @@ function handlePaste(view, event) {
 }
 // Handle mouse click for cell select
 function handleMousedown(view, event) {
+  // 1. 忽略按鈕
   if (event.target.closest('button')) return false;
-    // 2. 找出點擊的儲存格 DOM
-    const cellDOM = event.target.closest('td, th');
-    if (!cellDOM) return false;
+  
+  // 2. 找出點擊的儲存格 DOM
+  const cellDOM = event.target.closest('td, th');
+  if (!cellDOM) return false;
 
-    // 3. 取得該儲存格在文件中的位置
-    const pos = view.posAtDOM(cellDOM, 0);
-    if (pos === null) return false;
+  // 3. 取得該儲存格在文件中的位置
+  const pos = view.posAtDOM(cellDOM, 0);
+  if (pos === null) return false;
 
-    const cellPos = view.state.doc.resolve(pos).before(3);
+  const cellPos = view.state.doc.resolve(pos).before(3);
 
-    // 4. 判斷是否為「第二次點擊」(進入編輯模式)
-    const { selection } = view.state;
-    if (selection instanceof CellSelection) {
-        // 如果已經單選了這一格，且再次點擊 -> 放行事件，讓使用者進入編輯模式
-        if (selection.$anchorCell.pos === cellPos && selection.$headCell.pos === cellPos) {
-            return false; 
-        }
-    }
-
-    // [情境：第一次點擊] -> 手動實作「點擊選取」與「拖曳框選」
-    view.dispatch(view.state.tr.setSelection(CellSelection.create(view.state.doc, view.state.doc.resolve(cellPos).pos)));
-    if (!view.hasFocus()) view.focus();
-    event.preventDefault();
-
-    // C. 手動啟動拖曳監聽 (因為 preventDefault 殺死了插件的拖曳功能)
-    const startAnchorPos = cellPos;
-    let currentHeadPos = cellPos;
-
-    const moveHandler = (moveEvent) => {
-      // 1. 找出滑鼠當前位置下的 Cell
-      const posObj = view.posAtCoords({ left: moveEvent.clientX, top: moveEvent.clientY });
-      if (!posObj) return;
-
-      const $currPos = view.state.doc.resolve(posObj.pos);
-      let foundCellPos = $currPos.before(3);
-
-      // 2. 如果滑鼠移到了新的格子，且位置合法，更新選取範圍
-      if (foundCellPos !== null && foundCellPos !== currentHeadPos) {
-        currentHeadPos = foundCellPos;
-        try {
-          // 使用 CellSelection.create 自動計算矩形範圍
-          // 注意：必須確保 anchor 和 head 在同一個 table 內，否則 create 會報錯，這裡用 try-catch 保護
-          const newSelection = CellSelection.create(view.state.doc, startAnchorPos, foundCellPos);
-          view.dispatch(view.state.tr.setSelection(newSelection));
-        } catch (e) {
-          // 跨表格拖曳或結構錯誤時忽略
-        }
+  // 4. 判斷是否為「第二次點擊」(進入編輯模式)
+  const { selection } = view.state;
+  if (selection instanceof CellSelection) {
+      // 如果已經單選了這一格，且再次點擊 -> 放行事件，讓使用者進入編輯模式
+      if (selection.$anchorCell.pos === cellPos && selection.$headCell.pos === cellPos) {
+          return false; 
       }
-    };
+  }
 
-    const upHandler = () => {
-      // 滑鼠放開時，移除監聽
-      window.removeEventListener('mousemove', moveHandler);
-      window.removeEventListener('mouseup', upHandler);
-    };
+  // [情境：第一次點擊] -> 手動實作「點擊選取」與「拖曳框選」
+  view.dispatch(view.state.tr.setSelection(CellSelection.create(view.state.doc, view.state.doc.resolve(cellPos).pos)));
+  if (!view.hasFocus()) view.focus();
+  event.preventDefault();
 
-    // D. 掛載監聽器到 window (確保拖曳出表格也能感應)
-    window.addEventListener('mousemove', moveHandler);
-    window.addEventListener('mouseup', upHandler);
+  // C. 手動啟動拖曳監聽 (因為 preventDefault 殺死了插件的拖曳功能)
+  const startAnchorPos = cellPos;
+  let currentHeadPos = cellPos;
 
-    // E. 回傳 true，表示我們完全接管了這個事件
-    return true; 
+  const moveHandler = (moveEvent) => {
+    // 1. 找出滑鼠當前位置下的 Cell
+    const posObj = view.posAtCoords({ left: moveEvent.clientX, top: moveEvent.clientY });
+    if (!posObj) return;
+
+    const $currPos = view.state.doc.resolve(posObj.pos);
+    let foundCellPos = $currPos.before(3);
+
+    // 2. 如果滑鼠移到了新的格子，且位置合法，更新選取範圍
+    if (foundCellPos !== null && foundCellPos !== currentHeadPos) {
+      currentHeadPos = foundCellPos;
+      try {
+        // 使用 CellSelection.create 自動計算矩形範圍
+        // 注意：必須確保 anchor 和 head 在同一個 table 內，否則 create 會報錯，這裡用 try-catch 保護
+        const newSelection = CellSelection.create(view.state.doc, startAnchorPos, foundCellPos);
+        view.dispatch(view.state.tr.setSelection(newSelection));
+      } catch (e) {
+        // 跨表格拖曳或結構錯誤時忽略
+      }
+    }
+  };
+
+  const upHandler = () => {
+    // 滑鼠放開時，移除監聽
+    window.removeEventListener('mousemove', moveHandler);
+    window.removeEventListener('mouseup', upHandler);
+  };
+
+  // D. 掛載監聽器到 window (確保拖曳出表格也能感應)
+  window.addEventListener('mousemove', moveHandler);
+  window.addEventListener('mouseup', upHandler);
+
+  // E. 回傳 true，表示我們完全接管了這個事件
+  return true; 
 }
 // Handle keyboard event
 function handleKeydown(view, event) {
@@ -820,6 +822,27 @@ function isMachineConflict(i, mCode) {
   return badSet && badSet.has(mCode) && isSelected;
 }
 /* ===== [修正] 勾選/取消單一機台 (取代原本的 onMachineCheck) ===== */
+// async function toggleMachine(i, machine) {
+//   const blk = blocks.value[i];
+//   const machines = blk.data.metadata.machines;
+//   const machinies_name = blk.data.metadata.machines_name;
+
+//   if (!machines.some(machineCode => machineCode == machine.code)) {
+//     machines.push(machine.code); // 加入
+//     machinies_name.push(machine.name);
+//     if (machines.length === 1) await updateBaselineDependencies(i, true);
+//   } else {
+//     const idx = machines.findIndex(machineCode => machineCode == machine.code);
+//     machines.splice(idx, 1);
+//     machinies_name.splice(idx, 1);
+//     if (machines.length == 0) {
+//       incompatibleSets.value[blk.id] = new Set();
+//       if (paramEditors.value[i]) paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
+//     }
+//   }
+
+//   syncToParent();
+// }
 async function toggleMachine(i, machine) {
   const blk = blocks.value[i];
   const machines = blk.data.metadata.machines;
@@ -833,15 +856,51 @@ async function toggleMachine(i, machine) {
     const idx = machines.findIndex(machineCode => machineCode == machine.code);
     machines.splice(idx, 1);
     machinies_name.splice(idx, 1);
+    
     if (machines.length == 0) {
+      // 情況 A：全部取消了，徹底清空反灰名單與編輯器
       incompatibleSets.value[blk.id] = new Set();
       if (paramEditors.value[i]) paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
+    } else if (idx === 0) {
+      // ★ 情況 B：取消的是「第一台」(基準機台)！
+      // 雖然還有其他機台，但基準改變了，必須強制更新 PMS 基準與反灰名單
+      await updateBaselineDependencies(i, true);
     }
   }
 
   syncToParent();
 }
 /* 1. 全選：只選合法的，但需先確認是否有基準 */
+// async function selectAllMachines(i) {
+//   const blk = blocks.value[i];
+//   const machines = blk.data.metadata.machines;
+//   const machines_name = blk.data.metadata.machines_name;
+
+//   // 如果目前是空的，必須先加入第一台當作基準，並執行一次篩選
+//   if (machines.length === 0) {
+//     machines.push(groupMachinesMap.value[0].code);
+//     machines.push(groupMachinesMap.value[0].name);
+//     // 這是建立基準，必須呼叫
+//     await updateBaselineDependencies(i, true);
+//   }
+  
+//   // 之後就只在前端操作，不需再呼叫 API
+//   const badSet = incompatibleSets.value[blk.id] || new Set();
+//   const newSelection = [...machines]; // 複製目前的 (包含剛剛加的基準)
+//   const newSelectionName = [...machines_name];
+  
+//   for (const machineInfo of Object.values(groupMachinesMap.value)) {
+//     // 跳過已選 & 跳過不相容
+//     if (newSelection.some(machineCode => machineCode === machineInfo.code)) continue;
+//     if (badSet.has(machineInfo.code)) continue;
+//     newSelection.push(machineInfo.code);
+//     newSelectionName.push(machineInfo.name);
+//   }
+  
+//   blk.data.metadata.machines = newSelection;
+//   blk.data.metadata.machines_name = newSelectionName;
+//   syncToParent()
+// }
 async function selectAllMachines(i) {
   const blk = blocks.value[i];
   const machines = blk.data.metadata.machines;
@@ -850,14 +909,13 @@ async function selectAllMachines(i) {
   // 如果目前是空的，必須先加入第一台當作基準，並執行一次篩選
   if (machines.length === 0) {
     machines.push(groupMachinesMap.value[0].code);
-    machines.push(groupMachinesMap.value[0].name);
-    // 這是建立基準，必須呼叫
+    // ★ 修正：必須 push 到 machines_name，否則會導致取消時陣列清不空
+    machines_name.push(groupMachinesMap.value[0].name); 
     await updateBaselineDependencies(i, true);
   }
   
-  // 之後就只在前端操作，不需再呼叫 API
   const badSet = incompatibleSets.value[blk.id] || new Set();
-  const newSelection = [...machines]; // 複製目前的 (包含剛剛加的基準)
+  const newSelection = [...machines];
   const newSelectionName = [...machines_name];
   
   for (const machineInfo of Object.values(groupMachinesMap.value)) {
@@ -1329,6 +1387,7 @@ watch(
 
 // onMounted 只需要做最基礎的檢查，或者留空 (因為 watch immediate 已經做了)
 onMounted(async () => {
+  console.log("ManufacturingParameterBlocks onMounted: ", props.specification);
   // 這裡可以留空，或者再次確保 fetchGroups 有跑
   if (Object.keys(specGroupsMap.value).length === 0) {
     await fetchGroups();
@@ -1483,13 +1542,13 @@ defineExpose({ exportData })
 .ed :deep(col:nth-child(1)) { width: 40%; }
 .ed :deep(col:nth-child(2)) { width: 75%; }
 .ed :deep(col:nth-child(3)) { width: 100%; }
-.ed :deep(col:nth-child(4)) { width: 100%; }
-.ed :deep(col:nth-child(5)) { width: 100%; }
-.ed :deep(col:nth-child(6)) { width: 100%; }
-.ed :deep(col:nth-child(7)) { width: 100%; }
-.ed :deep(col:nth-child(8)) { width: 100%; }
-.ed :deep(col:nth-child(9)) { width: 33%; }
-.ed :deep(col:nth-child(10)) { width: 100%; }
+.ed :deep(col:nth-child(4)) { width: 75%; }
+.ed :deep(col:nth-child(5)) { width: 75%; }
+.ed :deep(col:nth-child(6)) { width: 75%; }
+.ed :deep(col:nth-child(7)) { width: 75%; }
+.ed :deep(col:nth-child(8)) { width: 75%; }
+.ed :deep(col:nth-child(9)) { width: 100%; }
+.ed :deep(td:last-child) { text-align: left; }
 .hint{ padding:12px; color:#555; background:#f8f9fb; border:1px dashed #cfd8dc; border-radius:6px; margin:8px 0 }
 .hint.empty{ color:#9e9e9e; text-align:center; }
 .menu-error { background: #ffcdd2; border-color: #f44336; }

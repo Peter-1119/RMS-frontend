@@ -3,26 +3,28 @@
   <div class="combination-block">
     <div class="management-header-block">
       <label>{{ props.managementBlock.step }}.{{ props.managementBlock.tier }} 生產基本條件</label>
-      <div class="management-operation-block">
-        <div v-if="allowColor" class="menu color">
-          <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
-          <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
-        </div>
-        <!-- <button class="combination-btn add" @click="addRow(false)">往上插入</button> -->
-        <!-- <button class="combination-btn add" @click="addRow(true)">往下插入</button> -->
-        <!-- <button class="combination-btn del" @click="deleteRow">刪除該列</button> -->
-      </div>
     </div>
 
     <div class="editor-wrapper">
       <div v-if="hasPms || localBlockData.data?.jsonHeader" class="header-editor-container">
         <EditorContent v-if="headerEditor" :editor="headerEditor" class="title-editor-content" />
       </div>
-      <!-- 沒有 PMS：只顯示提示文字 -->
       <p v-if="!hasPms" class="hint empty">選擇的機台無任何參數</p>
 
-      <!-- 有 PMS 而且 editor 存在：顯示 Tiptap 表格 -->
-      <EditorContent v-else-if="editor" :editor="editor" class="editor-content management-tiptap-editor"/>
+      <div v-else-if="editor">
+        <div class="management-operation-block">
+          <div v-if="allowColor" class="menu color">
+            <div class="font-color blue" @click="editor?.chain().focus().setColor('blue').run()"></div>
+            <div class="font-color black" @click="editor?.chain().focus().setColor('null').run()"></div>
+          </div>
+        </div>
+        <!-- 有 PMS 而且 editor 存在：顯示 Tiptap 表格 -->
+        <EditorContent :editor="editor" class="editor-content management-tiptap-editor" @mousedown.capture="onMouseDownCapture" @contextmenu.prevent="openCtxMenu"/>
+        <div v-if="ctxMenu.show" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @contextmenu.prevent>
+          <button class="ctx-item" :disabled="!canMergeLastCol" @mousedown.stop.prevent="onCtxMerge">合併</button>
+          <button class="ctx-item" :disabled="!canSplitLastCol" @mousedown.stop.prevent="onCtxUnmerge">取消合併</button>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -31,7 +33,7 @@
 
 <script setup>
 import axios from 'axios'
-import { onMounted, onUnmounted, reactive, ref, shallowRef, nextTick } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, shallowRef, computed } from 'vue'
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import { Focus } from '@tiptap/extensions'
 import Document from '@tiptap/extension-document'
@@ -59,78 +61,36 @@ const props = defineProps({
 const localBlockData = reactive({ ...props.managementBlock });
 let editor = shallowRef(null);
 let headerEditor = shallowRef(null);
+const selectionUpdateTrigger = ref(0)
 let validateTimer = null;
 let dirtyRows = new Set();
 
 const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })];
 
-const CustomTableCell = TableCell.extend({ addAttributes() { return { ...this.parent?.(), contenteditable: { default: true }, class: { default: null } }; } });
-const CustomTableHeader = TableHeader.extend({ addAttributes() { return { ...this.parent?.(), contenteditable: { default: true } }; } });
-const CustomTableRow = TableRow.extend({ content: '(tableCell | tableHeader | actionCell)*', addAttributes() { return { ...this.parent?.(), class: { default: null } }; } });
-// [新增] 1. ActionCell: 渲染 + 和 - 按鈕
-const ActionCell = TableCell.extend({
-  name: 'actionCell',
+const CustomTableCell = TableCell.extend({ 
   addAttributes() {
     return {
       ...this.parent?.(),
-      contenteditable: { default: false }, // 這一格永遠不可編輯文字
-      class: { default: 'action-cell-wrapper' },
-      isPms: { default: false } // 標記是否為 PMS 帶出的列 (不可刪除)
+      contenteditable: {
+        default: true,
+        parseHTML: el => el.getAttribute('contenteditable') !== 'false',
+        renderHTML: attrs => ({ contenteditable: attrs.contenteditable ? 'true' : 'false' }),
+      },
+      // ⭐ 新增這段：註冊 class 屬性，讓 setCellAttribute 可以控制它
+      class: {
+        default: null,
+        parseHTML: el => el.getAttribute('class'),
+        renderHTML: attrs => (attrs.class ? { class: attrs.class } : {}),
+      },
     }
   },
-  addNodeView() {
-    return ({ node, getPos, editor }) => {
-      const dom = document.createElement('td');
-      dom.classList.add('action-cell-wrapper');
-      dom.contentEditable = 'false';
-
-      const btnContainer = document.createElement('div');
-      btnContainer.classList.add('action-btn-group');
-
-      // [+] 按鈕
-      const addBtn = document.createElement('button');
-      addBtn.innerText = '+';
-      addBtn.className = 'act-btn add';
-      addBtn.onclick = async () => {
-        if (typeof getPos === 'function') {
-          editor.chain().setNodeSelection(getPos()).addRowAfter().run();
-          updateTable(editor);
-        }
-      }
-
-      // [-] 按鈕
-      const delBtn = document.createElement('button');
-      delBtn.innerText = '-';
-      delBtn.className = 'act-btn del';
-      
-      // 邏輯：如果是 PMS 列 (isPms=true)，禁用刪除
-      if (node.attrs.isPms) {
-        delBtn.disabled = true;
-        delBtn.classList.add('disabled');
-        delBtn.title = 'PMS 預設項目不可刪除';
-      } else {
-        delBtn.onclick = async () => {
-          if (typeof getPos === 'function') {
-            if (confirm('確定要刪除此列嗎？')) {
-              editor.chain().setNodeSelection(getPos()).deleteRow().run();
-              updateTable(editor);
-            }
-          }
-        }
-      }
-
-      btnContainer.appendChild(addBtn);
-      btnContainer.appendChild(delBtn);
-      dom.appendChild(btnContainer);
-
-      return { dom, ignoreMutation: () => true, stopEvent: () => true };  // ignoreMutation: 傳遞 ProseMirror 忽略這裡面的 DOM 變動, stopEvent: 事件發生 => return true (事件攔截)
-    }
-  }
-})
+});
+const CustomTableHeader = TableHeader.extend({ addAttributes() { return { ...this.parent?.(), contenteditable: { default: true } }; } });
+const CustomTableRow = TableRow.extend({ content: '(tableCell | tableHeader)*', addAttributes() { return { ...this.parent?.(), class: { default: null } }; } });
 const tableEditorExtensions = [
   Document.extend({ content: 'table' }), ...baseExt, Table,
   Focus.configure({ className: 'has-focus', mode: 'all' }),
-  CustomTableRow, CustomTableHeader, CustomTableCell, ActionCell, History,
+  CustomTableRow, CustomTableHeader, CustomTableCell, History,
 ]
 const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, Placeholder.configure({ placeholder: '請輸入項目說明...' })];
 
@@ -177,6 +137,7 @@ function validateTableContent(editor, rowsToCheck = null) {
 
   let maxRow = Math.max(...rowsToCheck);
   let rowsPos = [1];
+  if (!editor.state.selection.$anchor.node(1)) return;
   for(let rowIndex = 0; rowIndex < Math.min(editor.state.selection.$anchor.node(1).content.childCount, maxRow); rowIndex++) rowsPos.push(rowsPos.at(-1) + editor.state.doc.content.firstChild.content.child(rowIndex).nodeSize);
 
   const sortedIndex = [...rowsToCheck].sort((a, b) => b - a);
@@ -191,7 +152,7 @@ function validateTableContent(editor, rowsToCheck = null) {
     const valueStatus = [];
     for(let index = 0; index < cells.childCount - 1; index++) cellPos.push(cellPos.at(-1) + cells.child(index).nodeSize);
 
-    for(let index = 4; index < 9; index++) {
+    for(let index = 3; index < 8; index++) {
       const txt = getText(cells.child(index));
       let status = 'empty';
       let val = Number(txt);
@@ -229,14 +190,16 @@ function validateTableContent(editor, rowsToCheck = null) {
       }
     }
 
+    console.log(valueStatus);
+
     for (let offset = 4; offset >= 0; offset--) {
-      const cellNode = cells.child(4 + offset);
+      const cellNode = cells.child(3 + offset);
       const newClass = 'value-' + valueStatus[offset];
 
       if (cellNode.attrs.class === newClass) continue;
 
       const newAttrs = { ...cellNode.attrs, class: newClass };
-      tr = tr.setNodeMarkup(cellPos[4 + offset], cellNode.type, newAttrs, cellNode.marks);
+      tr = tr.setNodeMarkup(cellPos[3 + offset], cellNode.type, newAttrs, cellNode.marks);
       changed = true;
     }
   })
@@ -264,47 +227,6 @@ function exportTableData() {
   Object.assign(localBlockData.data, {jsonHeader, arrayData, jsonContent: ed.getJSON(), pmsData});
   emit('update-table-data', localBlockData);
   return { jsonHeader, arrayData, jsonContent: ed.getJSON(), pmsData };
-}
-
-// [新增] 用於修補舊資料的函式
-function migrateOldJsonContent(jsonContent) {
-  // 深拷貝以避免修改原始 props (雖然這裡通常是傳入副本，但安全起見)
-  const content = JSON.parse(JSON.stringify(jsonContent));
-
-  if (!content || !content.content) return content;
-
-  // 尋找 table 節點
-  const tableNode = content.content.find(n => n.type === 'table');
-  if (!tableNode) return content;
-
-  // 遍歷每一列 (TableRow)
-  tableNode.content.forEach(row => {
-    if (row.type === 'tableRow' && row.content) {
-      const firstCell = row.content[0];
-
-      // 檢查判斷：如果第一格不是 actionCell，代表這是舊資料 (13欄)
-      if (firstCell && firstCell.type !== 'actionCell') {
-        
-        // 建立缺少的 Action Cell 結構
-        const newActionCell = {
-          type: 'actionCell',
-          attrs: {
-            contenteditable: false,
-            class: 'action-cell-wrapper',
-            isPms: true // 預設設為 true (保護舊資料不被誤刪)，這與 getInitialTableContent 保持一致
-          },
-          content: [
-            { type: 'paragraph' }
-          ]
-        };
-
-        // 將 Action Cell 插入到該列的最前面
-        row.content.unshift(newActionCell);
-      }
-    }
-  });
-
-  return content;
 }
 
 function initOrReloadFromProps() {
@@ -345,7 +267,7 @@ function initOrReloadFromProps() {
   let content;
   if (jsonContent) {
     // 檢查並修補舊資料
-    content = migrateOldJsonContent(jsonContent);
+    content = jsonContent;
   } else {
     // 如果沒有 json，則從 arrayData 產生 (這原本就會產生正確的 ActionCell)
     content = getInitialTableContent(arrayData);
@@ -378,6 +300,7 @@ function initOrReloadFromProps() {
           view.dispatch(tr); event.preventDefault(); return true
         }
       },
+      onSelectionUpdate: () => { selectionUpdateTrigger.value++ },
       onUpdate: ({ editor: currEditor }) => {
         // 先標記目前 row 是 dirty
         markCurrentRowDirty(currEditor);
@@ -430,6 +353,7 @@ async function syncPmsWithBackend() {
       // 觸發一次儲存以更新父層資料
       exportTableData();
     }
+    validateTableContent(editor.value, new Set(Array.from({length: PMSData.length - 1}, (v, i) => PMSData.length - i - 1)));
   } catch (e) {
     console.error(e);
     alert("系統錯誤，請稍後再試。");
@@ -451,7 +375,7 @@ function handleKeydown(view, event) {
   // const rowIndex = editor.value.state.selection.$anchor.path[4];
   // const colIndex = editor.value.state.selection.$anchor.path[7];
 
-  if (rowIndex > 0  && [4, 5, 6, 7, 8].includes(colIndex)) {
+  if (rowIndex > 0  && [3, 4, 5, 6, 7].includes(colIndex)) {
     event.preventDefault();
     return true;
   }
@@ -706,21 +630,232 @@ function handleMousedown(view, event) {
   // E. 回傳 true，表示我們完全接管了這個事件
   return true; 
 }
-
 function rowFocusCheck() { return (!editor.value) ? -1 : editor.value.state.selection.$anchor.path[4]; }
 
-// Create table content
+// 輔助函式：判斷當前選取是否「只」位於表格的最後一欄
+const isLastColumnSelected = () => {
+  const ed = editor.value
+  if (!ed) return false
+  
+  // 必須依賴這個 trigger 讓 computed 知道要更新
+  // eslint-disable-next-line no-unused-vars
+  const _tick = selectionUpdateTrigger.value 
+
+  const { state } = ed
+  const { selection } = state
+
+  // 1. 必須是儲存格選取模式 (CellSelection)
+  if (!(selection instanceof CellSelection)) return false
+
+  // 2. 取得選取矩形資訊
+  const rect = selectedRect(state)
+  
+  // 3. 取得表格總寬度 (欄數)
+  // rect.map.width 是表格的總行數
+  const totalCols = rect.map.width
+
+  // 4. 判斷是否為最後一欄
+  // rect.left 是選取區域的起始 index (0-based)
+  // rect.right 是選取區域的結束 index (exclusive)
+  // 如果只選最後一欄：rect.left 必須是 totalCols - 1，且 rect.right 必須是 totalCols
+  const isLastCol = (rect.right === totalCols && rect.left === totalCols - 1)
+
+  return isLastCol
+}
+
+// 右鍵選單狀態
+const ctxMenu = reactive({ show: false, x: 0, y: 0 })
+let savedSelection = null
+
+function openCtxMenu(e) {
+  // 存起來：右鍵當下的 selection（很可能是 CellSelection）
+  savedSelection = editor?.value?.state?.selection || null
+
+  ctxMenu.show = true
+  ctxMenu.x = e.clientX
+  ctxMenu.y = e.clientY
+}
+
+function restoreSelection() {
+  const ed = editor?.value
+  if (!ed || !savedSelection) return
+
+  const { state, view } = ed
+  // 如果 selection 已經不在 doc 範圍，做個保底（可省略）
+  if (savedSelection.from > state.doc.content.size) return
+
+  view.dispatch(state.tr.setSelection(savedSelection))
+  view.focus()
+}
+
+function onCtxMerge(e) {
+  // 重要：不要讓點擊 menu 造成 editor selection 先被破壞
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
+
+  restoreSelection()
+  mergeLastCol()
+  closeCtxMenu()
+}
+
+function onCtxUnmerge(e) {
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
+
+  restoreSelection()
+  unmergeLastCol()
+  closeCtxMenu()
+}
+
+
+function onMouseDownCapture(e) {
+  // 右鍵：button=2
+  if (e.button === 2) {
+    // 阻止 ProseMirror 在右鍵時把 selection 改成單一游標
+    e.preventDefault()
+    e.stopPropagation()
+  }
+}
+
+function closeCtxMenu() {
+  ctxMenu.show = false
+}
+
+// 點擊空白處關閉、Esc 關閉、滾動關閉（體感最好）
+function onGlobalMouseDown() { if (ctxMenu.show) closeCtxMenu() }
+function onGlobalKeyDown(ev) { if (ev.key === 'Escape') closeCtxMenu() }
+function onGlobalScroll() { if (ctxMenu.show) closeCtxMenu() }
+
+// Computed: 是否可以合併 (最後一欄 + 選取多列 + Tiptap 允許合併)
+const canMergeLastCol = computed(() => {
+  const ed = editor.value
+  if (!ed) return false
+  
+  // 1. 基本 Tiptap 檢查 (是否選取了多個單元格)
+  if (!ed.can().mergeCells()) return false
+
+  // 2. 檢查是否在最後一欄
+  if (!isLastColumnSelected()) return false
+
+  return true
+})
+
+// Computed: 是否可以取消合併 (最後一欄 + Tiptap 允許分割)
+const canSplitLastCol = computed(() => {
+  const ed = editor.value
+  if (!ed) return false
+
+  // 1. 基本 Tiptap 檢查 (當前單元格是否已被合併)
+  if (!ed.can().splitCell()) return false
+
+  // 2. 檢查是否在最後一欄 (這裡邏輯稍寬鬆，只要選取的範圍在最後一欄即可)
+  // 注意：splitCell 通常是針對單一合併儲存格，或是選取範圍內的合併儲存格
+  if (!isLastColumnSelected()) {
+    // 特殊情況：如果只是游標在最後一欄的合併儲存格內，而不是 CellSelection
+    // 我們可以用更簡單的方式檢查：獲取當前 resolve 的位置是否在最後一欄
+    // 但為了 UI 一致性，這裡先要求使用者選取該格 (變成 CellSelection)
+    // 若要支援游標狀態，需額外寫 resolve logic，這裡先沿用 CellSelection 邏輯
+    return false
+  }
+
+  return true
+})
+
+// Action: 執行合併
+const mergeLastCol = () => {
+  editor.value?.chain().focus().mergeCells().run()
+}
+
+// Action: 執行分割 (取消合併)
+const unmergeLastCol = () => {
+  const ed = editor.value
+  if (!ed) return
+
+  const { state, view } = ed
+  const { selection } = state
+  
+  // 1. 先把當前選取的合併儲存格「洗白」
+  if (selection instanceof CellSelection) {
+    let tr = state.tr
+    selection.forEachCell((node, pos) => {
+      // 強制將節點類型設為 tableCell (防止它是 actionCell)
+      // 並強制重置屬性為可編輯、無樣式
+      tr.setNodeMarkup(pos, state.schema.nodes.tableCell, {
+        ...node.attrs,
+        contenteditable: true,
+        class: null
+      })
+    })
+    // 立即提交這個變更
+    view.dispatch(tr)
+  }
+
+  // 2. 執行拆分
+  // 因為母體已經是乾淨的 tableCell，分裂出來的子細胞也會是乾淨的
+  ed.chain().focus().splitCell().run()
+}
+
+// 替換原本的 getInitialTableContent (大約在第 670 行附近)
 function getInitialTableContent(data, PmsIndex = null) {
   const table = { type: 'table', content: [] };
-  for (let row = 0; row < data.length; row++) {
-    let actionCell = { type: 'actionCell', attrs: { contenteditable: false, isPms: (PmsIndex == null || PmsIndex[row]) ? true : false }, content: [{ type: 'paragraph' }] };
-    const row_data = data[row].map((text, index) => ({ type: row === 0 ? 'tableHeader' : 'tableCell', content: [{ type: 'paragraph', content: (text.length != 0) ? [{ type: 'text', text }] : [] }], attrs: (row === 0 || LOCKCOLS.includes(index)) ? { contenteditable: (PmsIndex == null || PmsIndex[row]) ? false : true } : {} }));
-    table.content.push({ type: 'tableRow', content: [actionCell, ...row_data] });
+
+  console.log("get initial table content: ", data);
+
+  // 1. 預先計算合併邏輯 (基於槽體: data[row][1])
+  const rowSpans = new Array(data.length).fill(1);
+  const skipLastCol = new Array(data.length).fill(false);
+  let currentTank = null;
+  let spanStartIdx = -1;
+
+  for (let row = 1; row < data.length; row++) {
+    const tank = String(data[row][1] || '').trim(); // 槽體是 data 的 index 1
+    if (tank === currentTank && tank !== '') {
+      rowSpans[spanStartIdx]++;
+      skipLastCol[row] = true;
+    } else {
+      currentTank = tank;
+      spanStartIdx = row;
+    }
   }
+
+  // 2. 產生 Table JSON
+  for (let row = 0; row < data.length; row++) {
+    const row_data = [];
+    for (let index = 0; index < data[row].length; index++) {
+      const text = data[row][index];
+      const isLastCol = (index === data[row].length - 1);
+
+      // ★ 若這列的最後一欄被合併到上面了，就不產生這格
+      if (row > 0 && isLastCol && skipLastCol[row]) {
+        continue;
+      }
+
+      const attrs = (row === 0 || LOCKCOLS.includes(index)) ? { contenteditable: (PmsIndex == null || PmsIndex[row]) ? false : true } : {};
+
+      // ★ 若這格是合併起點，設定 Tiptap 支援的 rowspan 屬性
+      if (row > 0 && isLastCol && rowSpans[row] > 1) {
+        attrs.rowspan = rowSpans[row];
+      }
+
+      row_data.push({
+        type: row === 0 ? 'tableHeader' : 'tableCell',
+        content: [{ type: 'paragraph', content: (text && text.length != 0) ? [{ type: 'text', text }] : [] }],
+        attrs: attrs
+      });
+    }
+
+    table.content.push({ type: 'tableRow', content: [...row_data] });
+  }
+  
   return { type: 'doc', content: [table] };
 }
 
-onMounted(() => { initOrReloadFromProps(); });
+onMounted(() => {
+  initOrReloadFromProps();
+  window.addEventListener('mousedown', onGlobalMouseDown, true);
+  window.addEventListener('keydown', onGlobalKeyDown, true);
+  window.addEventListener('scroll', onGlobalScroll, true);
+});
 onUnmounted(() => {
   if (validateTimer) clearTimeout(validateTimer);
   exportTableData();
@@ -735,6 +870,9 @@ onUnmounted(() => {
     headerEditor.value.destroy();
     headerEditor.value = null; // 🔥 關鍵修正：必須手動設為 null
   }
+  window.removeEventListener('mousedown', onGlobalMouseDown, true);
+  window.removeEventListener('keydown', onGlobalKeyDown, true);
+  window.removeEventListener('scroll', onGlobalScroll, true);
 })
 defineExpose({ initOrReloadFromProps, exportTableData, syncPmsWithBackend });
 </script>
@@ -746,7 +884,7 @@ defineExpose({ initOrReloadFromProps, exportTableData, syncPmsWithBackend });
 
 .management-header-block { display: flex; margin-bottom: 10px; justify-content: space-between; align-items: center; align-items: center; }
 .management-header-block label { font-size: 18px; }
-.management-main-function-block, .management-operation-block { display: flex; gap: 10px; align-items: center; }
+.management-operation-block { margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background-color: #f0f8ff; justify-content: flex-end; }
 .combination-btn {
   background-color: #1666C0;
   color: white;
@@ -794,21 +932,23 @@ defineExpose({ initOrReloadFromProps, exportTableData, syncPmsWithBackend });
 .editor-content :deep(p) { margin: 0px; }
 .editor-content :deep(th), .editor-content :deep(td) { text-align: center; }
 
-.management-tiptap-editor :deep(col:nth-child(1)) { width: 60px; } /* 新增: 操作欄 */
-.management-tiptap-editor :deep(col:nth-child(2)) { width: 50px; } /* 項次 */
-.management-tiptap-editor :deep(col:nth-child(3)) { width: 80px; } /* 槽體 */
-.management-tiptap-editor :deep(col:nth-child(4)) { width: 100px; } /* 管理項目 */
-.management-tiptap-editor :deep(col:nth-child(5)), 
+/*.management-tiptap-editor :deep(col:nth-child(1)) { width: 60px; }*/ /* 新增: 操作欄 */
+.management-tiptap-editor :deep(col:nth-child(1)) { width: 50px; } /* 項次 */
+.management-tiptap-editor :deep(col:nth-child(2)) { width: 80px; } /* 槽體 */
+.management-tiptap-editor :deep(col:nth-child(3)) { width: 100px; } /* 管理項目 */
+.management-tiptap-editor :deep(col:nth-child(4)), 
+.management-tiptap-editor :deep(col:nth-child(5)),
 .management-tiptap-editor :deep(col:nth-child(6)),
 .management-tiptap-editor :deep(col:nth-child(7)),
-.management-tiptap-editor :deep(col:nth-child(8)),
-.management-tiptap-editor :deep(col:nth-child(9)) { width: 60px; }
+.management-tiptap-editor :deep(col:nth-child(8)) { width: 60px; }
 
+.management-tiptap-editor :deep(col:nth-child(9)) { width: 60px; }
 .management-tiptap-editor :deep(col:nth-child(10)) { width: 60px; }
 .management-tiptap-editor :deep(col:nth-child(11)) { width: 60px; }
-.management-tiptap-editor :deep(col:nth-child(12)) { width: 60px; }
+.management-tiptap-editor :deep(col:nth-child(12)) { width: 100px; }
 .management-tiptap-editor :deep(col:nth-child(13)) { width: 100px; }
-.management-tiptap-editor :deep(col:nth-child(14)) { width: 100px; }
+/* .management-tiptap-editor :deep(td:last-child) { text-align: left; } */
+.management-tiptap-editor :deep(td.align-left) { text-align: left; }
 
 .editor-content :deep(.ProseMirror-focused td.selectedCell),
 .editor-content :deep(.ProseMirror-focused th.selectedCell) {
@@ -831,5 +971,78 @@ defineExpose({ initOrReloadFromProps, exportTableData, syncPmsWithBackend });
 .editor-content :deep(td.has-focus){ background-color:#fff7cc; box-shadow: inset 0 0 0 2px #ff9800; }
 
 .hint.empty { margin: 8px 0; color: #c62828; font-weight: 600; }
+
+
+/* 分隔線 */
+.divider {
+  height: 20px;
+  width: 1px;
+  background-color: #ccc;
+  margin: 0 5px;
+}
+
+.table-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.combination-btn {
+  padding: 8px 16px;
+  border: 1px solid #007bff;
+  background-color: #fff;
+  color: #007bff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.combination-btn:hover:not(:disabled) {
+  background-color: #007bff;
+  color: #fff;
+}
+
+.combination-btn:disabled {
+  border-color: #ccc;
+  color: #999;
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.12);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.ctx-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.ctx-item:hover {
+  background: rgba(0,0,0,0.06);
+}
+
+.ctx-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ctx-sep {
+  border: 0;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  margin: 6px 0;
+}
 
 </style>

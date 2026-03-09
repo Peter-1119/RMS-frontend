@@ -124,10 +124,20 @@
             :key="blk.id"
             :block-editors="blk"
             :allow-color="isRevisionDoc"
+            :documentMode="true"
             @add-block="addQualityLayer"
             @update-block="updateQualityLayer"
             @delete-block="removeQualityLayer(blk.id)"
+            @open-doc-search="handleOpenDocSearch(blk.tier - 1, blk)"
           />
+
+          <FormSearchWindow 
+            v-if="specDocWindowVisible"
+            headerName="適用品質與規格文件選取"
+            documentType="doc"
+            @add-new-forms="handleAddDocsToSpec" 
+            @close-window="specDocWindowVisible=false">
+          </FormSearchWindow>
         </section>
 
         <!-- Step 6 使用表單 -->
@@ -256,6 +266,10 @@ const steps = [
   { label: '其他', status: false },                      // 7 -> step_type 7
   { label: '文件匯出' },                  // 8
 ]
+
+// 搜尋結果 (製程列表)
+const searchResults = ref([]) 
+const isSearching = ref(false)
 const currentStep = ref(1)
 
 // 一頁式 section refs（只需要前 7 章節）
@@ -266,6 +280,7 @@ const navCollapsed = ref(false)
 
 // 其餘原本的狀態：form、specBlocks、mcrBlocks、qualityBlocks、otherBlocks 等
 const form = reactive({
+  documentType: 1,
   documentID: '',
   documentName: '',
   documentVersion: '',
@@ -720,7 +735,7 @@ const collectValidationErrors = () => {
           for (let r = 1; r < arr.length; r++) {
             const row = arr[r] || [];
             // 取出重點 5 欄
-            const cellStatus = row.slice(2, 7).map(cell => {
+            const cellStatus = row.slice(3, 8).map(cell => {
               const val = Number(cell);
               // 有文字但不是數字 -> invalid
               if (cell && Number.isNaN(val)) return 'invalid';
@@ -750,7 +765,7 @@ const collectValidationErrors = () => {
           for (let r = 1; r < arr.length; r++) {
             const row = arr[r] || [];
             const sub = [];
-            for (let c = 2; c <= 6; c++) sub.push(String(row[c] ?? '').trim());
+            for (let c = 3; c <= 7; c++) sub.push(String(row[c] ?? '').trim());
             mat.push(sub);
           }
           signatures.push(JSON.stringify(mat));
@@ -1050,6 +1065,70 @@ const fromGenericBlocks = (payload, stepType) =>
     }))
   }))
 
+const specDocWindowVisible = ref(false);
+const currentSpecInsertIndex = ref(-1);
+const currentSpecInsertBlockItem = ref(null); // ★ 記錄當下點擊的小區塊
+
+// 開啟視窗
+const handleOpenDocSearch = (index, blockItem) => {
+  currentSpecInsertIndex.value = index;
+  currentSpecInsertBlockItem.value = blockItem;
+  specDocWindowVisible.value = true;
+};
+
+// ★ 新增：關閉視窗 (取消)
+const handleCloseDocSearch = () => {
+  // 如果使用者點擊取消，把 option 恢復為 0，標題就會自動解鎖
+  if (currentSpecInsertBlockItem.value && currentSpecInsertBlockItem.value.option === 3) {
+    currentSpecInsertBlockItem.value.option = 0;
+  }
+  specDocWindowVisible.value = false;
+};
+
+// 處理選擇後的文件插入
+const handleAddDocsToSpec = (selectedDocs) => {
+  if (!selectedDocs || selectedDocs.length === 0) {
+    handleCloseDocSearch();
+    return;
+  }
+
+  const createTitleJson = (text) => {
+    return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
+  };
+
+  const newBlocks = selectedDocs.map(doc => {
+    return {
+      step: 4,
+      data: [
+        {
+          option: 3, 
+          jsonHeader: createTitleJson(`${doc.formId} ${doc.formName}`),
+          jsonContent: null,
+          files: [],
+        }
+      ]
+    };
+  });
+
+  const targetBlock = qualityBlocks.value[currentSpecInsertIndex.value];
+  
+  // ★ 核心判斷：
+  // 如果當前這個大模塊只有一個子項目 (代表它是新建出來當跳板的空模塊)
+  // 我們就用 splice 直接「替換」它，避免留一個空的在上面浪費。
+  if (targetBlock.data.length === 1) {
+    qualityBlocks.value.splice(currentSpecInsertIndex.value, 1, ...newBlocks);
+  } else {
+    // 如果它已經有多個子區塊(有內容)，我們才把它「附加」在後面
+    qualityBlocks.value.splice(currentSpecInsertIndex.value + 1, 0, ...newBlocks);
+  }
+
+  qualityBlocks.value = qualityBlocks.value.map((blk, blkIndex) => ({ ...blk, tier: blkIndex + 1 }));
+
+  console.log("qualityBlocks: ", qualityBlocks.value);
+
+  specDocWindowVisible.value = false;
+};
+
 // ---------- step 4 — parameters (SPEC_PARAM = 5) ----------
 const hasAnyMachineGroup = ref(true)   // 預設 true，舊資料不會被誤判
 const onMachineGroupInfo = (payload) => {
@@ -1072,7 +1151,6 @@ function serializeParamsFromMCR() {
 }
 // load backend → fill mcrBlocks that the child understands
 function loadParamsIntoMCR(payload) {
-  console.log("payload: ", payload);
   mcrBlocks.value = (payload.blocks || []).map((b, i) => ({
     id: i + 1,
     code: b.code || `XXXX${i + 1}`,
@@ -1102,6 +1180,85 @@ onActivated(() => {
     setToken(draftToken.value, { updateUrl: true })
   }
 })
+
+// ==========================================
+// ★ 核心邏輯：onActivated
+// 目的：當頁面從背景喚醒時，讀取 URL 參數並自動執行 handleSearch
+// ==========================================
+onActivated(async () => {
+  // 檢查是否有 autoLoad 標記
+  if (route.query.autoLoad === 'true') {
+    const { item, book, mode } = route.query;
+    console.log("route.query: ", route.query);
+
+    let itemType = item.split("-")[0];
+
+    // 1. 【修正點】正確填入 form.attribute
+    // 請確認您的 v-model 綁定名稱，通常是 matnr (品目) 和 sfhnr (式樣書號)
+    if (itemType) form.attribute.itemType = itemType;
+    onSelectItemType(itemType);
+
+    if (book) form.attribute.styleNo = book;
+    onSelectStyle();
+    console.log("on Activated form: ", form.attribute);
+
+    // 3. 重置步驟回第一步
+    currentStep.value = 1;
+
+    // 4. 【關鍵點】等待資料更新後，自動執行搜尋
+    await nextTick();
+  }
+})
+
+// ==========================================
+// ★ 核心邏輯：handleSearch
+// 目的：呼叫後端，取得該 品目+式樣書 下的所有製程
+// ==========================================
+const handleSearch = async () => {
+  // 1. 防呆檢查
+  if (!form.attribute.itemType || !form.attribute.styleNo) {
+    alert("請輸入完整的品目與式樣書編號")
+    return
+  }
+
+  isSearching.value = true
+  searchResults.value = [] // 清空舊結果
+
+  try {
+    // 2. 呼叫後端 API
+    // 注意：這裡的路徑要對應您的 item.py 內的 route
+    // 假設 item.py 有一個查詢 API 叫做 /item/search 或類似的
+    const response = await axios.get(`${API_BASE_URL}/item/search`, {
+      params: {
+        keyword: form.attribute.itemType,     // 或 specific: form.item
+        sfhnr: form.attribute.styleNo,     // 假設後端接收式樣書編號的參數名為 sfhnr
+        mode: 'spec_confirm'    // 標記這是從確認頁來的 (可選)
+      }
+    })
+
+    if (response.data.success) {
+      // 3. 綁定資料
+      // 假設後端回傳的是一個陣列，包含 { STATION: 'L260', STATION_CH: '壓合' ... }
+      searchResults.value = response.data.data || []
+      
+      console.log('搜尋成功，找到製程數:', searchResults.value.length)
+      
+      // [UX 優化] 如果只有一筆製程，直接幫使用者選中並跳下一頁 (視需求而定)
+      /*
+      if (searchResults.value.length === 1) {
+         selectStation(searchResults.value[0])
+      }
+      */
+    } else {
+      alert(response.data.message || "查無資料")
+    }
+  } catch (error) {
+    console.error("Search Error:", error)
+    alert("搜尋發生錯誤，請稍後再試")
+  } finally {
+    isSearching.value = false
+  }
+}
 
 const ensureDraftToken = async () => {
   // Snapshot 模式：一定要用 URL 上的 token
@@ -1443,8 +1600,10 @@ const saveDraft = async () => {
 
 // ★ 共用：把後端撈回來的 snapshot/draft 結果套用到前端
 const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false }) => {
+  // console.log("applyLoadedData form attribute: ", form.attribute);
+  // if (route.query.autoLoad === 'true') return;
   // 1) attributes
-  if (snapshot.attributes?.success) {
+  if (!(route.query.autoLoad === 'true') && snapshot.attributes?.success) {
     Object.assign(form, snapshot.attributes.form || {})
   }
 
@@ -1463,7 +1622,6 @@ const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false })
   }
 
   // 依據品目載入 style options + 顯示 specification
-  console.log("form.attribute.specification: ", form.attribute.specification);
   if (form.attribute?.itemType) {
     await loadStylesForItem(form.attribute.itemType)
 
@@ -1508,6 +1666,7 @@ const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false })
       formName: f.formName,
     }))
   }
+  console.log("applyLoadedData form attribute: ", form.attribute);
 }
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll, { passive: true })
@@ -1546,7 +1705,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('scroll', handleScroll);
+  if(confirm("請問是否要保存內容")) {
+    saveDraft();
+  }
 })
 
 const isRevision = computed(() => {

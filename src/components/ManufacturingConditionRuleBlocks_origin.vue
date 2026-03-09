@@ -53,10 +53,10 @@
         <!-- ===== 條件表 (Condition) ===== -->
         <div v-if="hasConditions">
           <div v-if="condEditors[i]" class="menu">
-            <!-- <div class="l"> -->
-              <!-- <button class="btn ghost" @click="addCondRow(i)">新增列</button> -->
-              <!-- <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button> -->
-            <!-- </div> -->
+            <div class="l">
+              <button class="btn ghost" @click="addCondRow(i)">新增列</button>
+              <button class="btn ghost danger" @click="delCondRow(i)">刪除列</button>
+            </div>
             <div v-if="allowColor" class="r">
               <i class="dot blue" @click="setCellColor(i,'cond','#0000ff')"></i>
               <i class="dot black" @click="setCellColor(i,'cond','#000000')"></i>
@@ -127,105 +127,8 @@ const Hdr = TableHeader.extend({
   }
 })
 const Row = TableRow.extend({
-  content: '(tableCell | tableHeader | actionCell)*',
+  content: '(tableCell | tableHeader)*',
   addAttributes() { return { ...(this.parent?.() || {}), class: { default: null } } },
-})
-// [新增] 1. ActionCell: 渲染 + 和 - 按鈕
-const ActionCell = TableCell.extend({
-  name: 'actionCell',
-  group: 'tableCell',
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      contenteditable: { default: false }, // 這一格永遠不可編輯文字
-      class: { default: 'action-cell-wrapper' },
-    }
-  },
-  addNodeView() {
-    return ({ node, getPos, editor }) => {
-      const dom = document.createElement('td');
-      dom.classList.add('action-cell-wrapper');
-      dom.contentEditable = 'false';
-
-      const btnContainer = document.createElement('div');
-      btnContainer.classList.add('action-btn-group');
-
-      // [+] 按鈕
-      const addBtn = document.createElement('button');
-      addBtn.innerText = '+';
-      addBtn.className = 'act-btn add';
-      addBtn.onclick = async () => {
-        if (typeof getPos === 'function') {
-          editor.chain().setNodeSelection(getPos()).addRowAfter().run();
-          nextTick(()=>{
-            const { state, view } = editor
-            const selRowIdx = rowFocusCheck(editor);
-            const tr = state.tr
-            let rowIdx = 0, newRowNode=null, newRowPos=null
-            state.doc.descendants((n,p)=>{
-              if(n.type.name==='tableRow'){
-                if (rowIdx === selRowIdx + 1){ newRowNode = n; newRowPos = p }
-                rowIdx++
-              }
-            })
-            if(!newRowNode) return
-
-            // derive dropdown options from current header template
-            const tdoc = normalizeCondTemplate()
-            const header = tdoc?.content?.[0]?.content?.[0] // tableRow
-            const optionCols = []
-            if (header?.type === 'tableRow') {
-              // header: ['條件名稱', ...]
-              // use props.condTemplate (array form) if provided
-              if (Array.isArray(props.condTemplate)) {
-                optionCols.push(...props.condTemplate.map(x => x.options || []))
-              } else {
-                // fallback: empty options
-                const count = (header.content?.length || 1) - 1
-                optionCols.push(...Array.from({length: Math.max(0, count)}, ()=>[]))
-              }
-            }
-
-            let offset = 1, ci = 0
-            newRowNode.forEach((cellNode, cellIndex)=>{
-              const cpos = newRowPos + offset
-              if (cellIndex > 0) {
-                let repl = null;
-                if (ci === 1) repl = state.schema.nodes.customTableCell.create({ cellType:'text', contenteditable:false }, state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx))));
-                else if (ci > 1) repl = state.schema.nodes.customTableCell.create({ cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-2] || [], dropdownColor: '#000', contenteditable: false }, state.schema.nodes.paragraph.create());
-                tr.replaceWith(cpos, cpos + cellNode.nodeSize, repl);
-              }
-              offset += cellNode.nodeSize;
-              ci++;
-            })
-            if (tr.docChanged) view.dispatch(tr)
-            updateCondRowNumbers(editor); runCondValidation()
-          })
-        }
-      }
-
-      // [-] 按鈕
-      const delBtn = document.createElement('button');
-      delBtn.innerText = '-';
-      delBtn.className = 'act-btn del';
-      
-      // 邏輯：如果是 PMS 列 (isPms=true)，禁用刪除
-      delBtn.onclick = async () => {
-        if (typeof getPos === 'function') {
-          if (confirm('確定要刪除此列嗎？')) {
-            editor.chain().setNodeSelection(getPos()).deleteRow().run();
-            updateCondRowNumbers(editor);
-          }
-        }
-      }
-
-      btnContainer.appendChild(addBtn);
-      btnContainer.appendChild(delBtn);
-      dom.appendChild(btnContainer);
-
-      return { dom, ignoreMutation: () => true, stopEvent: () => true };  // ignoreMutation: 傳遞 ProseMirror 忽略這裡面的 DOM 變動, stopEvent: 事件發生 => return true (事件攔截)
-    }
-  }
 })
 const Cell = TableCell.extend({
   name: 'customTableCell',
@@ -295,7 +198,7 @@ const TableOnlyDoc = Document.extend({ content:'table' })
 const TExt = [
   TableOnlyDoc, ...Base, Focus.configure({ className: 'has-focus', mode: 'all' }),
   Table.configure({ resizable:false, allowTableNodeSelection:true, handleWidth:5, cellMinWidth:50 }),
-  Row, Hdr, ActionCell, Cell, History
+  Row, Hdr, Cell, History
 ]
 
 /* ===== Reactive state ===== */
@@ -439,10 +342,7 @@ const isDoc = (x) => x && typeof x === 'object' && x.type === 'doc'
 // Build condition table TipTap doc from lightweight template:
 // template: Array<{name:string, options:Array<{label,value}>}>
 function buildCondDocFromArray(templateArr) {
-  // ★★★ 新增這行防呆：如果傳入 null/undefined，強制轉為空陣列 ★★★
-  const safeTemplate = Array.isArray(templateArr) ? templateArr : [];
-  
-  const headers = ["按鈕操作", '條件名稱', ...templateArr.map(x => x.name)]
+  const headers = ['條件名稱', ...templateArr.map(x => x.name)]
   const headerRow = {
     type:'tableRow',
     content: headers.map(h => ({
@@ -456,19 +356,12 @@ function buildCondDocFromArray(templateArr) {
     content: headers.map((_, colIdx) => {
       if (colIdx === 0) {
         return {
-          type:'actionCell',
-          attrs: { contenteditable: false },
-          content: [{ type: 'paragraph' }]
-        }
-      }
-      if (colIdx === 1) {
-        return {
           type:'customTableCell',
           attrs:{ cellType:'text', contenteditable:false },
           content:[{ type:'paragraph', content:[{ type:'text', text: '組合1' }] }]
         }
       }
-      const opts = templateArr[colIdx - 2]?.options || []
+      const opts = templateArr[colIdx - 1]?.options || []
       return {
         type:'customTableCell',
         attrs:{ cellType:'dropdown', dropdownValue:'', dropdownOptions:opts, dropdownColor:'#000', contenteditable:false },
@@ -476,8 +369,6 @@ function buildCondDocFromArray(templateArr) {
       }
     })
   }
-  console.log("templateArr: ", templateArr);
-  console.log("dataRow: ", dataRow);
   return { type:'doc', content:[{ type:'table', content:[headerRow, dataRow] }] }
 }
 // Build parameter table TipTap doc from 2D array rows
@@ -495,113 +386,48 @@ function buildParamDocFromRows(rows) {
   return { type:'doc', content:[{ type:'table', content:trows }] }
 }
 
-// function buildCondDocFromData(rows) {
-//   if (!Array.isArray(rows) || rows.length === 0) return buildCondDocFromArray([])
-
-//   // 1. 取得 Header (來自後端回傳的第一列)
-//   const headers = rows[0] // ['條件名稱', 'CondA', 'CondB'...]
-  
-//   // 2. 準備 Dropdown 選項 (來自 Props template)
-//   // 因為後端回傳的欄位順序可能跟 Template 不同，這裡假設後端已經依照 Template 順序整理過
-//   // 但為了保險，我們依據 props.condTemplate 的結構來對應 Column Dropdown Options
-//   // 假設 columns 1~N 對應 template[0~N-1]
-//   const templateArr = Array.isArray(props.condTemplate) ? props.condTemplate : []
-  
-//   // 建構 Header Row
-//   const headerRow = { type: 'tableRow', content: headers.map(h => ({ type: 'tableHeader', attrs: { contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(h) }] }] })) }
-
-//   // 建構 Data Rows (從 index 1 開始)
-//   const dataRows = rows.slice(2).map((row, rIdx) => {
-//     return {
-//       type: 'tableRow',
-//       content: row.map((val, cIdx) => {
-//         // 第 0 欄固定為項次 (Row Index)
-//         if (cIdx === 0) return { type: 'customTableCell', attrs: { cellType: 'text', contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(rIdx + 1) }] }] };
-        
-//         const colOpts = templateArr[cIdx - 1]?.options || []
-        
-//         return {
-//           type: 'customTableCell',
-//           attrs: { 
-//             cellType: 'dropdown', 
-//             dropdownValue: String(val || ''), // 填入後端的數值
-//             dropdownOptions: colOpts,         // 保留前端的選項設定
-//             dropdownColor: '#000', 
-//             contenteditable: false 
-//           },
-//           content: [{ type: 'paragraph' }] // Dropdown 的內容在 NodeView 中渲染，這裡留空
-//         }
-//       })
-//     }
-//   })
-
-//   return { type: 'doc', content: [{ type: 'table', content: [headerRow, ...dataRows] }] }
-// }
 function buildCondDocFromData(rows) {
-  // 防呆：如果沒有資料，就回傳空模板
-  if (!Array.isArray(rows) || rows.length === 0) return buildCondDocFromArray(props.condTemplate)
+  if (!Array.isArray(rows) || rows.length === 0) return buildCondDocFromArray([])
 
-  // 1. 取得 Header (來自後端回傳的第一列，例如 ['條件名稱', 'CondA', 'CondB'])
-  const headers = rows[0] 
+  // 1. 取得 Header (來自後端回傳的第一列)
+  const headers = rows[0] // ['條件名稱', 'CondA', 'CondB'...]
   
   // 2. 準備 Dropdown 選項 (來自 Props template)
+  // 因為後端回傳的欄位順序可能跟 Template 不同，這裡假設後端已經依照 Template 順序整理過
+  // 但為了保險，我們依據 props.condTemplate 的結構來對應 Column Dropdown Options
+  // 假設 columns 1~N 對應 template[0~N-1]
   const templateArr = Array.isArray(props.condTemplate) ? props.condTemplate : []
   
-  // ★ 建構 Header Row：在最前面插入「按鈕操作」
-  const headerRow = { 
-    type: 'tableRow', 
-    content: [
-      // 插入按鈕欄表頭
-      { type: 'tableHeader', attrs: { contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '按鈕操作' }] }] },
-      // 原本的表頭
-      ...headers.map(h => ({ type: 'tableHeader', attrs: { contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(h) }] }] }))
-    ]
-  }
+  // 建構 Header Row
+  const headerRow = { type: 'tableRow', content: headers.map(h => ({ type: 'tableHeader', attrs: { contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(h) }] }] })) }
 
   // 建構 Data Rows (從 index 1 開始)
   const dataRows = rows.slice(1).map((row, rIdx) => {
-    // ★ 每一列資料都要先產生一個 actionCell
-    const actionCell = {
-      type: 'actionCell',
-      attrs: { contenteditable: false },
-      content: [{ type: 'paragraph' }] // 內容留空，由 NodeView 渲染按鈕
-    };
-
-    // 接著產生資料欄位
-    const dataCells = row.map((val, cIdx) => {
-      // 第 0 欄固定為項次 (Row Index) -> cIdx 0 對應 '條件名稱' 欄位
-      if (cIdx === 0) {
-        return { 
-          type: 'customTableCell', 
-          attrs: { cellType: 'text', contenteditable: false }, 
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: String(rIdx + 1) }] }] 
-        };
-      }
-      
-      const colOpts = templateArr[cIdx - 1]?.options || []
-      
-      return {
-        type: 'customTableCell',
-        attrs: { 
-          cellType: 'dropdown', 
-          dropdownValue: String(val || ''), 
-          dropdownOptions: colOpts,
-          dropdownColor: '#000', 
-          contenteditable: false 
-        },
-        content: [{ type: 'paragraph' }] 
-      }
-    });
-
     return {
       type: 'tableRow',
-      content: [actionCell, ...dataCells] // ★ 組合：[按鈕] + [資料]
+      content: row.map((val, cIdx) => {
+        // 第 0 欄固定為項次 (Row Index)
+        if (cIdx === 0) return { type: 'customTableCell', attrs: { cellType: 'text', contenteditable: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(rIdx + 1) }] }] };
+        
+        const colOpts = templateArr[cIdx - 1]?.options || []
+        
+        return {
+          type: 'customTableCell',
+          attrs: { 
+            cellType: 'dropdown', 
+            dropdownValue: String(val || ''), // 填入後端的數值
+            dropdownOptions: colOpts,         // 保留前端的選項設定
+            dropdownColor: '#000', 
+            contenteditable: false 
+          },
+          content: [{ type: 'paragraph' }] // Dropdown 的內容在 NodeView 中渲染，這裡留空
+        }
+      })
     }
   })
 
   return { type: 'doc', content: [{ type: 'table', content: [headerRow, ...dataRows] }] }
 }
-
 // Public: normalize condition template → TipTap doc
 function normalizeCondTemplate() {
   const t = props.condTemplate
@@ -857,6 +683,8 @@ function handlePaste(view, event) {
       targets.push({ cellPos: cellPos[colIndex], cellSize: cellNode.nodeSize, type: cellNode.type, attrs: cellNode.attrs, text: sourceRowData[cIndex].toString() });
     })
   })
+  console.log("targets: ", targets);
+  console.log("targets: ", targets);
 
   // 4. 從尾部節點開始更新欄位
   if (targets.length === 0) return true;
@@ -1017,7 +845,11 @@ function mapDataBlocksToInternal(dataBlocks, diffCollector = []) {
 /* ===== Public actions（新增 / 刪除 / 複製 block） ===== */
 function addBlock() {
   const id = idSeq++
-  blocks.value.push({ id, programLinks: [], data: {} })
+  blocks.value.push({
+    id,
+    programLinks: [],
+    data: {},
+  })
   nextTick(() => initEditors(blocks.value.length - 1))
 }
 async function delBlock(i) {
@@ -1394,25 +1226,19 @@ function addCondRow(i){
     }
 
     let offset = 1, ci = 0
-    newRowNode.forEach((cellNode, index)=>{
+    newRowNode.forEach((cellNode)=>{
       const cpos = newRowPos + offset
-      if (index > 0){
-        let repl = null;
-        if (ci === 1) repl = state.schema.nodes.customTableCell.create({ cellType:'text', contenteditable:false }, state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx))));
-        else repl = state.schema.nodes.customTableCell.create({ cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-2] || [], dropdownColor: '#000', contenteditable: false }, state.schema.nodes.paragraph.create());
-        // const repl = (ci===0)
-        //   ? state.schema.nodes.customTableCell.create(
-        //       { cellType:'text', contenteditable:false },
-        //       state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx)))
-        //     )
-        //   : state.schema.nodes.customTableCell.create(
-        //       { cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-1] || [], dropdownColor: '#000', contenteditable: false },
-        //       state.schema.nodes.paragraph.create()
-        //     )
-        tr.replaceWith(cpos, cpos + cellNode.nodeSize, repl)
-      }
-      offset += cellNode.nodeSize; 
-      ci++;
+      const repl = (ci===0)
+        ? state.schema.nodes.customTableCell.create(
+            { cellType:'text', contenteditable:false },
+            state.schema.nodes.paragraph.create(null, state.schema.text(String(selRowIdx)))
+          )
+        : state.schema.nodes.customTableCell.create(
+            { cellType:'dropdown', dropdownValue:'', dropdownOptions: optionCols[ci-1] || [], dropdownColor: '#000', contenteditable: false },
+            state.schema.nodes.paragraph.create()
+          )
+      tr.replaceWith(cpos, cpos + cellNode.nodeSize, repl)
+      offset += cellNode.nodeSize; ci++
     })
     if (tr.docChanged) view.dispatch(tr)
     updateCondRowNumbers(ed); runCondValidation()
@@ -1436,8 +1262,8 @@ function updateCondRowNumbers(ed){
   state.doc.descendants((node,pos)=>{
     if(node.type.name==='tableRow'){
       if(rowIdx>0){
-        const NoCell = node.child(1);
-        if(NoCell){ const cellPos = pos + 1 + node.child(0).nodeSize; updates.push({ cellPos, node:NoCell, number: rowIdx }) }
+        const firstCell = node.firstChild
+        if(firstCell){ const cellPos = pos + 1; updates.push({ cellPos, node:firstCell, number: rowIdx }) }
       }
       rowIdx++
     }
@@ -1476,6 +1302,7 @@ function setCellColor(i,type,color){
 /* ===== Validation (unchanged) ===== */
 function runCondValidation(){
   const sigMap = new Map()
+  console.log("================================")
   condEditors.value.forEach((ed, bIdx)=>{
     if(!ed) return;
 
@@ -1485,7 +1312,7 @@ function runCondValidation(){
     let rowsPos = [1];
     for(let rowIndex = 0; rowIndex < N - 1; rowIndex++) rowsPos.push(rowsPos.at(-1) + state.doc.content.firstChild.content.child(rowIndex).nodeSize);
     for(let rowIndex = 1; rowIndex < N; rowIndex++) {
-      const rowText = JSON.stringify(state.doc.content.firstChild.content.child(rowIndex).content.content.slice(2).map(cellNode => getText(cellNode)));
+      const rowText = JSON.stringify(state.doc.content.firstChild.content.child(rowIndex).content.content.slice(1).map(cellNode => getText(cellNode)));
       const attrs = state.doc.content.firstChild.content.child(rowIndex).attrs;
       if (!sigMap.has(rowText)) sigMap.set(rowText, []);
       sigMap.get(rowText).push({ bIdx, pos: rowsPos[rowIndex], attrs });
@@ -1641,35 +1468,12 @@ function runAllValidations(){
 /* ===== init per index ===== */
 function initEditors(i) {
   const b = blocks.value[i]
-  if (props.hasConditions && props.condTemplate && props.condTemplate.length > 0) {
-    if (props.hasConditions) {
-      // ▼▼▼▼▼▼▼▼▼ 修改開始 ▼▼▼▼▼▼▼▼▼
-      
-      // 1. 取得原始資料
-      const rawJson = b.data?.jsonConditionContent || null;
-      let content = null;
-
-      if (rawJson) {
-        // 2. 如果有 JSON (代表是存檔過的)，呼叫 restoreActionColumnToJSON 把按鈕補回來
-        // 確保您已經在 script setup 中加入了 restoreActionColumnToJSON 這個 helper function
-        content = restoreActionColumnToJSON(rawJson);
-      } else {
-        // 3. 如果沒有 JSON，則使用 arrayConditionData 建立 (原本的邏輯)
-        // buildCondDocFromData 裡面已經有按鈕生成邏輯，所以不用動
-        // content = buildCondDocFromData(b.data?.arrayConditionData || [], props.condTemplate);
-        content = buildCondDocFromData(b.data?.arrayConditionData || []);
-      }
-
-      // 4. 將處理過後的 content 傳入 makeCondEditor
-      condEditors.value[i] = makeCondEditor(content, () => { runCondValidation() })
-      
-      // ▲▲▲▲▲▲▲▲▲ 修改結束 ▲▲▲▲▲▲▲▲▲
-    }
+  if (props.hasConditions) {
+    condEditors.value[i] = makeCondEditor(
+      b.data?.jsonConditionContent || null,
+      () => { runCondValidation() }
+    )
   }
-  else {
-    condEditors.value[i] = null;
-  }
-
   if (props.hasPms){
     paramEditors.value[i] = makeParamEditor(
       b.data?.jsonParameterContent || null,
@@ -1702,16 +1506,6 @@ onMounted(() => {
   lastExternalDataJson.value = JSON.stringify(props.dataBlocks || []);
   window.addEventListener('click', handleClickOutside);
 })
-
-let emitTimer = ref(null);
-function syncToParent() {
-  if (emitTimer.value) clearTimeout(emitTimer.value); // 有計時器才清除
-  emitTimer.value = setTimeout(() => {
-    const payload = exportData()
-    lastExternalDataJson.value = JSON.stringify(payload || [])
-    emit('update:dataBlocks', payload)
-  }, 150)
-}
 
 // Watch dataBlocks（外部載草稿 / 換機台時）
 watch(() => props.dataBlocks, async (newBlocks) => {
@@ -1805,7 +1599,6 @@ watch(
       updatedBlocks.forEach((newBlk, i) => {
         const oldBlk = blocks.value[i];
         
-        console.log("build hasConditions: ", props.hasConditions)
         if (newBlk.data.jsonParameterContent === null && paramEditors.value[i]) {
           const newDoc = buildParamDocFromRows(newBlk.data.arrayParameterData);
           paramEditors.value[i].commands.setContent(newDoc);
@@ -1826,7 +1619,6 @@ watch(
     // 幫現有的 blocks 補上 Editor
     blocks.value.forEach((b, i) => {
       if (props.hasConditions && !condEditors.value[i]) {
-        console.log("build hasConditions: ", props.hasConditions)
         condEditors.value[i] = makeCondEditor(
           b.data?.jsonConditionContent || null,
           () => {
@@ -1853,6 +1645,7 @@ watch(
 watch(
   () => props.specOptions,
   async (opts) => {
+    console.log("specOptions: ", opts);
     const list = opts || [];
     // ✅ 只有一個選項時才啟動
     if (list.length !== 1) return;
@@ -1900,98 +1693,35 @@ onBeforeUnmount(() => {
 })
 
 /* ===== Export to parent ===== */
-function extractTableArray(ed, skipFirstCol = false) {
-  if (!ed) return [];
-  const rows = ed.state.doc.content.firstChild.content.content.map(rowNode => 
-    (rowNode.content.content.map(cellNode => getText(cellNode)))
-  );
-  
-  if (skipFirstCol) {
-    // 如果需要忽略第一欄 (針對條件表)，每一列都 slice(1)
-    return rows.map(row => row.slice(1));
-  }
-  return rows;
-}
-/* Helper: 移除 JSON 中的第一欄 (用於 Export) */
-function removeActionColumnFromJSON(docJson) {
-  if (!docJson || !docJson.content) return null;
-
-  // 1. 深層複製，避免修改到編輯器當前的狀態
-  const newDoc = JSON.parse(JSON.stringify(docJson));
-
-  // 2. 找到 table 節點
-  const tableNode = newDoc.content.find(node => node.type === 'table');
-  
-  if (tableNode && Array.isArray(tableNode.content)) {
-    // 3. 遍歷每一列 (Row)，移除第一個 Cell
-    tableNode.content.forEach(row => {
-      if (row.content && row.content.length > 0) {
-        row.content.shift(); // 移除陣列第一個元素 (即 Action Cell)
-      }
-    });
-  }
-
-  return newDoc;
+function extractTableArray(ed) {
+  return (!ed) ? [] : ed.state.doc.content.firstChild.content.content.map(rowNode => (rowNode.content.content.map(cellNode => getText(cellNode))));
 }
 
-/* Helper: 還原 JSON 中的第一欄 (用於 Load) */
-function restoreActionColumnToJSON(docJson) {
-  if (!docJson || !docJson.content) return null;
-
-  // 1. 深層複製
-  const newDoc = JSON.parse(JSON.stringify(docJson));
-
-  // 2. 找到 table 節點
-  const tableNode = newDoc.content.find(node => node.type === 'table');
-
-  if (tableNode && Array.isArray(tableNode.content)) {
-    // 3. 遍歷每一列，補回 Action Cell
-    tableNode.content.forEach((row, rowIndex) => {
-      if (!row.content) row.content = [];
-
-      if (rowIndex === 0) {
-        // --- 表頭 (Header) ---
-        // 補回「按鈕操作」的 tableHeader
-        row.content.unshift({
-          type: 'tableHeader',
-          attrs: { contenteditable: false, colspan: 1, rowspan: 1, colwidth: null },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: '按鈕操作' }] }]
-        });
-      } else {
-        // --- 內容 (Body) ---
-        // 補回 actionCell
-        row.content.unshift({
-          type: 'actionCell', // 請確保這個 type 名稱跟您 NodeView 定義的一致
-          attrs: { contenteditable: false },
-          content: [{ type: 'paragraph' }]
-        });
-      }
-    });
-  }
-
-  return newDoc;
-}
 function exportData() {
   return blocks.value.map((b, i) => {
-    // 取得原始 JSON
-    const rawJson = condEditors.value[i]?.getJSON() || null;
-    
-    // ★ 修改點：移除第一欄按鈕再儲存
-    const cleanJson = removeActionColumnFromJSON(rawJson);
-
     return {
       id: b.id,
+      // ✅ 不再輸出 programLinks，真正要存的在 metadata.programs
       data: {
-        jsonConditionContent: cleanJson, // 存入乾淨的 JSON
-        arrayConditionData:   extractTableArray(condEditors.value[i], true), // 這裡維持 true (忽略第一欄)
-        
+        jsonConditionContent: condEditors.value[i]?.getJSON() || null,
+        arrayConditionData:   extractTableArray(condEditors.value[i]),
         jsonParameterContent: paramEditors.value[i]?.getJSON() || null,
-        arrayParameterData:   extractTableArray(paramEditors.value[i], false),
-        
+        arrayParameterData:   extractTableArray(paramEditors.value[i]),
         metadata: b.data?.metadata || {},
       },
     }
   })
+}
+
+let emitTimer = null
+function syncToParent() {
+  clearTimeout(emitTimer)
+  emitTimer = setTimeout(() => {
+    const payload = exportData()
+    console.log("sync to parent")
+    lastExternalDataJson.value = JSON.stringify(payload || [])
+    emit('update:dataBlocks', payload)
+  }, 150)
 }
 
 defineExpose({ exportData })
@@ -2083,13 +1813,5 @@ defineExpose({ exportData })
 .tag-code { font-family: monospace; padding: 0 4px; background: #fff; border-radius: 4px; border: 1px dashed #b0c4ff; }
 .tag-remove { border: none; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; color: #888; }
 .tag-remove:hover { color: #c62828; }
-
-.ed :deep(.action-cell-wrapper) { padding: 2px; background-color: #f1f3f5; vertical-align: middle; text-align: center; }
-.ed :deep(.action-btn-group) { display: flex; justify-content: center; gap: 12px; }
-.ed :deep(.act-btn) { width: 25px; height: 25px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; font-size: 14px; padding: 0; line-height: 1; }
-.ed :deep(.act-btn.add) { color: #1c7ed6; background-color: #e7f5ff; }
-.ed :deep(.act-btn.add:hover) { background-color: #d0ebff; }
-.ed :deep(.act-btn.del) { color: #fa5252; background-color: #fff5f5; }
-.ed :deep(.act-btn.del:hover) { background-color: #ffe3e3; }
 
 </style>

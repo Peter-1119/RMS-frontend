@@ -1,20 +1,21 @@
 <template>
   <div class="block-container">
-    <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
+    <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem.id" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
       <div class="block-header">
         <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
         
-        <EditorContent :editor="titleEditor[blockIndex]" class="title-editor-content" />
-
+        <EditorContent :editor="titleEditor[blockItem.id]" class="title-editor-content" />
+        
         <div v-if="allowColor" class="menu color">
           <div class="font-color blue" @click="setGenericColor('blue')"></div>
           <div class="font-color black" @click="setGenericColor(null)"></div>
         </div>
 
         <div :class="`menu content-type-option-${step}-${tier}-${blockIndex}`">
-          <label><input type="radio" v-model="blockItem.option" :value=0 @change="radioInputChange(blockIndex)">無</label>
-          <label><input type="radio" v-model="blockItem.option" :value=1 @change="radioInputChange(blockIndex)">文字框 or 圖</label>
-          <label><input type="radio" v-model="blockItem.option" :value=2 @change="radioInputChange(blockIndex)">表格</label>
+          <label><input type="radio" v-model="blockItem.option" :value=0 @change="radioInputChange(blockItem)">無</label>
+          <label><input type="radio" v-model="blockItem.option" :value=1 @change="radioInputChange(blockItem)">文字框 or 圖</label>
+          <label><input type="radio" v-model="blockItem.option" :value=2 @change="radioInputChange(blockItem)">表格</label>
+          <label v-if="documentMode"><input type="radio" v-model="blockItem.option" :value=3 @change="radioInputChange(blockItem)">插入文件</label>
         </div>
 
         <div class="action-buttons">
@@ -25,30 +26,28 @@
       </div>
 
       <div class="editor-body">
-        <div class="menu-bar" v-if="blockItem.option !== 0">
+        <div class="menu-bar" v-if="blockItem.option !== 0 && blockItem.option !== 3">
           <template v-if="blockItem.option === 2">
-          <button @click="addRow(blockIndex)" class="menu-btn" title="表格：新增列">新增列</button>
-          <button @click="addColumn(blockIndex)" class="menu-btn" title="表格：新增行">新增行</button>
+            <button @click="addRow(blockItem.id)" class="menu-btn" title="表格：新增列">新增列</button>
+            <button @click="addColumn(blockItem.id)" class="menu-btn" title="表格：新增行">新增行</button>
+            <button @click="deleteRow(blockItem.id)" class="menu-btn" :disabled="!canDeleteRow(blockItem.id)" title="表格：刪除列">刪除列</button>
+            <button @click="deleteColumn(blockItem.id)" class="menu-btn" :disabled="!canDeleteColumn(blockItem.id)" title="表格：刪除行">刪除行</button>
+            <button @click="mergeCells(blockItem.id)" class="menu-btn" :disabled="!canMergeOrSplit(blockItem.id)" title="表格：合併儲存格">合併儲存格</button>
+            <button @click="unmergeCells(blockItem.id)" class="menu-btn" :disabled="!canMergeOrSplit(blockItem.id)" title="表格：解除合併">取消合併</button>
 
-          <button @click="deleteRow(blockIndex)" class="menu-btn" :disabled="!canDeleteRow(blockIndex)" title="表格：刪除列">刪除列</button>
-          <button @click="deleteColumn(blockIndex)" class="menu-btn" :disabled="!canDeleteColumn(blockIndex)" title="表格：刪除行">刪除行</button>
-
-          <button @click="mergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：合併儲存格">合併儲存格</button>
-          <button @click="unmergeCells(blockIndex)" class="menu-btn" :disabled="!canMergeOrSplit(blockIndex)" title="表格：解除合併">取消合併</button>
-
-          <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
+            <span style="border-right: 1px solid #ccc; margin: 0 5px;"></span>
           </template>
 
-          <input type="file" :ref="el => fileInputRefs[blockIndex] = el" @change="handleImageUpload($event, blockIndex)" accept="image/*" style="display: none;">
-          <button @click="triggerFileInput(blockIndex)" class="menu-btn" title="插入圖片">插入圖片</button>
+          <input type="file" :ref="el => fileInputRefs[blockItem.id] = el" @change="handleImageUpload($event, blockItem)" accept="image/*" style="display: none;">
+          <button @click="triggerFileInput(blockItem.id)" class="menu-btn" title="插入圖片">插入圖片</button>
         </div>
         
-        <EditorContent v-if="blockItem.option !== 0" :editor="editors[blockIndex]" class="editor-content" />
+        <EditorContent v-if="blockItem.option !== 0 && blockItem.option !== 3" :editor="editors[blockItem.id]" class="editor-content" />
         <div v-if="blockItem.option == 1 && blockItem.files.length > 0" class="files-block">
           <ul class="preview-grid">
             <li v-for="(fileItem, index) in blockItem.files" :key="index" class="preview-item">
               <img :src="imgUrl(fileItem.path_to_save)" alt="圖片預覽" class="preview-thumbnail">
-              <button @click="removeFile(blockIndex, index)" class="remove-btn">X</button>
+              <button @click="removeFile(blockItem, index)" class="remove-btn">X</button>
               <div class="file-info">
                 <span>{{ fileItem.name }}</span> 
                 <span>({{ (fileItem.size / 1024 / 1024).toFixed(2) }} MB)</span>
@@ -63,7 +62,7 @@
 
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { v1 as uuidv1 } from 'uuid'
+import { v1 as uuidv1 } from 'uuid';
 import { EditorContent, Editor } from '@tiptap/vue-3'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
@@ -77,6 +76,7 @@ import { Color } from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Image } from '@tiptap/extension-image'
 import { Focus } from '@tiptap/extensions'
+import { History } from '@tiptap/extension-history'
 import { CellSelection, selectedRect } from 'prosemirror-tables'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
@@ -85,9 +85,10 @@ const STATIC_BASE_URL = import.meta.env.VITE_APP_STATIC_BASE_URL || ''
 // ---------- props / emits ----------
 const props = defineProps({
   blockEditors: { type: Object, required: true }, // { step, tier, data:[{option, header, jsonContent, files:[]}, ...] }
-  allowColor: {type: Boolean, default: true}
+  allowColor: {type: Boolean, default: true},
+  documentMode: { type: Boolean, default: false }
 })
-const emit = defineEmits(['add-block', 'update-block', 'delete-block'])
+const emit = defineEmits(['add-block', 'update-block', 'delete-block', 'open-doc-search']);
 
 // ---------- state ----------
 const step = ref(props.blockEditors.step)
@@ -103,7 +104,7 @@ const fileInputRefs = ref([])        // array-style refs per block index
 const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
 const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, Placeholder.configure({ placeholder: '請輸入標題' })]
 const textExt  = [Document, ...baseExt, Placeholder.configure({ placeholder: '請輸入文字內容' }), Image.configure({ inline: true, allowBase64: true })]
-const tableExt = [Document.extend({ content: 'table' }), ...baseExt, Focus.configure({ className: 'has-focus', mode: 'all' }),, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ inline: true, allowBase64: true })]
+const tableExt = [Document.extend({ content: 'table' }), ...baseExt, History, Focus.configure({ className: 'has-focus', mode: 'all' }),, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ inline: true, allowBase64: true })]
 
 // ---------- helpers ----------
 const deepClone = v => (v == null ? v : JSON.parse(JSON.stringify(v)))
@@ -128,48 +129,33 @@ const setActiveEditor = ed => (activeEditor.value = ed)
 const setGenericColor = color => activeEditor.value?.chain().focus().setColor(color || '#000').run()
 
 // safe can()-checks for table actions
-const canMergeOrSplit = idx => {
-  const ed = editors[idx]
-  if (!ed) return false
-  try {
-    return ed.can().mergeCells() || ed.can().splitCell()
-  } catch {
-    return false
-  }
+const canMergeOrSplit = id => {
+  const ed = editors[id];
+  if (!ed) return false;
+  try { return ed.can().mergeCells() || ed.can().splitCell() } catch { return false }
 }
-
-const canDeleteRow = idx => {
-  const ed = editors[idx]
-  if (!ed) return false
-  try {
-    return ed.can().deleteRow()
-  } catch {
-    return false
-  }
+const canDeleteRow = id => {
+  const ed = editors[id];
+  if (!ed) return false;
+  try { return ed.can().deleteRow() } catch { return false }
 }
-
-const canDeleteColumn = idx => {
-  const ed = editors[idx]
-  if (!ed) return false
-  try {
-    return ed.can().deleteColumn()
-  } catch {
-    return false
-  }
+const canDeleteColumn = id => {
+  const ed = editors[id];
+  if (!ed) return false;
+  try { return ed.can().deleteColumn() } catch { return false }
 }
 
 // ---------- editor init / lifecycle ----------
-const initTitleEditor = (idx) => {
-  titleEditor[idx]?.destroy()
-  delete titleEditor[idx]
+const initTitleEditor = (blockItem) => {
+  const id = blockItem.id;
+  titleEditor[id]?.destroy()
+  delete titleEditor[id]
 
-  // 處理舊格式的字串標題，轉換為 Tiptap JSON 格式
   let content = null
-  if (localBlockContents.data[idx] == undefined) {
+  if (!blockItem.jsonHeader) {
     content = initialDoc()
-  }
-  else {
-    content = localBlockContents.data[idx].jsonHeader
+  } else {
+    content = blockItem.jsonHeader
     if (typeof content === 'string' && content) {
       content = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: content }] }] }
     }
@@ -179,61 +165,73 @@ const initTitleEditor = (idx) => {
     content: deepClone(content),
     extensions: titleExt,
     editorProps: { attributes: { class: 'title-editor-content' }, handlePaste: (view, event) => handleTextPaste(view, event) },
+    editable: blockItem.option !== 3,
     onFocus: ({ editor }) => setActiveEditor(editor), 
     onUpdate: ({ editor }) => { 
-      // 綁定 JSON 內容回資料模型
-      localBlockContents.data[idx].jsonHeader = editor.getJSON() 
+      // 直接綁定物件屬性，不怕陣列 index 改變！
+      blockItem.jsonHeader = editor.getJSON() 
     },
   })
 
-  titleEditor[idx] = ed
-  if (!localBlockContents.data[idx].jsonHeader) {
-    localBlockContents.data[idx].jsonHeader = ed.getJSON()
-  }
+  titleEditor[id] = ed
+  if (!blockItem.jsonHeader) blockItem.jsonHeader = ed.getJSON()
 }
 
-const initBlockEditor = (idx, option) => {
-  // destroy old
-  editors[idx]?.destroy()
-  delete editors[idx]
+const initBlockEditor = (blockItem) => {
+  const id = blockItem.id;
+  editors[id]?.destroy()
+  delete editors[id]
 
-  if (option === 0) return
+  if (blockItem.option === 0 || blockItem.option === 3) return
 
-  const ext = option === 1 ? textExt : tableExt
-  const defaultContent = option === 1 ? initialDoc() : initialTableDoc()
-  const content = localBlockContents.data[idx].jsonContent || defaultContent
+  const ext = blockItem.option === 1 ? textExt : tableExt
+  const defaultContent = blockItem.option === 1 ? initialDoc() : initialTableDoc()
+  let content = deepClone(blockItem.jsonContent || defaultContent)
 
   let specificEditorProps = { attributes: { class: 'editor-content' } };
 
-  if (option === 1) {
-    // --- 文字模式 (Text Mode) ---
+  if (blockItem.option === 1) {
     specificEditorProps = { attributes: { class: 'editor-content' }, handlePaste: (view, event) => handleTextPaste(view, event) }
-  } else if (option === 2) {
-    // --- 表格模式 (Table Mode) ---
+  } else if (blockItem.option === 2) {
+    content = forceHeaderRow(content)
     specificEditorProps = {
       attributes: { class: 'editor-content' },
-      // 掛載複製事件
-      handleDOMEvents: {
-        copy: (view, event) => handleCopy(view, event),
-        paste: (view, event) => handleTablePaste(view, event),
-        mousedown: (view, event) => handelMousedown(view, event)
-      }
+      handleDOMEvents: { drop: () => true, dragstart: () => true, copy: handleCopy, paste: handlePaste, mousedown: handleMousedown }
     }
   }
 
   const ed = new Editor({
-    content: deepClone(content),
+    content,
     extensions: ext,
     editorProps: specificEditorProps,
     onFocus: ({ editor }) => setActiveEditor(editor),
-    onUpdate: ({ editor }) => { localBlockContents.data[idx].jsonContent = editor.getJSON() },
+    onUpdate: ({ editor }) => { blockItem.jsonContent = editor.getJSON() },
   })
-  editors[idx] = ed
+  editors[id] = ed
 
-  // seed jsonContent once
-  if (!localBlockContents.data[idx].jsonContent) {
-    localBlockContents.data[idx].jsonContent = ed.getJSON()
+  if (!blockItem.jsonContent) blockItem.jsonContent = ed.getJSON()
+}
+
+// 強制將 Table 的第一列轉換為 tableHeader
+const forceHeaderRow = (doc) => {
+  // 基礎檢查：確保是 Tiptap doc 結構
+  if (!doc || doc.type !== 'doc' || !Array.isArray(doc.content)) return doc
+
+  // 1. 尋找 table 節點
+  const tableNode = doc.content.find(n => n.type === 'table')
+  if (!tableNode || !Array.isArray(tableNode.content) || tableNode.content.length === 0) return doc
+
+  // 2. 取得第一列 (Row 0)
+  const firstRow = tableNode.content[0]
+  if (firstRow.type === 'tableRow' && Array.isArray(firstRow.content)) {
+    // 3. 遍歷第一列的所有儲存格，將 tableCell 改為 tableHeader
+    firstRow.content.forEach(cell => {
+      if (cell.type === 'tableCell') {
+        cell.type = 'tableHeader'
+      }
+    })
   }
+  return doc
 }
 
 const range = (a, b) => Array.from({length: b - a}, (v, i) => i + a);
@@ -289,7 +287,7 @@ function parseExcelClipboard(str) {
   }
   return rows;
 }
-// Copy Process
+// Handle copy process (Ctrl + C)
 function handleCopy(view, event) {
   const { state } = view;
   const sel = state.selection;
@@ -327,10 +325,11 @@ function handleCopy(view, event) {
   }
   return false;
 }
-// Paste Process
-function handleTablePaste(view, event) {
+// Handle paste process (Ctrl + V)
+function handlePaste(view, event) {
   const { state, dispatch } = view;
   const sel = state.selection;
+  console.log("Dynamic block paste function")
   
   // 1. 取得並解析內容
   const raw = event.clipboardData?.getData('text/plain') || '';
@@ -357,6 +356,11 @@ function handleTablePaste(view, event) {
     textToPaste = textToPaste.replace(/\r\n/g, '\n');
     dispatch(state.tr.insertText(textToPaste));
 
+    const anchorPath = view.state.selection.$anchor.path;
+    if(anchorPath && anchorPath.length > 4) {
+      const startRowIndex = anchorPath[4];
+    }
+
     // 阻止瀏覽器原生貼上 (避免重複)
     event.preventDefault(); 
     return true; 
@@ -367,7 +371,7 @@ function handleTablePaste(view, event) {
   startColIndex = rect.left;
 
   // [保護] 禁止貼在 Index 0
-  if (startColIndex === 0 || startRowIndex < 0 || startColIndex < 0) return false;
+  if (startRowIndex < 0 || startColIndex < 0) return false;
 
   // 3. 紀錄貼上的欄位
   let M = view.state.selection.$anchor.node(1).childCount;
@@ -377,7 +381,6 @@ function handleTablePaste(view, event) {
   for(let rowIndex = 0; rowIndex < tableNode.childCount; rowIndex++) rowsPos.push(rowsPos.at(-1) + tableNode.content.child(rowIndex).nodeSize);
 
   const targets = [];
-  const impactedRowIndexes = range(startRowIndex, Math.min(M, startRowIndex + matrix.length));
   range(startRowIndex, startRowIndex + matrix.length).forEach((rowIndex, rIndex) => {
     if (rowIndex >= M) return;
 
@@ -410,7 +413,9 @@ function handleTablePaste(view, event) {
     tr = tr.replaceWith(t.cellPos, t.cellPos + t.cellSize, newCell);
   }
 
-  if (tr.docChanged) dispatch(tr.scrollIntoView());
+  if (tr.docChanged) {
+    dispatch(tr.scrollIntoView());
+  }
 
   event.preventDefault();
   return true;
@@ -424,11 +429,11 @@ function handleTextPaste(view, event) {
   }
   return false;
 }
-// Mouse click Process
-function handelMousedown(view, event) {
+// Handle mouse click for cell select
+function handleMousedown(view, event) {
   // 1. 忽略按鈕
   if (event.target.closest('button')) return false;
-
+  
   // 2. 找出點擊的儲存格 DOM
   const cellDOM = event.target.closest('td, th');
   if (!cellDOM) return false;
@@ -442,10 +447,10 @@ function handelMousedown(view, event) {
   // 4. 判斷是否為「第二次點擊」(進入編輯模式)
   const { selection } = view.state;
   if (selection instanceof CellSelection) {
-    // 如果已經單選了這一格，且再次點擊 -> 放行事件，讓使用者進入編輯模式
-    if (selection.$anchorCell.pos === cellPos && selection.$headCell.pos === cellPos) {
-      return false; 
-    }
+      // 如果已經單選了這一格，且再次點擊 -> 放行事件，讓使用者進入編輯模式
+      if (selection.$anchorCell.pos === cellPos && selection.$headCell.pos === cellPos) {
+          return false; 
+      }
   }
 
   // [情境：第一次點擊] -> 手動實作「點擊選取」與「拖曳框選」
@@ -469,10 +474,13 @@ function handelMousedown(view, event) {
     if (foundCellPos !== null && foundCellPos !== currentHeadPos) {
       currentHeadPos = foundCellPos;
       try {
-        // 使用 CellSelection.create 自動計算矩形範圍，注意：必須確保 anchor 和 head 在同一個 table 內，否則 create 會報錯，這裡用 try-catch 保護
+        // 使用 CellSelection.create 自動計算矩形範圍
+        // 注意：必須確保 anchor 和 head 在同一個 table 內，否則 create 會報錯，這裡用 try-catch 保護
         const newSelection = CellSelection.create(view.state.doc, startAnchorPos, foundCellPos);
         view.dispatch(view.state.tr.setSelection(newSelection));
-      } catch (e) { }
+      } catch (e) {
+        // 跨表格拖曳或結構錯誤時忽略
+      }
     }
   };
 
@@ -491,10 +499,13 @@ function handelMousedown(view, event) {
 }
 
 onMounted(() => {
-  // lazy init only for active options
   nextTick(() => {
-    localBlockContents.data.forEach((blk, i) => { initTitleEditor(i) })
-    localBlockContents.data.forEach((blk, i) => blk.option !== 0 && initBlockEditor(i, blk.option))
+    localBlockContents.data.forEach((blk) => { 
+      // 確保每一個 block 一定有 id
+      if (!blk.id) blk.id = uuidv1();
+      initTitleEditor(blk);
+      if (blk.option !== 0) initBlockEditor(blk);
+    })
   })
 })
 
@@ -510,25 +521,52 @@ watch(() => props.blockEditors.tier, t => {
   localBlockContents.tier = t
 })
 
+// // ★ 新增：監聽資料變化，動態切換標題編輯器的鎖定狀態
+// watch(() => localBlockContents.data, (newData) => {
+//   newData.forEach(blockItem => {
+//     const tEd = titleEditor[blockItem.id];
+//     if (tEd) {
+//       tEd.setEditable(blockItem.option !== 3);
+//     }
+//   });
+// }, { deep: true });
+
 // ---------- UI handlers ----------
 const addSmallBlock = () => {
-  localBlockContents.data.push({ option: 0, jsonHeader: null, jsonContent: null, files: [] })
-  initTitleEditor(localBlockContents.data.length - 1)
+  const newBlock = { option: 0, jsonHeader: null, jsonContent: null, files: [], id: uuidv1() };
+  localBlockContents.data.push(newBlock);
+  initTitleEditor(newBlock);
 }
+
 const removeSmallBlock = (idx) => {
   if (!confirm('確定要刪除此子區塊?')) return
-  titleEditor[idx]?.destroy()
-  editors[idx]?.destroy()
-  delete titleEditor[idx]
-  delete editors[idx]
+  
+  // 刪除陣列前，先抓到 id，並用 id 把編輯器徹底銷毀
+  const id = localBlockContents.data[idx].id;
+  titleEditor[id]?.destroy()
+  editors[id]?.destroy()
+  delete titleEditor[id]
+  delete editors[id]
+  
+  // 執行刪除
   localBlockContents.data.splice(idx, 1)
 }
 
-const radioInputChange = (idx) => {
-  const opt = localBlockContents.data[idx].option;
-  localBlockContents.data[idx].jsonContent = null;
-  if (opt !== 1) localBlockContents.data[idx].files = [];
-  nextTick(() => initBlockEditor(idx, opt));
+const radioInputChange = (blockItem) => {
+  const opt = blockItem.option;
+  
+  if (opt === 3) {
+    // ★ 將 blockItem 傳出去給父元件
+    emit('open-doc-search', blockItem);
+    return;
+  }
+
+  const tEd = titleEditor[blockItem.id];
+  if (tEd) { tEd.setEditable(blockItem.option !== 3); }
+
+  blockItem.jsonContent = null;
+  if (opt !== 1) blockItem.files = [];
+  nextTick(() => initBlockEditor(blockItem));
 }
 
 const emitAddBlock = () => { emit('add-block'); }
@@ -539,22 +577,23 @@ const emitDelete = () => {
   emit('delete-block', localBlockContents.id);
 }
 
-const addRow = idx => editors[idx]?.chain().focus().addRowAfter().run()
-const addColumn = idx => editors[idx]?.chain().focus().addColumnAfter().run()
-const deleteRow = idx => editors[idx]?.chain().focus().deleteRow().run()
-const deleteColumn = idx => editors[idx]?.chain().focus().deleteColumn().run()
-const mergeCells = idx => editors[idx]?.chain().focus().mergeCells().run()
-const unmergeCells = idx => editors[idx]?.chain().focus().splitCell().run()
+const addRow = id => editors[id]?.chain().focus().addRowAfter().run()
+const addColumn = id => editors[id]?.chain().focus().addColumnAfter().run()
+const deleteRow = id => editors[id]?.chain().focus().deleteRow().run()
+const deleteColumn = id => editors[id]?.chain().focus().deleteColumn().run()
+const mergeCells = id => editors[id]?.chain().focus().mergeCells().run()
+const unmergeCells = id => editors[id]?.chain().focus().splitCell().run()
 
 
-const triggerFileInput = idx => {
-  const el = fileInputRefs.value[idx]
+const triggerFileInput = id => {
+  const el = fileInputRefs.value[id]
   if (Array.isArray(el) ? el[0] : el) (Array.isArray(el) ? el[0] : el).click()
 }
-const removeFile = (idx, picIdx) => localBlockContents.data[idx].files.splice(picIdx, 1)
-const handleImageUpload = async (evt, idx) => {
+const removeFile = (blockItem, picIdx) => blockItem.files.splice(picIdx, 1)
+
+const handleImageUpload = async (evt, blockItem) => {
   const file = evt.target.files?.[0]
-  const ed = editors[idx]
+  const ed = editors[blockItem.id]
   if (!file) return
   try {
     const fd = new FormData()
@@ -563,8 +602,8 @@ const handleImageUpload = async (evt, idx) => {
     const result = await res.json()
     if (!result.success) throw new Error(result.message || 'upload failed')
 
-    if (localBlockContents.data[idx].option === 1) {
-      localBlockContents.data[idx].files.push({ name: file.name, size: file.size, path_to_save: result.path_to_save })
+    if (blockItem.option === 1) {
+      blockItem.files.push({ name: file.name, size: file.size, path_to_save: result.path_to_save })
     } else if (ed) {
       ed.chain().focus().setImage({ src: API_BASE_URL + result.url }).run()
     }
@@ -632,7 +671,7 @@ const handleImageUpload = async (evt, idx) => {
 
 /* TipTap Table 樣式 */
 .editor-content :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0px; table-layout: fixed; }
-.editor-content :deep(th) { position:sticky; top:35px; z-index:5; }
+.editor-content :deep(th) { position:sticky; top:35px; z-index:5; background-color: #ffffff; }
 .editor-content :deep(th), .editor-content :deep(td) { border: 1px solid #ccc; padding: 8px; text-align: center; vertical-align: middle; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px auto; cursor: pointer; border: 2px solid transparent; }
 .editor-content :deep(img) { max-width: 100%; height: auto; display: block; margin: 5px 0; cursor: pointer; border: 2px solid transparent; }

@@ -278,6 +278,30 @@ async function loadDefaultFlow(machineCode) {
     console.error('load default flow failed', err)
   }
 }
+// 新增比對函式
+async function checkPmsDiff(machineCode, currentDraftSteps) {
+  try {
+    // 1. 撈取最新 PMS
+    const res = await axios.get(`${API_BASE_URL}/mes/pms/machine-process-flow`, {
+      params: { machine_id: machineCode },
+    })
+    const latestSteps = res.data?.data?.slots || []
+
+    // 2. 簡單比對 (陣列轉字串比較)
+    // 注意：這裡假設順序也要一樣，若允許順序不同需改用 Set 比對
+    const isSame = JSON.stringify(latestSteps) === JSON.stringify(currentDraftSteps)
+
+    if (!isSame) {
+      // 3. 發出通知 (可以 emit 給父層彈窗，或直接 alert)
+      // 建議用 UI 顯示差異，這裡先用 confirm 示範
+      const msg = `【系統偵測】MES PMS 流程已有變更！\n\n草稿內容：${currentDraftSteps.join(',')}\n最新流程：${latestSteps.join(',')}`
+      alert(msg);
+      loadDefaultFlow(machineCode);
+    }
+  } catch (e) {
+    console.error('PMS Check failed', e)
+  }
+}
 
 // 專門決定「要不要自動帶入 PMS」的邏輯
 function maybeAutoLoadPms(code) {
@@ -308,13 +332,7 @@ watch(
     console.log("props version: ", props.version)
     if (!tableEditor.value) return
 
-    const model = clone(props.modelValue) || {
-      mode: 'table',
-      cols: 9,
-      header_json: null,
-      items: null,
-      file: null,
-    }
+    const model = clone(props.modelValue) || { mode: 'table', cols: 9, header_json: null, items: null, file: null }
 
     // 先同步內部 m
     gate = true
@@ -347,7 +365,11 @@ watch(
     ) {
       updatingFromParent = true
       updatingFromSteps = true
-      tableEditor.value.commands.setContent(parentItems, false)
+      tableEditor.value.commands.setContent(parentItems, false);
+      // ★★★ 新增：背景檢查新版 PMS ★★★
+    //   if (props.machineCode) {
+    //       checkPmsDiff(props.machineCode, getStepsFromDoc(tableEditor.value))
+    //   }
       updatingFromSteps = false
       updatingFromParent = false
 
