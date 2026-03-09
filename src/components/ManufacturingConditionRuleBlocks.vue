@@ -476,8 +476,6 @@ function buildCondDocFromArray(templateArr) {
       }
     })
   }
-  console.log("templateArr: ", templateArr);
-  console.log("dataRow: ", dataRow);
   return { type:'doc', content:[{ type:'table', content:[headerRow, dataRow] }] }
 }
 // Build parameter table TipTap doc from 2D array rows
@@ -1805,7 +1803,7 @@ watch(
       updatedBlocks.forEach((newBlk, i) => {
         const oldBlk = blocks.value[i];
         
-        console.log("build hasConditions: ", props.hasConditions)
+        // console.log("build hasConditions: ", props.hasConditions)
         if (newBlk.data.jsonParameterContent === null && paramEditors.value[i]) {
           const newDoc = buildParamDocFromRows(newBlk.data.arrayParameterData);
           paramEditors.value[i].commands.setContent(newDoc);

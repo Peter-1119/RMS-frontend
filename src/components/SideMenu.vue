@@ -62,7 +62,7 @@ export default {
       if (userName) {
         this.displayedUserName = userName;
         this.displayedUserdeptDesc = deptDesc;
-        console.log('SideMenu.vue: 更新使用者名稱為:', userName,'更新使用者部門為:', deptDesc);
+        // console.log('SideMenu.vue: 更新使用者名稱為:', userName,'更新使用者部門為:', deptDesc);
       } else {
         this.displayedUserName = '訪客';
         this.displayedUserdeptDesc = '';

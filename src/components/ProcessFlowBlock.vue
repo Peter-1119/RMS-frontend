@@ -329,7 +329,7 @@ function maybeAutoLoadPms(code) {
 watch(
   () => props.version,
   async () => {
-    console.log("props version: ", props.version)
+    // console.log("props version: ", props.version)
     if (!tableEditor.value) return
 
     const model = clone(props.modelValue) || { mode: 'table', cols: 9, header_json: null, items: null, file: null }

@@ -190,8 +190,6 @@ function validateTableContent(editor, rowsToCheck = null) {
       }
     }
 
-    console.log(valueStatus);
-
     for (let offset = 4; offset >= 0; offset--) {
       const cellNode = cells.child(3 + offset);
       const newClass = 'value-' + valueStatus[offset];
@@ -798,8 +796,6 @@ const unmergeLastCol = () => {
 // 替換原本的 getInitialTableContent (大約在第 670 行附近)
 function getInitialTableContent(data, PmsIndex = null) {
   const table = { type: 'table', content: [] };
-
-  console.log("get initial table content: ", data);
 
   // 1. 預先計算合併邏輯 (基於槽體: data[row][1])
   const rowSpans = new Array(data.length).fill(1);
