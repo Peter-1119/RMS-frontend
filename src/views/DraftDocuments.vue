@@ -154,9 +154,9 @@ export default {
     },
     // Pagination helpers (add buttons in template if desired)
     changePage(p) {
-      if (p < 1 || p > this.totalPages) return
+      if (p < 1 || p > this.total) return
       this.page = p
-      this.loadDrafts()
+      this.load()
     },
   },
   mounted() {

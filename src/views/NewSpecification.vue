@@ -134,7 +134,7 @@
           <FormSearchWindow 
             v-if="specDocWindowVisible"
             headerName="適用品質與規格文件選取"
-            documentType="doc"
+            documentType="qua"
             @add-new-forms="handleAddDocsToSpec" 
             @close-window="specDocWindowVisible=false">
           </FormSearchWindow>
@@ -162,7 +162,7 @@
             v-if="formWindowVisible"
             headerName="表單選取"
             documentType="form"
-            @add-new-form="addUsedForm"
+            @add-new-forms="addUsedForm"
             @close-window="formWindowVisible=false">
           </FormSearchWindow>
         </section>
@@ -1165,7 +1165,22 @@ function loadParamsIntoMCR(payload) {
 
 // ---------- references (forms) ----------
 let usedFormUid = 1
-const addUsedForm = ({ formId, formName }) => { usedForms.value.push({ id: usedFormUid++, formId, formName }); formWindowVisible.value = false }
+// const addUsedForm = ({ formId, formName }) => { usedForms.value.push({ id: usedFormUid++, formId, formName }); formWindowVisible.value = false }
+const addUsedForm = (selectedForms) => {
+  console.log("selectedForms: ", selectedForms);
+  console.log("usedForms: ", usedForms);
+  selectedForms.forEach(form => {
+    // 檢查是否已經存在，避免重複加入
+    if (!usedForms.value.some(f => f.formId === form.formId)) {
+      usedForms.value.push({ 
+        id: usedFormUid++, 
+        formId: form.formId, 
+        formName: form.formName 
+      });
+    }
+  });
+  formWindowVisible.value = false;
+}
 const removeUsedForm = (id) => { usedForms.value = usedForms.value.filter(x => x.id !== id) }
 
 // ---------- token bootstrap (document_type = 1) ----------
