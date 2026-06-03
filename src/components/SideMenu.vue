@@ -33,7 +33,8 @@ export default {
         ]},
         {id: 3, title: '資料設定', children: [
           {id: 31, title: "規則一覽表", link: "/Specification"},
-          {id: 32, title: "適用工程一覽表", link: "/project-specification"}
+          {id: 32, title: "適用工程一覽表", link: "/project-specification"},
+          {id: 33, title: "課別製程管理", link: "/department-process"}
         ]},
         {id: 4, title: '檢索', children: [
           {id: 41, title: "文件檢索", link: '/SearchPage'},

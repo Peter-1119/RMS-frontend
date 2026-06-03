@@ -9,7 +9,7 @@
         </div>
         <div class="login-form-group">
           <label for="password">密碼</label>
-          <input type="text" id="password" v-model="password" placeholder="請輸入密碼" required/>
+          <input type="password" id="password" v-model="password" placeholder="請輸入密碼" required/>
         </div>
         <button type="submit">登入</button>
         <div v-if="errorMessage" class="error-message">{{ errorMessage }}</div>
@@ -23,73 +23,73 @@
 import axios from "axios";
 
 export default {
-    name: "LoginPage",
-    data() {
-        return {
-            username: "",
-            password: "",
-            errorMessage: "",
-        }
-    },
-    methods: {
-        async handleSubmit() {
-            const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
-            try{
-                // const response = await axios.post(API_BASE_URL + "/api/loginTest", {empNo: this.username, empPw: this.password});
-                const response = await axios.post(API_BASE_URL + "/api/login", {empNo: this.username, empPw: this.password});
-
-                if (response.data.success) {
-                    this.errorMessage = "";
-                    this.$router.push({path: '/home'});
-
-                    const userNo = response.data.data.empNo.toString();
-                    const userNameFromBackend = response.data.data.empName;
-                    const userDeptNameFromBackend = response.data.data.deptName;
-                    const userDeptDescFromBackend = response.data.data.deptDesc;
-                    const userToken = response.data.data.token;
-
-                    sessionStorage.setItem('loggedInUserNo', userNo);
-                    sessionStorage.setItem('loggedInUserName', userNameFromBackend);
-                    sessionStorage.setItem('loggedInUserdeptName', userDeptNameFromBackend);
-                    sessionStorage.setItem('loggedInUserdeptDesc', userDeptDescFromBackend);
-                    sessionStorage.setItem('userToken', userToken);
-                }
-                else if (response.status == 401){
-                    alert(`${response.data}`);
-                }
-            }
-            catch(error) {
-                console.error('登入請求失敗:', error);
-
-                if (error.response) {
-                    // 伺服器有響應，但狀態碼不在 2xx 範圍內 (例如 401, 403, 404, 500)
-                    if (error.response.status === 401) {
-                        // alert('用戶名或密碼不正確，請重試。');
-                        alert(`${error.response.data.message}`);
-                    }
-                    else if (error.response.status === 404) {
-                        // alert('登入服務器路徑錯誤或服務未啟動，請聯繫管理員。');
-                        alert(`${error.response.data.message}`);
-                    }
-                    else {
-                        // 其他伺服器錯誤
-                        alert(`登入失敗，伺服器錯誤：${error.response.status} - ${error.response.statusText}`);
-                    }
-                    console.log('伺服器響應數據:', error.response.data);
-                    console.log('伺服器響應狀態:', error.response.status);
-                    console.log('伺服器響應頭:', error.response.headers);
-                }
-                else if (error.request) {
-                    alert('無法連接到服務器，請檢查您的網路連接。');
-                    console.log('請求對象:', error.request);
-                }
-                else {
-                    alert('發生未知錯誤，請重試。');
-                    console.log('錯誤訊息:', error.message);
-                }
-            }
-        }
+  name: "LoginPage",
+  data() {
+    return {
+      username: "",
+      password: "",
+      errorMessage: "",
     }
+  },
+  methods: {
+    async handleSubmit() {
+      const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL;
+      try{
+        // const response = await axios.post(API_BASE_URL + "/api/loginTest", {empNo: this.username, empPw: this.password});
+        const response = await axios.post(API_BASE_URL + "/api/login", {empNo: this.username, empPw: this.password});
+
+        if (response.data.success) {
+          this.errorMessage = "";
+          this.$router.push({path: '/home'});
+
+          const userNo = response.data.data.empNo.toString();
+          const userNameFromBackend = response.data.data.empName;
+          const userDeptNameFromBackend = response.data.data.deptName;
+          const userDeptDescFromBackend = response.data.data.deptDesc;
+          const userToken = response.data.data.token;
+
+          sessionStorage.setItem('loggedInUserNo', userNo);
+          sessionStorage.setItem('loggedInUserName', userNameFromBackend);
+          sessionStorage.setItem('loggedInUserdeptName', userDeptNameFromBackend);
+          sessionStorage.setItem('loggedInUserdeptDesc', userDeptDescFromBackend);
+          sessionStorage.setItem('userToken', userToken);
+        }
+        else if (response.status == 401){
+          alert(`${response.data}`);
+        }
+      }
+      catch(error) {
+        console.error('登入請求失敗:', error);
+
+        if (error.response) {
+          // 伺服器有響應，但狀態碼不在 2xx 範圍內 (例如 401, 403, 404, 500)
+          if (error.response.status === 401) {
+            // alert('用戶名或密碼不正確，請重試。');
+            alert(`${error.response.data.message}`);
+          }
+          else if (error.response.status === 404) {
+            // alert('登入服務器路徑錯誤或服務未啟動，請聯繫管理員。');
+            alert(`${error.response.data.message}`);
+          }
+          else {
+            // 其他伺服器錯誤
+            alert(`登入失敗，伺服器錯誤：${error.response.status} - ${error.response.statusText}`);
+          }
+          console.log('伺服器響應數據:', error.response.data);
+          console.log('伺服器響應狀態:', error.response.status);
+          console.log('伺服器響應頭:', error.response.headers);
+        }
+        else if (error.request) {
+          alert('無法連接到服務器，請檢查您的網路連接。');
+          console.log('請求對象:', error.request);
+        }
+        else {
+          alert('發生未知錯誤，請重試。');
+          console.log('錯誤訊息:', error.message);
+        }
+      }
+    }
+  }
 }
 
 </script>
@@ -133,19 +133,6 @@ h2 {
   border: 1px solid #ccc;
   padding: 10px 10px;
 }
-
-/* label {
-  display: block;
-  margin-bottom: 0.5rem;
-}
-
-input {
-  width: 90%;
-  padding: 0.8rem;
-  margin-top: 0.3rem;
-  border-radius: 4px;
-  border: 1px solid #ccc;
-} */
 
 button {
   width: 100%;

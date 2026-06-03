@@ -2,12 +2,15 @@
   <div class="new-instruction-container">
     <div class="header">
       <h1>草稿匣</h1>
+      <div class="right">
+        <input v-model="keyword" type="text" placeholder="搜尋名稱/編號" class="search-input" @input="onKeywordInput"/>
+      </div>
     </div>
 
     <div class="form-section">
       <table class="document-table">
         <thead CLASS="TABLE-HEADER">
-          <tr> <th>文件名稱</th> <th>版本</th> <th>作者</th> <th>更新日期</th> <th>變更</th> <th>刪除</th>
+          <tr> <th>文件名稱</th> <th>版本</th> <th>作者</th> <th>更新日期</th> <th>變更</th> <th>複製</th> <th>刪除</th>
           </tr>
         </thead>
         <tbody>
@@ -17,14 +20,9 @@
             <td>{{ item?.documentVersion }}</td>
             <td>{{ item?.author }}</td>
             <td>{{ item?.issueDate }}</td>
-            <td>
-              <button class="btn edit" @click="performSearch(item)"><img src="@/assets/edit-icon.png" alt="變更" class="icon edit"></button>
-            </td>
-            <td>
-              <button @click="deleteDraft(item)" style="border: none; background: none; cursor: pointer;">
-                <img src="@/assets/delete-icon.png" alt="刪除" class="btn delete">
-              </button>
-            </td>
+            <td><button class="btn edit" @click="performSearch(item)"><img src="@/assets/edit-icon.png" alt="變更" class="icon edit"></button></td>
+            <td><button v-if="item?.documentType == 1" class="btn edit" @click="copyDocument(item)"><img src="@/assets/archives-icon.png" alt="複製" class="icon edit"></button></td>
+            <td><button @click="deleteDraft(item)" style="border: none; background: none; cursor: pointer;"><img src="@/assets/delete-icon.png" alt="刪除" class="btn delete"></button></td>
           </tr>
           <tr v-if="searchData.length === 0">
               <td colspan="6" style="text-align: center; padding: 20px;">
@@ -44,6 +42,7 @@
 
 <script>
 import axios from 'axios'
+import { initDoc } from '@/api/docsApi'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
 
@@ -137,7 +136,23 @@ export default {
       // Decide destination by documentType
       const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
       // Push with token in query (your pages read via useDraftToken)
-      this.$router.push({ name: routeName, query: { token: item.documentToken } })
+      this.$router.push({ name: routeName, query: { token: item.documentToken, mode: "draft" } })
+    },
+    async copyDocument(item) {
+      if (!item || !item.documentToken) return;
+      const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction';
+      try {
+        const res = await initDoc(item.documentType);
+        
+        if (res?.success && res.token) {
+          const newToken = res.token;
+          this.$router.push({ name: routeName, query: { token: newToken, copyToken: item.documentToken, mode: "copy" } });
+        } else { alert('配發新代碼失敗，無法複製'); }
+      } catch (e) {
+        console.error('initDoc failed:', e);
+        alert('網路異常，配發新代碼失敗，無法複製');
+      }
+      // this.$router.push({ name: routeName, query: { copyToken: item.documentToken, mode: "copy" } });
     },
 
     // optional: delete handler
@@ -152,6 +167,13 @@ export default {
         alert(msg)
       }
     },
+    async onKeywordInput() {
+      clearTimeout(this.__kwTimer)
+      this.__kwTimer = setTimeout(() => {
+        this.page = 1
+        this.getPagesAndLoad()
+      }, 500)
+    },
     // Pagination helpers (add buttons in template if desired)
     changePage(p) {
       if (p < 1 || p > this.total) return
@@ -159,9 +181,8 @@ export default {
       this.load()
     },
   },
-  mounted() {
-    this.getPagesAndLoad()
-  },
+  mounted() { this.getPagesAndLoad(); },
+  activated() { this.getPagesAndLoad(); },
 }
 </script>
 
@@ -175,6 +196,7 @@ export default {
   border-radius: 10px;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
+.search-input { border:1px solid #ccc; border-radius:6px; padding:8px 10px; width:240px; }
 .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
 .header h1 { margin: 0; font-size: 28px; color: #333; }
 

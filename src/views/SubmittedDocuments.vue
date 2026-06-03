@@ -11,7 +11,7 @@
       <table class="submitted-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>編輯</th>
+            <!-- <th>編輯</th> -->
             <th>編號</th>
             <th>文件狀態</th>
             <th>文件名稱</th>
@@ -25,12 +25,12 @@
 
         <tbody>
           <tr v-for="(item, index) in searchData" :key="item.documentToken || index">
-            <td>
-              <button class="btn doc" @click="performSearch(item)"><img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc"/></button>
-            </td>
+            <!-- <td> -->
+              <!-- <button class="btn doc" @click="performSearch(item)"><img src="@/assets/document-show-icon.png" alt="顯示文件" class="icon doc"/></button> -->
+            <!-- </td> -->
             <td>{{ item.documentId }}</td>
             <td>{{ item.eipStatus }}</td>
-            <td class="doc-name"><button class="doc-link" @click="openWordPreview(item)">{{ item.documentName }}</button></td>
+            <td class="doc-name" style="text-align: left"><button class="doc-link" @click="openWordPreview(item)">{{ item.documentName }}</button></td>
             <td>{{ item.documentVersion }}</td>
             <td>{{ item.author }}</td>
             <td>{{ item.issueDate }}</td>

@@ -32,7 +32,7 @@
           <!-- ✅ 用 keep-alive 包 router-view，讓每個 tab 保持各自 state -->
           <router-view v-slot="{ Component, route }">
             <keep-alive :include="cachedViews">
-              <component :is="Component" :key="route.name" v-if="route.meta.keepAlive"/>
+              <component :is="Component" :key="getRouterKey(route)" v-if="route.meta.keepAlive"/>
             </keep-alive>
             <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive" />
           </router-view>
@@ -44,6 +44,7 @@
 
 <script>
 import SideMenu from './components/SideMenu.vue';
+import { getDraftTab } from '@/composables/draftTabRegistry';
 
 export default {
   name: 'App',
@@ -74,6 +75,23 @@ export default {
     }
   },
   methods: {
+    getRouterKey(route) {
+      // 如果不是這些特定頁面，就回傳正常的 fullPath
+      if (route.name !== 'new-instruction' && route.name !== 'new-specification') return route.fullPath;
+
+      const page = (route.name == "new-instruction") ? "instruction" : "specification"
+      const mode = route.query.mode || 'new';
+      const token = route.query.token || '';
+
+      // console.log("getRouterKey page: ", page);
+      // console.log("getRouterKey mode: ", mode);
+      // console.log("getRouterKey token: ", token);
+
+      if (mode === 'new') return `${page}_new`; 
+      else if (mode === 'draft') return `${page}_${mode}_${token}`;
+      else if (mode === 'revision') return `${page}_${mode}_${token}`;
+      else if (mode === 'copy') return `${page}_${mode}_${token}`;
+    },
     // === Layout / 登出 ==================================
     toggleMenu() {
       this.isMenuCollapsed = !this.isMenuCollapsed;
@@ -131,37 +149,40 @@ export default {
         return;
       }
 
-      // ★ 新增：如果該路由需要 keep-alive，加入 cachedViews
+      // ★ 補回這段：如果路由需要快取，就把它的「組件名稱」加入 VIP 名單
       if (route.meta.keepAlive && route.name) {
         if (!this.cachedViews.includes(route.name)) {
           this.cachedViews.push(route.name);
         }
       }
 
-      const fullPath = route.fullPath;
-      const key = route.name || fullPath;   // 👈 tab 的「識別 key」
+      // 使用剛才設計的穩定 Key
+      const tabKey = this.getRouterKey(route); 
+      const existTab = this.tabs.find(t => t.key === tabKey);
 
-      const exist = this.tabs.find(t => t.key === key);
-
-      if (exist) {
-        // 👇 同一個頁面（例如 new-instruction），只更新 fullPath（讓點 tab 時會帶上最新的 token）
-        exist.fullPath = fullPath;
-        this.activeTabFullPath = fullPath;
+      if (existTab) {
+        // 如果頁籤已經存在，我們只更新它的 fullPath (例如把加上 token 的新網址存起來)
+        // 這樣下次點擊這個 Tab 時，就會帶上正確的 token
+        existTab.fullPath = route.fullPath;
+        this.activeTabFullPath = route.fullPath;
         return;
       }
 
-      const title = route.meta.title || route.name || route.path;
-      const closable = route.name !== 'home-alias';
+      // 建立新頁籤
+      let title = route.meta.title;
+      if (route.name === 'new-instruction') {
+        if (route.query.mode === 'draft') title = `製造條件指示書-草稿`;
+        if (route.query.mode === 'revision') title = `製造條件指示書-變版`;
+        if (route.query.mode === 'copy') title = `製造條件指示書-複製`; // ★ 補上指示書的複製標題
+      }
+      if (route.name === 'new-specification') {
+        if (route.query.mode === 'draft') title = `製造式樣書-草稿`;
+        if (route.query.mode === 'revision') title = `製造式樣書-變版`;
+        if (route.query.mode === 'copy') title = `製造式樣書-複製`; // ★ 補上式樣書的複製標題
+      }
 
-      this.tabs.push({
-        key,
-        fullPath,
-        path: route.path,
-        name: route.name,
-        title,
-        closable,
-      });
-      this.activeTabFullPath = fullPath;
+      this.tabs.push({ key: tabKey, fullPath: route.fullPath, path: route.path, name: route.name, title: title, closable: true });
+      this.activeTabFullPath = route.fullPath;
     },
 
     activateTab(tab) {
@@ -170,36 +191,53 @@ export default {
     },
     closeTab(tab, index) {
       const isActive = (tab.fullPath === this.activeTabFullPath);
-      
-      // ★ 新增：根據關閉的 Tab 路由名稱，清除對應的 localStorage
-      if (tab.name === 'new-instruction') {
-        localStorage.removeItem('rms:draft:new-instruction');
-        // 如果有其他需要清除的狀態，也可以在這裡處理
+
+      const urlParams = new URLSearchParams(tab.fullPath.split('?')[1]);
+      const tabMode = urlParams.get('mode') || 'new';
+      const tabToken = urlParams.get('token');
+
+      // ★ 點頁簽 ✕ 的當下就詢問是否儲存對應草稿（用 token 查 registry，精準對應到那一份文件）
+      const draftEntry = tabToken ? getDraftTab(tabToken) : null;
+      if (draftEntry && confirm(`關閉「${draftEntry.label}」前，是否要儲存草稿？`)) {
+        draftEntry.save();
       }
+
+      // 1. 精準刪除對應的 LocalStorage (你的這段寫得很好)
+      if (tabMode !== 'new' && tabToken) localStorage.removeItem(`rms:draft:${tabToken}`);
+      else if (tabMode === 'new') localStorage.removeItem('rms:draft:new-instruction');
+      
       if (tab.name === 'new-specification') {
         localStorage.removeItem('rms:draft:new-specification');
       }
 
-      // ★ 新增：從 cachedViews 移除，這會強制銷毀組件實例，下次打開就是全新的
-      if (tab.name) {
-        this.cachedViews = this.cachedViews.filter(name => name !== tab.name);
-      }
-
-      // 原本的關閉邏輯
+      // 2. 先把頁籤從視覺的 tabs 陣列中移除
       this.tabs.splice(index, 1);
 
-      if (!isActive) return; 
+      const cleanupCache = () => {
+        if (tab.name) {
+          const isNameStillUsed = this.tabs.some(t => t.name === tab.name);
+          if (!isNameStillUsed) {
+            this.cachedViews = this.cachedViews.filter(name => name !== tab.name);
+          }
+        }
+      };
+
+      // 4. 原本的跳轉邏輯
+      if (!isActive) {
+        cleanupCache();
+        return; 
+      }
 
       if (this.tabs.length === 0) {
         this.activeTabFullPath = '';
-        this.$router.push('/home');
+        this.$router.push('/home').then(() => { cleanupCache(); });
         return;
       }
 
       const newIndex = index > 0 ? index - 1 : 0;
       const newTab = this.tabs[newIndex];
       this.activeTabFullPath = newTab.fullPath;
-      this.$router.push(newTab.fullPath);
+      this.$router.push(newTab.fullPath).then(() => { cleanupCache(); });
     }
   },
 };

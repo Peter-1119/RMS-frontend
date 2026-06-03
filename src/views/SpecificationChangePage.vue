@@ -11,7 +11,7 @@
       <table class="speicifcation-change-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>編輯</th>
+            <th>變版</th>
             <th>編號</th>
             <th>文件名稱</th>
             <th>版本</th>
@@ -73,20 +73,20 @@ export default {
   },
   computed: {
     effectiveUserId() {
-      return sessionStorage.getItem('loggedInUserNo') || ''
+      return sessionStorage.getItem('loggedInUserNo') || '';
     },
   },
   methods: {
     formatDate(iso) {
-      if (!iso) return ''
+      if (!iso) return '';
       try {
-        const d = new Date(iso)
-        const y = d.getFullYear()
-        const m = String(d.getMonth() + 1).padStart(2, '0')
-        const day = String(d.getDate()).padStart(2, '0')
-        return `${y}.${m}.${day}`
+        const d = new Date(iso);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}.${m}.${day}`;
       } catch {
-        return iso
+        return iso;
       }
     },
     async getPagesAndLoad() {
@@ -95,18 +95,18 @@ export default {
       })
 
       if (status != 200) {
-        alert("取得資料庫發生問題，請重新確認網路")
-        return
+        alert("取得資料庫發生問題，請重新確認網路");
+        return;
       }
 
-      this.total = data.data.pages
-      this.load()
+      this.total = data.data.pages;
+      this.load();
     },
     async load() {
       if (!this.effectiveUserId) {
-        this.errorMsg = '缺少 user_id，請先登入'
-        this.searchData = []
-        this.total = 0
+        this.errorMsg = '缺少 user_id，請先登入';
+        this.searchData = [];
+        this.total = 0;
         return
       }
       this.loading = true
@@ -116,64 +116,58 @@ export default {
         })
 
         if (status != 200) {
-          alert("訪問資料庫發生問題，請重新確認網路連接")
-          return
+          alert("訪問資料庫發生問題，請重新確認網路連接");
+          return;
         }
 
-        this.searchData = (data.data.items || []).map(x => ({...x, issueDate: this.formatDate(x.issueDate),}))
+        this.searchData = (data.data.items || []).map(x => ({...x, issueDate: this.formatDate(x.issueDate),}));
       } catch (e) {
-        console.error(e)
-        this.searchData = []
-        this.total = 0
-        this.errorMsg = e?.message || '讀取失敗'
+        console.error(e);
+        this.searchData = [];
+        this.total = 0;
+        this.errorMsg = e?.message || '讀取失敗';
       } finally {
-        this.loading = false
+        this.loading = false;
       }
     },
     changePage(p) {
-      if (p < 1 || p > this.totalPages) return
-      this.page = p
-      this.load()
+      if (p < 1 || p > this.totalPages) return;
+      this.page = p;
+      this.load();
     },
     // open detail/draft editor route based on type
     async performSearch(item) {
-      if (!item) return
+      if (!item) return;
 
       try {
-        this.loading = true
+        this.loading = true;
         // 1) 建立新一版
-        const res = await createRevision(item.documentToken)
+        const res = await createRevision(item.documentToken);
         if (!res?.success || !res.token) {
-          alert(res?.message || '建立變版草稿失敗')
-          return
+          alert(res?.message || '建立變版草稿失敗');
+          return;
         }
 
-        const newToken = res.token
-        const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction'
+        const newToken = res.token;
+        const routeName = item.documentType === 1 ? 'new-specification' : 'new-instruction';
 
         // 2) 導到新的草稿 token
-        this.$router.push({
-          name: routeName,
-          query: { token: newToken, mode: 'revision' },
-        })
+        this.$router.push({ name: routeName, query: { token: newToken, mode: 'revision' } });
       } catch (e) {
-        console.error(e)
-        alert('建立變版草稿失敗')
+        console.error(e);
+        alert('建立變版草稿失敗');
       } finally {
-        this.loading = false
+        this.loading = false;
       }
     },
     // debounce keyword input
     onKeywordInput() {
-      clearTimeout(this.__kwTimer)
-      this.__kwTimer = setTimeout(() => {
-        this.page = 1
-        this.load()
-      }, 300)
+      clearTimeout(this.__kwTimer);
+      this.__kwTimer = setTimeout(() => { this.page = 1; this.load(); }, 300);
     },
   },
   mounted() {
-    this.getPagesAndLoad()
+    this.getPagesAndLoad();
   },
 }
 </script>

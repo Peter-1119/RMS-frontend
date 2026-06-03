@@ -248,27 +248,20 @@ reloadUnassigned()
     background-color: rgba(0, 0, 0, 0.5);
 }
 
-.modal-dialog { background-color: white; padding: 0; border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); width: 80%; max-width: 1000px; overflow: hidden; }
-.dialog-header { background-color: #61a5d6; color: #fff; padding: 12px 20px; }
-.dialog-header :deep(h3) { margin: 0; color: #fff; }
-.dialog-footer { text-align: right; padding: 12px 20px; border-top: 1px solid #eee; background-color: #fff; }
+.modal-dialog { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); width: 80%; max-width: 1000px; }
+.dialog-header { border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 6px; }
+.dialog-footer { text-align: right; margin-top: 6px; border-top: 1px solid #eee; padding-top: 4px; }
 
 /* 按鈕樣式 */
-.btn { padding: 8px 18px; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; transition: background-color 0.2s; font-size: 14px; }
-.btn--confirm { background-color: #007bff; color: white; } /* 原 .btn.confirm */
-.btn--confirm:hover { background-color: #0069d9; }
-.btn--confirm:disabled { background-color: #9ec5f0; cursor: not-allowed; }
-.btn--cancel { background-color: #6c757d; color: #fff; } /* 原 .btn.cancel */
-.btn--search { background-color: #61a5d6; color: #fff; } /* 原 .btn.search */
-.btn--search:hover { background-color: #4f93c4; }
-.btn--remove { background: none; border: none; color: #c0392b; font-weight: bold; cursor: pointer; font-size: 1.1em; width: 24px; height: 24px; border-radius: 50%; } /* 原 .remove-btn */
-.btn--remove:hover { background-color: #fdecec; }
+.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; transition: background-color 0.2s; }
+.btn--confirm { background-color: #42b983; color: white; } /* 原 .btn.confirm */
+.btn--cancel { background-color: #ccc; color: black; } /* 原 .btn.cancel */
+.btn--search { background-color: #2196F3; color: #fff; } /* 原 .btn.search */
+.btn--remove { background: none; border: none; color: red; font-weight: bold; cursor: pointer; font-size: 1.2em; } /* 原 .remove-btn */
 .btn--move { background-color: #4CAF50; color: white; } /* 原 .btn.move-btn */
-.btn--move:hover { background-color: #449d48; }
-.btn--move:disabled { background-color: #a9d6ab; cursor: not-allowed; }
 
 /* 內容佈局 */
-.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding: 20px; } /* 原 .content-split */
+.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; flex-grow: 1; } /* 原 .content-split */
 .content-panel { display: flex; flex-direction: column; gap: 8px; } /* 原 .content-left, .content-right */
 
 /* 表單區塊 */

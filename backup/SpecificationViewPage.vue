@@ -1,10 +1,5 @@
 <template>
   <div class="Porject-Specification-container">
-    <div class="page-header">
-      <h2>適用工程一覽表</h2>
-      <span class="subtitle">維護每個適用工程所屬的製程</span>
-    </div>
-
     <!-- 控制列 -->
     <div class="top-control">
       <div class="input-action-layout">
@@ -187,123 +182,31 @@ load()
 </script>
 
 <style scoped>
-.Porject-Specification-container {
-  width: 90%;
-  margin: 24px auto;
-  padding: 24px;
-  background-color: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
+.Porject-Specification-container { width: 90%; margin: 30px auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }
+.top-control { display: flex; justify-content: space-between; margin-bottom: 20px; text-align: right; align-items: center; }
+.top-control input { padding: 4px; font-size: 15px; border-radius: 4px; margin-right: 12px; }
+.top-control p { margin: 0; }
 
-/* 頁首 */
-.page-header { margin-bottom: 16px; }
-.page-header h2 { margin: 0; font-size: 20px; color: #023b64; }
-.page-header .subtitle { font-size: 13px; color: #888; }
+.input-action-layout { display: flex; }
+.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; }
+.btn.add-project { background-color: #4CAF50; color: white; }
 
-/* 控制列 */
-.top-control { display: flex; margin-bottom: 18px; align-items: center; }
-.input-action-layout { display: flex; align-items: center; gap: 8px; }
-.input-action-layout p { margin: 0; font-size: 14px; color: #555; white-space: nowrap; }
-.top-control input {
-  padding: 6px 10px;
-  font-size: 14px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  width: 320px;
-}
-.btn-search {
-  padding: 6px 14px;
-  border: none;
-  border-radius: 4px;
-  background-color: #61a5d6;
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-}
-.btn-search:hover { background-color: #4f93c4; }
+.content-wrapper { display: flex; }
+.table-wrapper { margin-right: 8px; width: 100%; max-height: 600px; overflow-y: auto; }
+.info-block { display: flex; padding: 4px; justify-content: space-between; align-items: center; }
+.header-control { display: flex; justify-content: center; gap: 20px; margin-bottom: 20px; text-align: right; align-items: center; }
 
-.btn { padding: 6px 14px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; }
-.btn.edit { background-color: #61a5d6; color: white; }
-.btn.edit:hover { background-color: #4f93c4; }
-.btn.delete { background-color: #e15241; color: white; }
-.btn.delete:hover { background-color: #d23c2a; }
+.project-table { width: 100%; max-height: 600px; overflow-y: auto; }
+.project-table th, .project-table td { border: 1px solid #ddd; padding: 8px; word-wrap: break-word; text-align: center; }
+.project-table th { background-color: #f2f2f2; }
+.project-table tbody tr { cursor: pointer; transition: background-color 0.3s ease; }
+.project-table tbody tr:hover { background-color: #f5f5f5; }
+.project-table tbody tr.selected-row { background-color: #e0f7fa; }
 
-/* 雙表佈局 */
-.content-wrapper { display: flex; gap: 16px; align-items: flex-start; }
-.table-wrapper {
-  width: 100%;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  overflow: hidden;
-  max-height: 620px;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 面板標題列 */
-.info-block {
-  display: flex;
-  padding: 10px 14px;
-  justify-content: space-between;
-  align-items: center;
-  background-color: #61a5d6;
-  color: #fff;
-  flex-shrink: 0;
-}
-.title-label { margin: 0; font-size: 15px; font-weight: bold; }
-.info-label { font-size: 12px; opacity: 0.95; }
-
-.header-control {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  padding: 10px 0;
-  align-items: center;
-  flex-shrink: 0;
-}
-.header-control .btn,
-.header-control button {
-  padding: 5px 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 13px;
-}
-.header-control button:disabled { opacity: 0.5; cursor: not-allowed; }
-.page-info { font-size: 13px; color: #555; }
-
-/* 表格 */
-.project-table, .specification-table {
-  width: 100%;
-  border-collapse: collapse;
-  overflow-y: auto;
-}
-.project-table th, .project-table td,
-.specification-table th, .specification-table td {
-  border: 1px solid #eee;
-  padding: 8px;
-  word-wrap: break-word;
-  text-align: center;
-  font-size: 14px;
-}
-.project-table thead th,
-.specification-table thead th {
-  background-color: #f6f9fc;
-  color: #333;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-.project-table tbody tr,
-.specification-table tbody tr { cursor: pointer; transition: background-color 0.2s ease; }
-.project-table tbody tr:hover,
-.specification-table tbody tr:hover { background-color: #f5f9fd; }
-.project-table tbody tr.selected-row,
-.specification-table tbody tr.selected-row,
-.project-table tbody tr.bg-blue-50 { background-color: #cfe6fb; }
-
-/* 讓表身可捲動 */
-.table-wrapper { overflow-y: auto; }
+.specification-table { width: 100%; max-height: 600px; overflow-y: auto; }
+.specification-table th, .specification-table td { border: 1px solid #ddd; padding: 8px; word-wrap: break-word; text-align: center; }
+.specification-table th { background-color: #f2f2f2; }
+.specification-table tbody tr { cursor: pointer; transition: background-color 0.3s ease; }
+.specification-table tbody tr:hover { background-color: #f5f5f5; }
+.specification-table tbody tr.selected-row { background-color: #e0f7fa; }
 </style>

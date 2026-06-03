@@ -22,8 +22,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in paginatedItemsInfos" :key="p">
-              <td><input type="radio" :value="p" v-model="selectedItem" /></td>
+            <tr v-for="p in paginatedItemsInfos" :key="p" @click="selectedItem = p" class="clickable-row" :class="{ 'selected-row': selectedItem === p }">
+              <td><input type="radio" :value="p" v-model="selectedItem" @click.stop /></td>
               <td>{{ p }}</td>
             </tr>
           </tbody>
@@ -191,4 +191,7 @@ export default {
 .btn.confirm { background-color: #007bff; color: white; }
 .btn.cancel { background-color: #6c757d; color: white; }
 
+.clickable-row { cursor: pointer; transition: background-color 0.2s ease; }
+.clickable-row:hover { background-color: #f5f5f5; }
+.selected-row { background-color: #e3f2fd !important; }
 </style>

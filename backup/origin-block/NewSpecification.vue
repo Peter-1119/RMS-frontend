@@ -39,15 +39,31 @@
 
               <div class="form-group">
                 <label for="item-type">品目：</label>
-                <input id="item-type" class="window-select" type="text" v-model="form.attribute.itemType" :readonly="true" @click="!isRevision && (itemsListVisible = !itemsListVisible)"/>
+                <input id="item-type" class="window-select" type="text" v-model="form.attribute.itemType" :readonly="true" @click="(!isRevision && form.documentID.length === 0) && (itemsListVisible = !itemsListVisible)"/>
               </div>
-
+              
               <div class="form-group">
-                <label for="style-no">式樣NO：</label>
-                <select id="style-no" class="window-select" v-model="form.attribute.styleNo" @change="onSelectStyle" :disabled="isRevision">
-                  <option value="">-- 請先選品目，再選式樣 --</option>
-                  <option v-for="st in styleOptions" :key="st.sfhnr" :value="st.sfhnr">{{ st.sfhnr }}</option>
-                </select>
+                <label>式樣NO：</label>
+                
+                <div class="custom-select window-select" tabindex="0" @focusout="closeStyleMenu">
+                  <div class="select-trigger" @click="toggleStyleMenu" :class="{ disabled: (mode !== 'new') && (isRevision || form.documentID.length > 0) }">
+                    <span>{{ form.attribute.styleNo || '-- 請先選品目，再選式樣 --' }}</span>
+                    <span class="arrow">▼</span>
+                  </div>
+                  
+                  <div class="select-options" v-show="isStyleMenuOpen">
+                    <div v-for="st in styleOptions" :key="st.sfhnr" class="option-item style-option-item" :class="{ 'is-locked': st.isLocked }" @mousedown.prevent="!st.isLocked && selectStyle(st.sfhnr)">
+                      <div class="style-name-group">
+                        <span class="style-name">{{ st.sfhnr }}</span>
+                        <span v-if="st.isLocked" class="locked-hint">(已由 {{ st.lockedBy }} 編輯中)</span>
+                      </div>
+
+                      <div class="process-tags">
+                        <span v-for="proc in st.clean_process_names" :key="proc" class="proc-tag">{{ proc }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="form-group">
@@ -97,7 +113,37 @@
 
         <!-- Step 4 製造參數一覽表 -->
         <section :ref="el => (sectionRefs[3].value = el)" class="step-section">
-          <h2>3. 製造參數一覽表</h2>
+          <h2 style="border: none; margin: 0; padding: 0;">3. 製造參數一覽表</h2>
+          
+          <!-- 標題列：加入 N/A 選項 -->
+          <!-- <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #007bff; margin-bottom: 20px; padding-bottom: 10px;">
+            <h2 style="border: none; margin: 0; padding: 0;">3. 製造參數一覽表</h2>
+            <label style="cursor: pointer; color: #d32f2f; font-weight: bold; font-size: 15px;">
+              <input type="checkbox" v-model="form.attribute.isParamNA" @change="onParamNAChange" />
+              無需設定機台參數 (N/A)
+            </label>
+          </div> -->
+
+          <!-- 勾選 N/A 時顯示的取代區塊 -->
+          <!--
+          <div v-if="form.attribute.isParamNA" style="font-size: 16px; font-weight: bold; text-align: center; padding: 40px; background-color: #f4f9ff; border: 1px dashed #1666C0; border-radius: 8px; color: #1666C0;">
+            請依照「2. 製作條件規範」進行製造參數設定與確認
+          </div>
+          -->
+
+          <!-- 未勾選 N/A 時，顯示原本的編輯組件 -->
+          <!-- <ManufacturingParameterBlocks
+            v-else-if="paramsLoaded"
+            :data-blocks="mcrBlocks"
+            :itemType="form.attribute.itemType"
+            :specification="form.attribute.specification"
+            :current-step="currentStep"
+            :document-token="draftToken"
+            :allow-color="isRevisionDoc"
+            @update:dataBlocks="mcrBlocks = $event"
+            @save="mcrBlocks = $event"
+            @machine-group-info="onMachineGroupInfo"
+          /> -->
           <ManufacturingParameterBlocks
             v-if="paramsLoaded"
             :data-blocks="mcrBlocks"
@@ -143,14 +189,19 @@
         <!-- Step 6 使用表單 -->
         <section :ref="el => (sectionRefs[5].value = el)" class="step-section">
           <h2>5. 使用表單</h2>
-          <div class="used-form">
+          <div class="used-form" style="display: flex; justify-content: space-between; align-items: center;">
             <button class="layer-action-btn add" @click="formWindowVisible = true">新增表單</button>
+            <div v-if="isRevisionDoc" class="color-picker-group">
+              <span style="font-size: 14px; color: #666; margin-right: 8px;">文字顏色:</span>
+              <i class="dot blue" @click="setDocColor('blue')" title="設為藍色"></i>
+              <i class="dot black" @click="setDocColor('black')" title="設為黑色"></i>
+            </div>
           </div>
 
-          <div v-for="(f, idx) in usedForms" :key="f.id" class="form-block">
-            <div class="form-info-block">
-              <label class="form-label no">5.{{ idx + 1 }}</label>
-              <label class="form-label id">{{ f.formId }}</label>
+          <div v-for="(f, idx) in usedForms" :key="f.id" class="form-block" :class="{ 'is-selected': selectedFormId === f.id }" @click="selectedFormId = f.id">
+            <div class="form-info-block" :style="{ color: f.color === 'blue' ? 'blue': 'black' }">
+              <label class="form-label no" :style="{ borderColor: f.color === 'blue' ? 'blue' : '#ddd' }">5.{{ idx + 1 }}</label>
+              <label class="form-label id" :style="{ borderColor: f.color === 'blue' ? 'blue' : '#ddd' }">{{ f.formId }}</label>
               <label class="form-label name">{{ f.formName }}</label>
             </div>
             <div class="form-btn-block">
@@ -207,7 +258,7 @@
 <script setup>
 defineOptions({ name: 'new-specification' })
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick, onActivated } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
 import DynamicEditorBlock from '@/components/DynamicEditorBlock.vue'
@@ -223,12 +274,29 @@ import {
   saveDraftAll,
   loadDraftAll,
   loadSnapshotDraftAll,
+  fetchLatestSpecificationDocVersion,
 } from '@/api/docsApi'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
-const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specification')
+// const { token: draftToken, setToken } = useDraftToken('rms:draft:new-specification')
 
-const route = useRoute()
+const route = useRoute();
+const router = useRouter();
+
+const mode = computed(() => route.query.mode || 'new')
+const currentToken = computed(() => route.query.token || '')
+
+// 2. 動態決定這個實例的 LocalStorage Key (這跟我們在 App.vue 刪除時的邏輯完全對應！)
+const storageKey = computed(() => {
+  if (mode.value === 'new') {
+    return 'rms:draft:new-specification'; 
+  } else {
+    return currentToken.value ? `rms:draft:${currentToken.value}` : 'rms:draft:unknown'; 
+  }
+})
+
+// 3. 把動態的 Key 傳給 composable (注意：useDraftToken 內部可能只吃初始值，所以要傳入 .value)
+const { token: draftToken, setToken, clearToken } = useDraftToken(storageKey.value)
 
 // ─── 模式判斷 ──────────────────────────────
 const isRevisionDoc = computed(() => form.documentVersion > 1)
@@ -238,6 +306,9 @@ const isRevisionDoc = computed(() => form.documentVersion > 1)
 const fromSource = computed(() => String(route.query.source || '').trim())  // submitted / rejected / ''
 const rmsId = computed(() => String(route.query.rms_id || '').trim())
 const routeToken = computed(() => String(route.query.token || '').trim())
+
+const copyToken = computed(() => String(route.query.copyToken || '').trim())
+const isCopyMode = computed(() => route.query.mode === 'copy')
 
 // 只要有 rms_id，就視為「snapshot 進來」
 // （也就是從 SubmittedDocuments / RejectedDocuments 點進來）
@@ -296,6 +367,7 @@ const form = reactive({
     itemType: '',        // 片段 MATNR
     styleNo: '',         // 完整 SFHNR（含版本）
     specification: [],   // 任務三回傳的 [{code, name}, ...]
+    isParamNA: false,
   },
 })
 
@@ -308,6 +380,7 @@ const itemsListVisible = ref(false)
 const specBlocks = ref([])
 const mcrBlocks = ref([])
 const paramsLoaded = ref(false)   // 👈 新增這個
+const dataloading = ref(false);
 
 const qualityBlocks = ref([])
 const otherBlocks = ref([])
@@ -377,8 +450,11 @@ const scrollToStep = (index) => {
   }
 
   // Step 8：切到輸出頁，順便回到最上
-  if (index === 8) {
+  if (index === 8 && !dataloading.value) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  else if (index == 8 && dataloading.value) {
+    alert("資料載入中，請稍後嘗試");
   }
 }
 const goToStep = scrollToStep
@@ -433,71 +509,86 @@ const isStep3Valid = computed(() => {
   if (!hasUsed) return null
   return allValid
 })
+const getText = cellNode => {
+  const paragraphs = cellNode.content || [];
+  return paragraphs.map(pNode => { return (pNode.content || []).map(textNode => textNode.text || '').join('') }).join('\n');
+}
 const isStep4Valid = computed(() => {
-  // 1) 完全沒有機台群組 → 此 Step 不適用，導航不上色
-  if (!hasAnyMachineGroup.value) {
-    return null
-  }
+  if (!hasAnyMachineGroup.value) return null;
 
-  const blocksArr = mcrBlocks.value || []
-  if (!blocksArr.length) {
-    // 有機台群組但一個 block 都沒有（理論上不會發生）→ 當作未填
-    return false
-  }
+  const blocksArr = mcrBlocks.value || [];
+  if (!blocksArr.length) return false;
 
-  let hasAnySelection = false        // 有沒有選過「任一」群組/機台
-  let hasAnyPmsTable = false         // 有沒有至少一台真的有 PMS 表
-  const signatures = []
+  let hasAnyPmsTable = false;
+  const signatures = [];
 
   for (const blk of blocksArr) {
-    const data = blk?.data || {}
-    const meta = data.metadata || {}
-    const arr  = data.arrayParameterData || []
+    const data = blk?.data || {};
+    const meta = data.metadata || {};
+    const arr  = data.arrayParameterData || [];
 
-    const hasGroup   = !!meta.groupCode
-    const hasMachine = meta.machines.length > 0
-    const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0)
-    const hasProcessOrder = (meta.processOrder.length > 0)
+    const hasGroup   = !!meta.groupCode;
+    const hasMachine = meta.machines && meta.machines.length > 0;
+    const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0);
+    const hasProcessOrder = (meta.processOrder && meta.processOrder.length > 0);
+    const isParamNA = meta.isParamNA === true; 
+    const hasTableBody = Array.isArray(arr) && arr.length > 1;
 
-    const hasTableBody = Array.isArray(arr) && arr.length > 1
+    // ★ 任務 5：只要這個 Block 被新增出來，這三個東西就是「絕對必填」，不再跳過！
+    if (!hasGroup || !hasMachine) return false;
+    if (!isParamNA && !hasProcessOrder) return false;
 
-    // const isTotallyUnused = !hasGroup && !hasMachine && !hasProgram && !hasTableBody
+    // 如果是 N/A (無點位參數)，合法過關
+    if (isParamNA) continue;
 
-    // 🔹 完全沒動過的 block：略過
-    // if (isTotallyUnused) {
-    //   continue
-    // }
+    // 🔴 若不是 N/A，那就必須要有配到程式號碼，且要有表格資料
+    if (!hasProgram || !hasTableBody) return false;
 
-    // 走到這裡代表這個 block 有被操作過
-    hasAnySelection = true
-
-    // ✅ 情境 4：已選群組+機台+程式號碼，但沒有任何 PMS 資料
-    //    → 該機台本來就沒 PMS，「不上色」（當成不需要填資料）
-    // if (hasGroup && hasMachine && hasProgram && !hasTableBody) {
-    //   continue
-    // }
-
-    // 🔴 只要有動作，但欄位不完整（群組 / 機台 / 程式 / 表格其中缺一） → 錯
-    if (!hasGroup || !hasMachine || !hasProgram || !hasTableBody || !hasProcessOrder) {
-      return false
-    }
-
-    // ⭐ 正常有 PMS 表的 block，開始做數值 / 重複檢查
-    hasAnyPmsTable = true
+    hasAnyPmsTable = true;
 
     // 數值檢查：欄位 2~6 必須是數字、不可遞減
     for (let r = 1; r < arr.length; r++) {
       const row = arr[r] || []
-      const cellStatus = row.slice(3, 8).map(cell => {
+      const value = [];
+      const valueStatus = [];
+      for(let index = 3; index < 8; index++) {
+        const txt = row[index];
         let status = 'empty';
-        let val = Number(cell);
-        if (cell) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
-        return status;
-      });
-    //   console.log(`row: ${r}, cellStatus: ${cellStatus}`);
-      if (cellStatus.some(status => status == 'invalid')) return false;
-      if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
-      if (cellStatus.every(status => status == 'empty')) return false;
+        let val = Number(txt);
+
+        if (txt) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+        
+        value.push(val);
+        valueStatus.push(status);
+      }
+
+      // Compare relation from left to right
+      const validIndices = [0, 1, 2, 3, 4].filter(i => valueStatus[i] === 'valid');
+      if (validIndices.length > 1){
+        let maxSoFar = value[validIndices[0]];
+        for (let i = 1; i < validIndices.length; i++) {
+            const item = value[validIndices[i]];
+            if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+            else maxSoFar = item;
+        }
+
+        let minSoFar = value[validIndices.at(-1)];;
+        for (let i = validIndices.length - 2; i >= 0; i--) {
+            const item = value[validIndices[i]];
+            if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
+            else minSoFar = item;
+        }
+      }
+      if (valueStatus.some(status => status == 'invalid' || status == 'empty')) return false;
+      // const cellStatus = row.slice(3, 8).map(cell => {
+      //   let status = 'empty';
+      //   let val = Number(cell);
+      //   if (cell) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+      //   return status;
+      // });
+      // if (cellStatus.some(status => status == 'invalid')) return false;
+      // if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+      // if (cellStatus.every(status => status == 'empty')) return false;
     }
 
     // 建立 signature，用來檢查不同 block 是否完全同一組 PMS
@@ -513,22 +604,12 @@ const isStep4Valid = computed(() => {
     signatures.push(JSON.stringify(mat))
   }
 
-  // 🔴 有機台群組，但一台都沒選 → 必填未填
-  if (!hasAnySelection) {
-    return false
-  }
-
-  // 🔹 有選機台，但全部都是「沒有 PMS 的機台」→ 此 Step 對這份文件不適用 → 不上色
-  if (!hasAnyPmsTable) {
-    return null
-  }
+  if (!hasAnyPmsTable && blocksArr.every(b => b.data.metadata.isParamNA)) return true;
 
   // 檢查不同 block 是否有完全相同的 PMS 表 → 不允許重複
   for (let i = 0; i < signatures.length; i++) {
     for (let j = i + 1; j < signatures.length; j++) {
-      if (signatures[i] === signatures[j]) {
-        return false
-      }
+      if (signatures[i] === signatures[j]) return false;
     }
   }
 
@@ -629,6 +710,27 @@ const stepStatusClass = (index) => {
   return 'step-ok'
 }
 
+// ★ 新增：當勾選/取消 N/A 時的處理
+const onParamNAChange = () => {
+  if (form.attribute.isParamNA) {
+    // 如果原本已經有選機台或填資料，警告會被清空
+    if (mcrBlocks.value && mcrBlocks.value.length > 0 && mcrBlocks.value[0]?.data?.metadata?.groupCode) {
+      const ok = confirm("勾選 N/A 將會忽略並清空下方已設定的參數資料，確定要繼續嗎？");
+      if (!ok) {
+        form.attribute.isParamNA = false; // 恢復不勾選
+        return;
+      }
+      // 確定 N/A，清空資料，避免後端存入垃圾資料
+      mcrBlocks.value = [];
+    }
+  } else {
+    // 取消 N/A 時，確保陣列是乾淨的，讓子元件重新掛載第一列
+    if (!mcrBlocks.value || mcrBlocks.value.length === 0) {
+      mcrBlocks.value = [];
+    }
+  }
+};
+
 /* =========================================
    新增：全域驗證與錯誤收集邏輯 (仿照 NewInstruction)
    ========================================= */
@@ -702,7 +804,6 @@ const collectValidationErrors = () => {
     if (pmsBs.length === 0) {
       errors.push('【3. 製造參數一覽表】尚未建立任何參數模塊');
     } else {
-      let hasAnySelection = false;
       const signatures = [];
 
       pmsBs.forEach((blk, idx) => {
@@ -712,74 +813,59 @@ const collectValidationErrors = () => {
 
         const hasGroup = !!meta.groupCode;
         const hasMachine = meta.machines && meta.machines.length > 0;
+        const hasProgram = (Array.isArray(meta.programs) && meta.programs.length > 0);
         const hasProcessOrder = meta.processOrder && meta.processOrder.length > 0;
+        const isParamNA = meta.isParamNA === true; 
         const hasTableBody = Array.isArray(arr) && arr.length > 1;
 
-        // 若完全沒動過 (空的)，視為未填
-        if (!hasGroup && !hasMachine && !hasTableBody) {
-           errors.push(`${prefix} 未選擇機台群組與機台`);
-           return;
-        }
-
-        hasAnySelection = true;
-
-        // 檢查必填欄位
+        // ★ 任務 5：精準報出缺失，不再提早 return 結束檢查
         if (!hasGroup) errors.push(`${prefix} 未選擇機台群組`);
         if (!hasMachine) errors.push(`${prefix} 未選擇機台`);
-        if (!hasProcessOrder) errors.push(`${prefix} 未選擇流程順序`);
+        if (!isParamNA && !hasProcessOrder) errors.push(`${prefix} 未選擇流程順序`);
         
-        // 檢查表格數值 (PMS Table)
-        // 欄位 2~6 (規下, 操下, 設定, 操上, 規上) 必須是有效數字
-        if (hasTableBody) {
-          let tableInvalid = false;
-          for (let r = 1; r < arr.length; r++) {
-            const row = arr[r] || [];
-            // 取出重點 5 欄
-            const cellStatus = row.slice(3, 8).map(cell => {
-              const val = Number(cell);
-              // 有文字但不是數字 -> invalid
-              if (cell && Number.isNaN(val)) return 'invalid';
-              // 沒文字 -> empty
-              if (!cell && cell !== 0) return 'empty';
-              return 'valid';
-            });
+        if (isParamNA) { } 
+        else {
+          // 只有這三項必填都有了，才去報配號或表格的錯
+          if (hasGroup && hasMachine && hasProcessOrder) {
+            if (!hasProgram) errors.push(`${prefix} 尚未配發程式號碼`);
+            if (!hasTableBody) {
+              errors.push(`${prefix} 尚未取得 PMS 表格資料或資料為空`);
+            } else {
+              let tableInvalid = false;
+              for (let r = 1; r < arr.length; r++) {
+                const row = arr[r] || [];
+                const cellStatus = row.slice(3, 8).map(cell => {
+                  const val = Number(cell);
+                  if (cell && Number.isNaN(val)) return 'invalid';
+                  if (!cell && cell !== 0) return 'empty';
+                  return 'valid';
+                });
 
-            // 規則：不能有 invalid (非數字)
-            if (cellStatus.some(s => s === 'invalid')) {
-              tableInvalid = true; 
-              break;
+                if (cellStatus.some(s => s === 'invalid')) {
+                  tableInvalid = true; 
+                  break;
+                }
+                if (cellStatus.every(s => s === 'empty')) {
+                  tableInvalid = true; 
+                  break;
+                }
+              }
+              if (tableInvalid) {
+                errors.push(`${prefix} 表格數值填寫不完整或包含非數字內容`);
+              }
+
+              const mat = [];
+              for (let r = 1; r < arr.length; r++) {
+                const row = arr[r] || [];
+                const sub = [];
+                for (let c = 3; c <= 7; c++) sub.push(String(row[c] ?? '').trim());
+                mat.push(sub);
+              }
+              signatures.push(JSON.stringify(mat));
             }
-            // 規則：若有設定值，則不能全空 (詳細邏輯參考 isStep4Valid)
-            // 簡易版：檢查是否全部 empty -> 若全空則該行沒意義
-            if (cellStatus.every(s => s === 'empty')) {
-               tableInvalid = true; 
-               break;
-            }
           }
-          if (tableInvalid) {
-            errors.push(`${prefix} 表格數值填寫不完整或包含非數字內容`);
-          }
-
-          // 收集簽名以檢查重複 (Row 2~6 的內容)
-          const mat = [];
-          for (let r = 1; r < arr.length; r++) {
-            const row = arr[r] || [];
-            const sub = [];
-            for (let c = 3; c <= 7; c++) sub.push(String(row[c] ?? '').trim());
-            mat.push(sub);
-          }
-          signatures.push(JSON.stringify(mat));
-
-        } else {
-           // 有選機台但沒表格資料 (如果是因為該機台本來就沒 PMS 則忽略，否則報錯)
-           // 這裡假設選了就要有
-           // errors.push(`${prefix} 無法取得 PMS 表格資料`);
         }
       });
-
-      if (!hasAnySelection) {
-        errors.push('【3. 製造參數一覽表】未進行任何機台設定');
-      }
 
       // 檢查重複內容
       for (let i = 0; i < signatures.length; i++) {
@@ -831,6 +917,11 @@ function onSelectItemType(payload) {
   styleOptions.value = []
   itemsListVisible.value = false
 
+  if (!isSnapshotView.value && !isRevision.value) {
+    form.documentID = ''
+    form.documentVersion = '1.0'
+  }
+
   if (!form.attribute.itemType) return
 
   // 依品目抓式樣清單
@@ -844,53 +935,89 @@ async function loadStylesForItem(matnr) {
       styleOptions.value = []
       return
     }
-    styleOptions.value = Array.isArray(data.data?.styles) ? data.data.styles : []
+    console.log("data: ", data);
+    styleOptions.value = data.data.styles.map(st => ({ ...st, clean_process_names: st.process_names.map(name => cleanProcessName(name)) }));
   } catch (e) {
     console.error('loadStylesForItem failed:', e)
     alert('取得式樣清單失敗')
   }
 }
-function getDisplayName(rawName = '') {
-  const idx = rawName.indexOf(')')
-  if (idx === -1) {
-    // 沒有 ')' 就原樣回傳（或你要不要再 trim 都可以）
-    return rawName.trim()
-  }
-  // 取第一個 ')' 後面的全部，順便 trim 掉前後空白
-  return rawName.slice(idx + 1).trim()
-}
+
+const isStyleMenuOpen = ref(false);
+const toggleStyleMenu = () => {
+  if ((mode.value !== 'new') && (isRevision.value || form.documentID.length > 0)) return;
+  isStyleMenuOpen.value = !isStyleMenuOpen.value;
+};
+const closeStyleMenu = (event) => {
+  if (event.currentTarget.contains(event.relatedTarget)) return;
+  isStyleMenuOpen.value = false;
+};
+const selectStyle = (sfhnr) => {
+  form.attribute.styleNo = sfhnr;
+  isStyleMenuOpen.value = false;
+  onSelectStyle(); // 觸發你原本的 API 抓取或資料綁定邏輯
+};
 async function onSelectStyle() {
-  const matnr = form.attribute.itemType
-  const sfhnr = form.attribute.styleNo
-
-  if (!matnr || !sfhnr) return
-
-  try {
-    const { data } = await axios.get(`${API_BASE_URL}/item/processes`, { params: { matnr, sfhnr }, })
-    if (!data.success) {
-      alert(data.error || '取得適用工程失敗')
-      form.attribute.specification = []
-      specificationDisplay.value = ''
-      return
-    }
-
-    const specList = Array.isArray(data.data?.specification) ? data.data.specification : []
-
-    // 5. form.attribute 中的 specific_xxx → specification 陣列
-    form.attribute.specification = specList
-
-    // 4. 適用工程 readonly input 顯示 PROCESS_NAME 串
-    specificationDisplay.value = specList.map(s => s.name).join(', ')
-
-    // 順便更新文件名（你可以依你喜好調整）
-    if (form.attribute.itemType && specList.length) {
-      form.documentName = `${form.attribute.itemType}_${specList.map(s => getDisplayName(s.name)).join('、')} 製造式樣書`
-    }
-  } catch (e) {
-    console.error('onSelectStyle /item/processes failed:', e)
-    alert('取得適用工程失敗')
+  const sfhnr = form.attribute.styleNo;
+  if (!sfhnr) {
+    form.attribute.specification = [];
+    specificationDisplay.value = '';
+    return;
   }
+
+  const selectedStyle = styleOptions.value.find(st => st.sfhnr === sfhnr);
+  
+  if (!selectedStyle || !selectedStyle.processes || selectedStyle.processes.length === 0) {
+    alert('該式樣查無適用工程');
+    form.attribute.specification = [];
+    specificationDisplay.value = '';
+    return;
+  }
+
+  // 1. 直接將記憶體中的 processes 賦值給 specification (零延遲！)
+  const specList = selectedStyle.processes;
+  form.attribute.specification = specList;
+
+  // 2. 適用工程 readonly input 顯示 PROCESS_NAME 串
+  specificationDisplay.value = specList.map(s => cleanProcessName(s.name)).join('、');
+
+  // 3. 更新文件名 (使用洗乾淨的名稱)
+  if (form.attribute.itemType && specList.length) {
+    // form.documentName = `${form.attribute.styleNo.split('-', 1)[0]}_${specList.map(s => s.name).join('、')} 製造式樣書`;
+    form.documentName = `${form.attribute.styleNo.split('-', 1)[0]}_${specList.map(s => cleanProcessName(s.name, true, false)).join('、')} 製造式樣書`;
+  }
+
+  // 4. 取得最新版本號
+  if (!isSnapshotView.value && !isRevision.value) {
+    try {
+      const versionInfo = await fetchLatestSpecificationDocVersion(sfhnr);
+      form.documentID = versionInfo.document_id;
+      form.documentVersion = versionInfo.document_version;
+    } catch (e) {
+      console.error('取得版本號失敗:', e);
+    }
+  }
+
+  await saveDraft(false);
 }
+// 輔助函數：清洗適用工程名稱
+const cleanProcessName = (name, filter_front = true, filter_end = true) => {
+  if (!name) return '';
+
+  let cleaned = name;
+  
+  // 1. 去除開頭的代碼 (例如: (L314-17)、(L210-33))
+  // ^\([^)]+\) 代表：從開頭找第一個左括號，一直到第一個右括號為止
+  if (filter_front) cleaned = name.replace(/^\([^)]+\)/, '');
+  
+  // 2. 去除結尾的括號與數字 (例如: (1)、(2))
+  // \(\d+\)$ 代表：在字串最尾端，尋找括號裡面包著純數字的部分
+  if (filter_end) cleaned = cleaned.replace(/\(\d+\)$/, '');
+  
+  // 回傳並去除前後多餘空白
+  return cleaned.trim();
+}
+
 // ---------- dynamic blocks (spec/quality/other) ----------
 let uid = 1
 const makeBlock = (stepType, tier) => ({
@@ -926,6 +1053,7 @@ function extractPlainTextFromNode(node) {
   if (typeof node.text === 'string') {
     out += node.text
   }
+  if (node.type === 'image') return '[IMAGE]'
   if (Array.isArray(node.content)) {
     node.content.forEach(child => {
       out += extractPlainTextFromNode(child)
@@ -998,8 +1126,8 @@ function isDynamicBlockItemValid(item) {
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r]
       const cells = Array.isArray(row.content) ? row.content : []
-      const isHeaderRow = r === 0
-      if (isHeaderRow) continue
+      // const isHeaderRow = r === 0
+      // if (isHeaderRow) continue
 
       let rowHasContent = false
       for (const cell of cells) {
@@ -1054,7 +1182,7 @@ const toGenericBlocks = (arr=[], step_type) =>
 
 const fromGenericBlocks = (payload, stepType) =>
   (payload.blocks || []).map((blk, i) => ({
-    id: i + 1,
+    id: uid++,
     step: stepType,
     tier: blk.tier,
     data: (blk.data || []).map(it => ({
@@ -1098,6 +1226,7 @@ const handleAddDocsToSpec = (selectedDocs) => {
 
   const newBlocks = selectedDocs.map(doc => {
     return {
+      id: uid++,
       step: 4,
       data: [
         {
@@ -1137,9 +1266,16 @@ const onMachineGroupInfo = (payload) => {
 // serialize params → backend shape for /docs/params/save (step_type = 5)
 function serializeParamsFromMCR() {
   console.log("mcrBlocks: ", mcrBlocks.value);
-  if (mcrBlocks.value.length == 0 || (mcrBlocks.value.length == 1 && mcrBlocks.value[0].data.metadata.programs.length == 0)){
+  
+  // ★ 新增防護：如果系統判定沒有群組機台，一律送出空陣列給後端
+  if (!hasAnyMachineGroup.value) {
     return []
   }
+
+  if (mcrBlocks.value.length == 0){
+    return []
+  }
+  
   return (mcrBlocks.value || []).map((blk, i) => ({
     step_type: 5,
     tier_no: i + 1,
@@ -1165,6 +1301,14 @@ function loadParamsIntoMCR(payload) {
 
 // ---------- references (forms) ----------
 let usedFormUid = 1
+const selectedFormId = ref(null); // 新增：記錄目前選取的文件 ID
+
+// 新增：改變文件顏色的函式
+const setDocColor = (color) => {
+  if (selectedFormId.value == null) return alert('請先點擊選取要更改顏色的文件列');
+  const target = usedForms.value.find(d => d.id === selectedFormId.value);
+  if (target) target.color = color;
+}
 // const addUsedForm = ({ formId, formName }) => { usedForms.value.push({ id: usedFormUid++, formId, formName }); formWindowVisible.value = false }
 const addUsedForm = (selectedForms) => {
   console.log("selectedForms: ", selectedForms);
@@ -1175,7 +1319,8 @@ const addUsedForm = (selectedForms) => {
       usedForms.value.push({ 
         id: usedFormUid++, 
         formId: form.formId, 
-        formName: form.formName 
+        formName: form.formName,
+        color: 'black'
       });
     }
   });
@@ -1197,33 +1342,42 @@ onActivated(() => {
 })
 
 // ==========================================
-// ★ 核心邏輯：onActivated
-// 目的：當頁面從背景喚醒時，讀取 URL 參數並自動執行 handleSearch
+// ★ 自動帶入邏輯：解析網址參數並自動選擇品目與式樣
 // ==========================================
-onActivated(async () => {
-  // 檢查是否有 autoLoad 標記
-  if (route.query.autoLoad === 'true') {
-    const { item, book, mode } = route.query;
-    console.log("route.query: ", route.query);
+const handleAutoLoadFromQuery = async () => {
+  const { item, styleNo, token, rms_id, mode } = route.query;
 
-    let itemType = item.split("-")[0];
+  // 1. 如果有 token 或 rms_id，代表正在開啟既有文件或快照，不執行自動帶入
+  // 2. 如果是複製模式，也不執行
+  if (token || rms_id || mode === 'copy') return;
 
-    // 1. 【修正點】正確填入 form.attribute
-    // 請確認您的 v-model 綁定名稱，通常是 matnr (品目) 和 sfhnr (式樣書號)
-    if (itemType) form.attribute.itemType = itemType;
-    onSelectItemType(itemType);
+  // 3. 如果網址有傳入 item 和 styleNo，執行自動帶入
+  if (item && styleNo) {
+    // 如果目前表單已經是這個品目和式樣，不用重複執行
+    if (form.attribute.itemType === item && form.attribute.styleNo === styleNo) {
+       return;
+    }
+    
+    // B. 載入該品目下的所有式樣清單 (這包 API 會回傳每個式樣對應的所有 processes)
+    await loadStylesForItem(item);
+    form.attribute.itemType = item;
+    
+    // C. 帶入式樣號碼，並觸發 onSelectStyle()
+    // (onSelectStyle 內部會自動把該式樣的所有 processes 抓出來塞進 form.attribute.specification)
+    form.attribute.styleNo = styleNo;
+    await onSelectStyle();
 
-    if (book) form.attribute.styleNo = book;
-    onSelectStyle();
-    console.log("on Activated form: ", form.attribute);
-
-    // 3. 重置步驟回第一步
+    // D. 幫使用者跳回第一步
     currentStep.value = 1;
-
-    // 4. 【關鍵點】等待資料更新後，自動執行搜尋
-    await nextTick();
+    
+    // E. (優化) 清理 URL，避免使用者按 F5 重新整理時又重複觸發這段邏輯
+    const query = { ...route.query };
+    delete query.item;
+    delete query.styleNo;
+    delete query.processCode;
+    router.replace({ query });
   }
-})
+}
 
 // ==========================================
 // ★ 核心邏輯：handleSearch
@@ -1367,9 +1521,11 @@ async function generateAndPreviewDocx() {
           referenceType: 1,
           referenceDocumentID: f.formId,
           referenceDocumentName: f.formName,
+          color: f.color
         })),
       ],
     }
+    console.log("generate and preview Docx: ", payload);
 
     const url = `${API_BASE_URL}/docs/preview/docx`
     const res = await axios.post(url, payload, { responseType: 'blob' })
@@ -1483,7 +1639,8 @@ async function generateAndDownloadDocx() {
         ...(usedForms.value || []).map(f => ({
           referenceType: 1,
           referenceDocumentID: f.formId,
-          referenceDocumentName: f.formName
+          referenceDocumentName: f.formName,
+          color: f.color
         }))
       ]
     }
@@ -1495,18 +1652,14 @@ async function generateAndDownloadDocx() {
 
     const res = await axios.post(url, payload, { responseType: 'blob' })
 
-    const docIdHeader =
-      res.headers['x-document-id'] || res.headers['X-Document-ID']
-    if (docIdHeader) {
-      form.documentID = docIdHeader
-    }
+    const docIdHeader = res.headers['x-document-id'] || res.headers['X-Document-ID']
+    const docVersion = res.headers['x-document-version'] || res.headers['X-Document-Version']
+    if (docIdHeader) { form.documentID = docIdHeader; form.documentVersion = docVersion }
 
-    const contentType =
-      res.headers['content-type'] ||
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const contentType = res.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     const dispo = res.headers['content-disposition']
     const versionStr = Number(form.documentVersion ?? 1).toFixed(1)
-    const filename = extractFilenameFromDisposition(dispo, `${form.documentName || 'document'}${versionStr}.docx`)
+    const filename = extractFilenameFromDisposition(dispo, `${form.documentName || 'document'} ${form.attribute.styleNo.split("-")[1]} ${versionStr}.docx`)
 
     const blob = new Blob([res.data], { type: contentType })
 
@@ -1536,24 +1689,17 @@ async function generateAndDownloadDocx() {
 
         try {
           const obj = JSON.parse(text)
-          if (obj && typeof obj === 'object' && obj.message) {
-            msg = String(obj.message)
-          }
+          if (obj && typeof obj === 'object' && obj.message) { msg = String(obj.message) }
         } catch {}
 
-        if (msg.includes('ORA-01031')) {
-          msg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。'
-        }
+        if (msg.includes('ORA-01031')) { msg = 'EIP 建檔 / 歷史快照失敗：Oracle 權限不足（ORA-01031）。\n請聯絡資訊部或系統管理員開啟寫入 IDBUSER.RMS_DCC2EIP 的權限。' }
 
         errorMsg.value = msg.replace(/\\n/g, '\n')
       } catch {
         errorMsg.value = e?.message || '文件產出失敗，請稍後再試'
       }
     } else {
-      const msg =
-        e?.response?.data?.message ||
-        e?.message ||
-        '文件產出失敗，請稍後再試'
+      const msg = e?.response?.data?.message || e?.message || '文件產出失敗，請稍後再試'
       errorMsg.value = msg
     }
   } finally {
@@ -1564,7 +1710,11 @@ async function generateAndDownloadDocx() {
 // ---------- save ----------
 const isSaving = ref(false)
 
-const saveDraft = async () => {
+const saveDraft = async (show_window = true) => {
+  if (dataloading.value) {
+    alert("資料載入中，請稍後嘗試");
+    return;
+  }
   // Snapshot 模式：直接用 URL token 覆蓋最新草稿
   let t;
   if (isSnapshotView.value) {
@@ -1596,14 +1746,14 @@ const saveDraft = async () => {
       form,
       blockRequests: [{ step_type: 4, blocks: specBlockPayload }, { step_type: 6, blocks: qualityBlockPayload }, { step_type: 7, blocks: otherBlockPayload },],
       paramRequests: [{ step_type: 5, blocks: paramPayload }],
-      references: { documents: [], forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })) },
+      references: { documents: [], forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName, color: f.color })) },
     });
 
     if (!result?.success) {
       alert(result?.message || '屬性儲存失敗');
       return false;
     }
-    alert(`草稿已儲存（時間：${result.issueTime || ''}）`);
+    if (show_window) alert(`草稿已儲存（時間：${result.issueTime || ''}）`);
   } catch (e) {
     console.error('saveDraft failed:', e);
     alert('儲存草稿失敗');
@@ -1614,12 +1764,33 @@ const saveDraft = async () => {
 }
 
 // ★ 共用：把後端撈回來的 snapshot/draft 結果套用到前端
-const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false }) => {
+const applyLoadedData = async (snapshot, { isSnapshot = false, isCopy = false } = {}) => {
+  dataloading.value = true;
   // console.log("applyLoadedData form attribute: ", form.attribute);
   // if (route.query.autoLoad === 'true') return;
   // 1) attributes
   if (!(route.query.autoLoad === 'true') && snapshot.attributes?.success) {
-    Object.assign(form, snapshot.attributes.form || {})
+    if (isCopy) {
+      const oldForm = snapshot.attributes.form || {}
+      form.documentPurpose = oldForm.documentPurpose || ''
+      form.documentVersion = '1.0'
+    } else {
+      // 一般模式：照單全收
+      Object.assign(form, snapshot.attributes.form || {})
+    }
+  }
+
+  // 重新帶入登入者資訊 (新建或複製都要執行這段！)[cite: 2]
+  if (!isSnapshot) {
+    form.department = sessionStorage.getItem('loggedInUserdeptName')
+    form.author_id = sessionStorage.getItem('loggedInUserNo')
+    form.author = sessionStorage.getItem('loggedInUserName')
+
+    const personnel = await loadPersonnel(sessionStorage.getItem('loggedInUserNo'))
+    if (personnel?.success) {
+      if (!form.confirmer) form.confirmer = personnel.data.personnel.confirmer
+      if (!form.approver) form.approver = personnel.data.personnel.approver
+    }
   }
 
   // 如果是 snapshot 檢視 → 不要覆蓋原本的部門/作者
@@ -1652,11 +1823,17 @@ const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false })
   }
 
   // 3) 參數 (step_type=5)
-  const pm = snapshot.params?.['5']
-  if (pm?.success) {
-    loadParamsIntoMCR(pm)
+  if (!isCopy) {
+    const pm = snapshot.params?.['5']
+    if (pm?.success) {
+      loadParamsIntoMCR(pm)
+    } else {
+      paramsLoaded.value = true
+    }
   } else {
-    paramsLoaded.value = true
+    // ★ 任務 1：如果是複製模式，雖然不載入舊參數，但必須告訴系統「參數區塊已就緒」
+    // 否則 v-if="paramsLoaded" 會讓整個組件消失！
+    paramsLoaded.value = true;
   }
 
   // 4) 品質與規格 blocks (step_type=6)
@@ -1679,10 +1856,25 @@ const applyLoadedData = async (snapshot, { isSnapshot } = { isSnapshot: false })
       id: i++,
       formId: f.formId,
       formName: f.formName,
+      color: f.color
     }))
   }
   console.log("applyLoadedData form attribute: ", form.attribute);
+  dataloading.value = false;
+  if (form.documentName) alert("草稿載入成功");
 }
+
+// 當組件被 keep-alive 喚醒時觸發
+onActivated(async () => {
+  // 如果當前 URL 沒有 token，但我們手上有草稿 token (代表是點側邊欄切回來的)
+  if (!route.query.token && draftToken.value) {
+    // 把 token 補回 URL，這樣看起來才像是在編輯同一份文件
+    setToken(draftToken.value, { updateUrl: true })
+  }
+  
+  // ★ 從其他頁面 (如 ItemViewPage) Keep-alive 切換過來時，自動帶入參數
+  await handleAutoLoadFromQuery();
+})
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll, { passive: true })
 
@@ -1702,6 +1894,24 @@ onMounted(async () => {
         rms_id: rmsId.value,
       })
       await applyLoadedData(snapshot, { isSnapshot: true })
+    } else if (isCopyMode.value && copyToken.value) {
+      // 1. 用「舊的 copyToken」去後端撈舊資料
+      snapshot = await loadDraftAll(copyToken.value, { blocks: [4, 6, 7], params: [5], attrs: true, refs: true })
+      
+      // 2. 帶入畫面 (isCopy: true 會濾掉原作者等不該複製的資訊)
+      await applyLoadedData(snapshot, { isSnapshot: false, isCopy: true })
+
+      // ★ 3. 載入完成後，立刻在背景偷偷存檔！
+      const saveSuccess = await saveDraft(); 
+
+      // ★ 4. 存檔成功後，把網址上的 mode=copy 和 copyToken 洗掉
+      // 讓它變成一份普通的草稿，使用者就算按 F5 重新整理，也不會再發生去撈舊資料的靈異事件
+      if (saveSuccess) {
+        const query = { ...route.query };
+        delete query.mode;
+        delete query.copyToken;
+        router.replace({ query });
+      }
     } else {
       // 一般新建/草稿 → 用 draft-all
       snapshot = await loadDraftAll(t, {
@@ -1712,6 +1922,10 @@ onMounted(async () => {
       })
       await applyLoadedData(snapshot, { isSnapshot: false })
     }
+
+    // ★ 在載入空白草稿之後，檢查是否有外部傳入的參數需要自動帶入
+    await handleAutoLoadFromQuery();
+
   } catch (e) {
     console.error('load draft/snapshot failed:', e)
     alert(isSnapshotView.value ? '載入歷史快照失敗' : '載入草稿失敗')
@@ -1724,6 +1938,7 @@ onBeforeUnmount(() => {
   if(confirm("請問是否要保存內容")) {
     saveDraft();
   }
+  clearToken();
 })
 
 const isRevision = computed(() => {
@@ -1942,6 +2157,104 @@ defineExpose({ saveDraft })
   cursor: pointer;
 }
 
+/* 自訂選項的排版：左右對齊 */
+.style-option-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+/* 適用工程 Tag 的容器 */
+.process-tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
+/* 小 Card 設計 */
+.proc-tag { background-color: #e3f2fd; color: #1565c0; padding: 2px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+.select-trigger.disabled { background-color: #f5f5f5; color: #999; pointer-events: none; }
+/* ====================================================
+   自製 Select Component 樣式 (完美對齊原生 input 版)
+==================================================== */
+
+/* 1. 容器本身：寬度設定為 70%，與其他 input 保持絕對一致 */
+.custom-select { position: relative; width: 70%; outline: none; }
+.custom-select:focus .select-trigger { border-color: #008bff; box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1); }
+
+/* 2. 觸發按鈕：Padding、字體大小、邊框顏色全部「複製」你原本的 input 設定 */
+.select-trigger {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px; /* ★ 對齊原本 input 的 padding */
+  background-color: #ffffff;
+  border: 1px solid #ddd; /* ★ 對齊原本 input 的邊框色 */
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-size: 15px; /* ★ 對齊原本 input 的字體大小 */
+  color: #333;
+  box-sizing: border-box; /* 確保寬度計算包含 padding，不會凸出去 */
+}
+
+/* Interaction feedback and cursor style */
+.select-trigger:hover { border-color: #008bff;  }
+.select-trigger .arrow { font-size: 12px; color: #999; margin-left: 10px; }
+
+/* 5. 展開的下拉選單面板 (維持原樣，讓它有立體感) */
+.select-options {
+  position: absolute;
+  top: calc(100% + 4px); /* 稍微靠近輸入框一點 */
+  left: 0;
+  width: 100%;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); 
+  z-index: 2000; 
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+/* 6. 選單內的每一個選項 */
+.style-option-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: #333;
+  font-size: 15px; /* 配合主字體大小 */
+  transition: background-color 0.2s;
+}
+
+/* 鎖定狀態的選項樣式 */
+.style-option-item.is-locked {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6; /* 讓整體變淡，提示無法選擇 */
+}
+
+/* 鎖定狀態時，滑鼠移上去不要變色 */
+.style-option-item.is-locked:hover {
+  background-color: #f5f5f5; 
+}
+
+/* 左側文字群組，讓名稱跟提示排在一起 */
+.style-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 鎖定提示文字：紅色醒目提醒 */
+.locked-hint {
+  font-size: 12px;
+  color: #e74c3c; /* 紅色，或者用你的主題色 */
+  font-weight: bold;
+}
+
+/* 選項 hover 時的背景色變換 */
+.style-option-item:hover { background-color: #f5f7fa; }
+
+/* 7. 禁用狀態 (對齊你 input[readonly] 的風格) */
+.select-trigger.disabled { background-color: #e9ecef; color: #495057; cursor: not-allowed; border-color: #ddd; }
+
+/* 8. 適用工程小標籤 (Card) */
+.process-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 65%; }
+.proc-tag { background-color: #ecf5ff; color: #008bff; border: 1px solid #d9ecff;  padding: 2px 6px; border-radius: 4px; font-size: 12px; white-space: nowrap; }
+
 /* Purpose */
 .purpose-group {
   width: 100%;
@@ -2042,4 +2355,38 @@ defineExpose({ saveDraft })
   opacity: 0.6;
   cursor: default;
 }
+
+/* 文件與表單區塊樣式 */
+.document-block, .form-block { 
+  display: flex; 
+  justify-content: space-between; 
+  padding: 10px; 
+  margin: 10px 10px; 
+  border: 1px solid #ddd; 
+  border-radius: 4px; /* 加點圓角更好看 */
+  cursor: pointer;    /* 讓使用者知道可以點擊 */
+  transition: all 0.2s ease;
+}
+
+/* ★ 被選取時的狀態 (藍色高光) */
+.document-block.is-selected, .form-block.is-selected {
+  outline: 2px solid #2196f3;
+  background-color: #f4f9ff;
+  border-color: #2196f3;
+}
+
+/* 顏色選擇器 */
+.color-picker-group {
+  display: flex;
+  align-items: center;
+  background: #f8f9fa;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid #eee;
+}
+
+/* 共用顏色圓點 (沿用您原本的 .dot 樣式，但稍微修正一下邊距) */
+.dot { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); cursor: pointer; margin-left: 6px; }
+.blue { background: #0000ff; }
+.black { background: #000000; }
 </style>

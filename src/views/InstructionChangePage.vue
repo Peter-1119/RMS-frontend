@@ -11,7 +11,7 @@
       <table class="instruction-change-documents-table">
         <thead class="TABLE-HEADER">
           <tr>
-            <th>編輯</th>
+            <th>變版</th>
             <th>編號</th>
             <th>文件名稱</th>
             <th>版本</th>
@@ -147,12 +147,9 @@ export default {
         }
 
         // 🔸 避免舊草稿 token 沾黏
-        localStorage.removeItem('rms:draft:new-instruction')
+        // localStorage.removeItem('rms:draft:new-instruction')
 
-        this.$router.push({
-          name: 'new-instruction',
-          query: { token: res.token, mode: 'revision' },
-        })
+        this.$router.push({ name: 'new-instruction', query: { token: res.token, mode: 'revision' } })
       } catch (e) {
         console.error(e)
         alert(e?.message || '建立變版失敗')

@@ -9,39 +9,30 @@
 
     <div class="filter-card">
       <div class="search-row">
-        <div class="input-group"><label>建立日期 起</label><input type="date" v-model="search.startDate" /></div>
-        <div class="input-group"><label>迄</label><input type="date" v-model="search.endDate" /></div>
+        <!-- 加上 min 屬性限制不可選擇 2026-04-01 之前的日期 -->
+        <div class="input-group">
+          <label>建立日期 起</label>
+          <input type="date" v-model="search.startDate" min="2026-04-01" @change="validateDate" />
+        </div>
+        <div class="input-group">
+          <label>迄</label>
+          <input type="date" v-model="search.endDate" min="2026-04-01" @change="validateDate" />
+        </div>
         <div class="input-group"><label>品目</label><input type="text" v-model="search.item" placeholder="輸入品目..." /></div>
         <div class="input-group"><label>製程</label><input type="text" v-model="search.station" placeholder="代號或名稱..." /></div>
-        <div class="input-group"><label>單位/課別</label><input type="text" v-model="search.unit" placeholder="輸入課別..." /></div>
-        <button class="btn search-btn" @click="fetchData"><i class="fa fa-search"></i> 查詢</button>
-      </div>
-
-      <div class="control-row">
-        <div class="threshold-control">
-          <label>管控閥值 (天)</label>
-          <input type="number" v-model.number="thresholdDays" min="0" class="short-input" />
-          <span class="hint">超過此天數未確認將標示為紅色</span>
+        <div class="input-group"><label>式樣書編號</label><input type="text" v-model="search.document_id" placeholder="輸入式樣書編號..." /></div>
+        <div class="input-group"><label>課別</label><input type="text" v-model="search.department" placeholder="輸入課別..." /></div>
+        <div class="input-group">
+          <label>文件狀態</label>
+          <select v-model="search.status" class="status-select">
+            <option value="">全部</option>
+            <option value="已公告">已公告</option>
+            <option value="已下載">已下載</option>
+            <option value="草稿">草稿</option>
+          </select>
         </div>
-
-        <div class="checkbox-group">
-          <label class="cb-container">
-            <input type="checkbox" v-model="filters.onlyProd" />
-            <span class="checkmark"></span> 僅顯示量產 (Z開頭)
-          </label>
-          <label class="cb-container">
-            <input type="checkbox" v-model="filters.onlyProto" />
-            <span class="checkmark"></span> 僅顯示試作 (非Z)
-          </label>
-          <label class="cb-container">
-            <input type="checkbox" v-model="filters.unconfirmed" />
-            <span class="checkmark"></span> 僅顯示未確認
-          </label>
-          <label class="cb-container">
-            <input type="checkbox" v-model="filters.overdueOnly" />
-            <span class="checkmark"></span> 僅顯示過期
-          </label>
-        </div>
+        <button class="btn search-btn" @click="handleSearch" :disabled="isLoading || isExporting"><i class="fa fa-search"></i> {{ isLoading ? '查詢中...' : '查詢' }}</button>
+        <button class="btn export-btn" @click="handleExport" :disabled="isLoading || isExporting"><i class="fa fa-download"></i> {{ isExporting ? '匯出中...' : '匯出 Excel' }}</button>
       </div>
     </div>
 
@@ -50,232 +41,278 @@
         <thead>
           <tr>
             <th width="50">項次</th>
-            <th width="120">品目</th>
+            <th width="100">品目</th>
+            <th width="80">製程</th>
+            <th width="120">製程名稱</th>
             <th width="120">式樣書編號</th>
-            <th width="220">製程</th> <th width="100">建立時間</th>
-            <th width="80">課別</th>
-            <th width="80">生技確認</th>
-            <th width="100">生技確認人</th>
-            <th width="100">確認日期</th>
-            <th>式樣注意事項</th>
+            <th width="100">建立時間</th>
+            <th width="100">文管編號</th>
+            <th width="120">文件名稱</th>
+            <th width="70">版本</th>
+            <th width="80">制定者</th>
+            <th width="80">承認者</th>
+            <th width="120">變更要點</th>
             <th width="80">文件狀態</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, index) in filteredDisplayData" :key="index" :class="{ 'row-overdue': isRowOverdue(row) }" @click="handleRowClick(row)">
-            <td>{{ (search.page - 1) * search.pageSize + index + 1 }}</td>
-            
-            <td class="fw-bold">{{ row.ITEM }}</td>
-            
-            <td>{{ row.BOOK }}</td>
-
-            <td class="text-left process-cell">
-              <div v-for="(proc, pIdx) in parseProcessInfo(row.PROCESS_INFO)" :key="pIdx" class="process-item">
-                {{ proc }}
-              </div>
-            </td>
-
-            <td>{{ formatDate(row.T_TIME) }}</td>
-
-            <td>{{ row.CLASS_CH }}</td>
-            
-            <td>
-              <span v-if="row.CHECK_TIME" class="badge success">已確認</span>
-              <span v-else class="badge warning">未確認</span>
-            </td>
-            
-            <td>{{ row.PT_EMP }}</td>
-
-            <td>{{ formatDate(row.CHECK_TIME) }}</td>
-
-            <td class="text-left precautions-cell">{{ row.PRECAUTIONS }}</td>
-
-            <td>
-              <span :class="getStatusClass(row.DOC_STATUS)">{{ row.DOC_STATUS }}</span>
-            </td>
-          </tr>
-          
-          <tr v-if="filteredDisplayData.length === 0">
-            <td colspan="11" class="empty-state">查無資料</td>
+          <tr v-if="isLoading"><td colspan="13" class="empty-state">資料載入中，請稍候...</td></tr>
+          <tr v-else-if="filteredDisplayData.length === 0"><td colspan="13" class="empty-state">查無資料</td></tr>
+          <tr v-else v-for="(row, index) in filteredDisplayData" :key="index" @click="handleRowClick(row)">
+            <td>{{ (currentPage - 1) * displayPageSize + index + 1 }}</td>
+            <td class="fw-bold">{{ row.MATNR }}</td>
+            <td>{{ row.KTSCH }}</td>
+            <td class="text-left">{{ row.LTXA1 }}</td>
+            <td class="fw-bold">{{ row.SFHNR }}</td>
+            <td>{{ formatDate(row.EDATE) }}</td>
+            <!-- 以下為 MySQL 對應資料，若無資料顯示空值或預設提示 -->
+            <td>{{ row.doc_id || '-' }}</td>
+            <td class="text-left">{{ row.doc_name || '-' }}</td>
+            <td>{{ row.doc_version ? parseFloat(row.doc_version).toFixed(1) : '-' }}</td>
+            <td>{{ row.author || '-' }}</td>
+            <td>{{ row.approver || '-' }}</td>
+            <td class="text-left precautions-cell">{{ row.change_summary || '-' }}</td>
+            <td><span :class="getStatusClass(row.status_text)">{{ row.status_text }}</span></td>
           </tr>
         </tbody>
       </table>
-      <div class="pagination-bar" v-if="total > 0">
-        <span class="info">共 {{ total }} 筆資料，第 {{ search.page }} / {{ totalPages }} 頁</span>
+      <div class="pagination-bar">
+        <div class="page-size-selector">
+          每頁顯示
+          <select v-model="displayPageSize" @change="onPageSizeChange" class="page-size-select" :disabled="isLoading">
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="30">30</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+          筆
+        </div>
+
+        <span class="info" v-if="total > 0">共 {{ total }} 筆資料，第 {{ currentPage }} / {{ totalPages }} 頁</span>
+        <span class="info" v-else>尚未查詢或查無資料</span>
+        
         <div class="actions">
-          <button :disabled="search.page <= 1" @click="changePage(-1)">上一頁</button>
-          <button :disabled="search.page >= totalPages" @click="changePage(1)">下一頁</button>
+          <button :disabled="currentPage <= 1 || isLoading || total === 0" @click="changePage(-1)">上一頁</button>
+          <button :disabled="currentPage >= totalPages || isLoading || total === 0" @click="changePage(1)">下一頁</button>
         </div>
       </div>
     </div>
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL || ''
+const router = useRouter()
 
-export default {
-  name: 'ItemViewPage',
-  data() {
-    return {
-      // 搜尋條件
-      search: {
-        startDate: '',
-        endDate: '',
-        item: '',
-        station: '',
-        unit: '',
-        page: 1,
-        pageSize: 20
-      },
-      total: 0, 
+// 搜尋條件
+const search = reactive({
+  startDate: '2026-04-01',
+  endDate: '',
+  item: '',
+  station: '',
+  document_id: '',
+  department: '',
+  status: ''
+})
 
-      // 篩選條件
-      filters: {
-        onlyProd: false,
-        onlyProto: false,
-        unconfirmed: false,
-        overdueOnly: false 
-      },
-      // 閥值
-      thresholdDays: 3, 
-      
-      // 資料
-      tableData: [],
-      loading: false
-    }
-  },
-  computed: {
-    totalPages() {
-      return Math.ceil(this.total / this.search.pageSize) || 1
-    },
-    // 前端二次過濾 (針對 "僅顯示過期")
-    filteredDisplayData() {
-      if (!this.filters.overdueOnly) {
-        return this.tableData
-      }
-      return this.tableData.filter(row => this.isRowOverdue(row))
-    }
-  },
-  methods: {
-    async fetchData() {
-      this.loading = true
-      try {
-        const params = {
-          startDate: this.search.startDate,
-          endDate: this.search.endDate,
-          item: this.search.item,
-          station: this.search.station,
-          unit: this.search.unit,
-          // 傳遞給後端的 Checkbox 邏輯
-          filterProd: this.filters.onlyProd,
-          filterProto: this.filters.onlyProto,
-          filterUnconfirmed: this.filters.unconfirmed,
-          page: this.search.page,
-          pageSize: this.search.pageSize
-        }
+// === 原本是常數，現在改成響應式設定 ===
+const displayPageSize = ref(10); // 畫面上每頁顯示的筆數
+const bucketSize = computed(() => displayPageSize.value * 10); // 快取桶永遠是顯示數量的 10 倍
 
-        const { data } = await axios.get(`${API_BASE_URL}/spec/view-list`, { params })
-        if (data.success) {
-          this.tableData = data.data.items || []
-          this.total = data.data.total || 0
-        } else {
-          alert(data.message)
-        }
-      } catch (e) {
-        console.error(e)
-        alert('查詢失敗')
-      } finally {
-        this.loading = false
-      }
-    },
+const currentPage = ref(1);        // 使用者目前看到的頁碼
+const allFetchedData = ref([]);    // 快取桶 (存放目前抓下來的所有資料)
+const total = ref(0);              // 資料庫總筆數
+const isLoading = ref(false);      // 讀取狀態
+const isExporting = ref(false);    // 匯出狀態
 
-    changePage(delta) {
-      this.search.page += delta
-      this.fetchData()
-    },
+// 計算總頁數
+const totalPages = computed(() => Math.ceil(total.value / displayPageSize.value) || 1);
 
-    // 解析後端傳來的製程字串 (原本由 \n 分隔)
-    parseProcessInfo(infoStr) {
-      if (!infoStr) return [];
-      // 後端 SQL: LISTAGG(..., CHR(10))，所以這裡 split('\n')
-      // 過濾掉空字串以防萬一
-      return infoStr.split('\n').filter(s => s && s.trim() !== '');
-    },
+// ★ 只從 Cache 中切出當前頁面需要的資料
+const filteredDisplayData = computed(() => {
+  const startIndex = (currentPage.value - 1) * displayPageSize.value;
+  const endIndex = startIndex + displayPageSize.value;
+  return allFetchedData.value.slice(startIndex, endIndex);
+});
 
-    // 根據狀態回傳對應 class
-    getStatusClass(status) {
-        if (status === '已簽核') return 'badge success';
-        if (status === '送審中') return 'badge info';
-        if (status === '被退回') return 'badge danger';
-        if (status === '草稿') return 'badge warning';
-        return 'badge default'; // 未建立
-    },
-
-    // 判斷是否過期
-    isRowOverdue(row) {
-      if (row.CHECK_TIME) return false
-      if (!this.thresholdDays && this.thresholdDays !== 0) return false
-
-      const createDate = new Date(row.T_TIME)
-      const today = new Date()
-      createDate.setHours(0, 0, 0, 0)
-      today.setHours(0, 0, 0, 0)
-
-      const diffTime = today - createDate
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-
-      return diffDays > this.thresholdDays
-    },
-
-    // 日期格式化 (YYYY-MM-DD)
-    formatDate(val) {
-      if (!val) return '-'
-      const d = new Date(val)
-      if (isNaN(d.getTime())) return val 
-      
-      const year = d.getFullYear()
-      const month = String(d.getMonth() + 1).padStart(2, '0')
-      const day = String(d.getDate()).padStart(2, '0')
-      return `${year}-${month}-${day}`
-    },
-
-    handleRowClick(row) {
-      // 這裡您可以根據需求，看是要帶入 row.ITEM 還是 row.BOOK
-      this.$router.push({
-        name: 'new-specification', 
-        query: {
-          item: row.ITEM, 
-          book: row.BOOK,
-          mode: 'view_confirm',
-          autoLoad: 'true'
-        }
-      })
-    }
-  },
-  mounted() {
-    // 預設查詢日期：最近 30 天
-    const end = new Date()
-    const start = new Date()
-    start.setDate(end.getDate() - 30)
-
-    const format = (d) => {
-        const year = d.getFullYear()
-        const month = String(d.getMonth() + 1).padStart(2, '0')
-        const day = String(d.getDate()).padStart(2, '0')
-        return `${year}-${month}-${day}`
-    }
-
-    this.search.startDate = format(start)
-    this.search.endDate = format(end)
-    this.fetchData()
+// 日期防呆
+const validateDate = () => {
+  const minDate = new Date('2026-04-01')
+  if (search.startDate && new Date(search.startDate) < minDate) {
+    search.startDate = '2026-04-01'
+  }
+  if (search.endDate && new Date(search.endDate) < minDate) {
+    search.endDate = '2026-04-01'
   }
 }
+
+// 向後端請求資料 (以 Bucket 為單位)
+const fetchBucket = async (bucketIndex) => {
+  isLoading.value = true;
+  try {
+    const res = await axios.get(`${API_BASE_URL}/item/spec-list`, {
+      params: {
+        ...search,
+        page: bucketIndex,
+        pageSize: bucketSize.value    // 👉 改用 bucketSize.value (例如選 20 筆時，這裡會送 200)
+      }
+    })
+    
+    if (res.data.success) {
+      if (bucketIndex === 1) {
+        allFetchedData.value = res.data.data.items;
+      } else {
+        allFetchedData.value.push(...res.data.data.items);
+      }
+      total.value = res.data.data.total;
+    }
+  } catch (err) {
+    console.error('Fetch data failed:', err)
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// 👉 新增：當使用者改變每頁顯示數量時，重新整理並重撈第一桶快取
+const onPageSizeChange = () => {
+  currentPage.value = 1;
+  allFetchedData.value = []; // 清空舊快取
+  fetchBucket(1);            // 重新依照新的 bucketSize 抓資料
+}
+
+// 使用者按下「查詢」按鈕
+const handleSearch = () => {
+  currentPage.value = 1;
+  allFetchedData.value = [];
+  fetchBucket(1);
+}
+
+// 匯出 Excel：先預檢數量，再下載 xlsx
+const handleExport = async () => {
+  if (isExporting.value) return;
+  isExporting.value = true;
+  try {
+    // Step 1: 預檢數量
+    const countRes = await axios.get(`${API_BASE_URL}/item/spec-list/export-count`, {
+      params: { ...search }
+    });
+    if (!countRes.data.success) {
+      alert('匯出失敗：' + (countRes.data.error || '無法取得筆數'));
+      return;
+    }
+    const count = countRes.data.data.count;
+    if (count === 0) {
+      alert('沒有符合條件的資料');
+      return;
+    }
+    if (count > 10000) {
+      if (!confirm(`即將匯出 ${count} 筆資料，可能需要等候較久，確定繼續？`)) return;
+    } else if (count > 2000) {
+      if (!confirm(`將匯出 ${count} 筆資料，確定繼續？`)) return;
+    }
+
+    // Step 2: 下載 xlsx（不設 timeout 避免大量匯出被中斷）
+    const dlRes = await axios.get(`${API_BASE_URL}/item/spec-list/export`, {
+      params: { ...search },
+      responseType: 'blob',
+      timeout: 0
+    });
+
+    // 後端回 JSON 表示失敗
+    const contentType = dlRes.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      const errText = await dlRes.data.text();
+      try {
+        const errJson = JSON.parse(errText);
+        alert('匯出失敗：' + (errJson.error || '未知錯誤'));
+      } catch {
+        alert('匯出失敗：' + errText);
+      }
+      return;
+    }
+
+    // 從 Content-Disposition 取得後端建議檔名
+    const cd = dlRes.headers['content-disposition'] || '';
+    const match = cd.match(/filename="?([^";]+)"?/);
+    const filename = match ? decodeURIComponent(match[1]) : '式樣書清單.xlsx';
+
+    // 觸發瀏覽器下載
+    const blobUrl = URL.createObjectURL(dlRes.data);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error('Export failed:', err);
+    alert('匯出失敗：' + (err.message || '未知錯誤'));
+  } finally {
+    isExporting.value = false;
+  }
+}
+
+// 使用者按下「上一頁」或「下一頁」
+const changePage = async (step) => {
+  const targetPage = currentPage.value + step;
+  if (targetPage < 1 || targetPage > totalPages.value) return;
+
+  const requiredItemsCount = targetPage * displayPageSize.value; // 👉 改用 .value
+  
+  if (requiredItemsCount > allFetchedData.value.length && allFetchedData.value.length < total.value) {
+    // 👉 計算下一個 Bucket，改用 bucketSize.value
+    const nextBucketIndex = Math.floor(allFetchedData.value.length / bucketSize.value) + 1;
+    await fetchBucket(nextBucketIndex);
+  }
+
+  currentPage.value = targetPage;
+}
+
+// 狀態 Badge 顏色對應
+const getStatusClass = (status) => {
+  switch (status) {
+    case '已公告': return 'badge success'
+    case '已下載': return 'badge info'
+    case '草稿': return 'badge warning'
+    default: return 'badge default'
+  }
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('zh-TW')
+}
+
+// 點擊 Row 跳轉至 NewSpecification
+const handleRowClick = (row) => {
+  if (row.author) {
+    alert(`該式樣已由 ${row.author} 進行編輯，若有問題請詢問開發人員。`);
+    return; // 中止執行，不跳轉
+  }
+
+  // 沒有資料才允許跳轉到 NewSpecification 建立新草稿
+  router.push({
+    path: '/new-specification',
+    query: {
+      item: row.MATNR.split("-")[0],
+      styleNo: row.SFHNR,
+      processCode: row.KTSCH,
+      mode: 'new'
+    }
+  })
+}
+
 </script>
 
 <style scoped>
+.precautions-cell { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spec-view-container { padding: 20px; background-color: #f5f7fa; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
 
 /* Header */
@@ -295,9 +332,16 @@ export default {
 .input-group label { font-size: 13px; color: #666; font-weight: 500; }
 .input-group input { padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 14px; outline: none; transition: border 0.2s; }
 .input-group input:focus { border-color: #4a90e2; }
+.status-select { padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 14px; outline: none; transition: border 0.2s; background-color: white; cursor: pointer; }
+.status-select:focus { border-color: #4a90e2; }
 
 .search-btn { background-color: #4a90e2; color: white; border: none; padding: 9px 20px; border-radius: 6px; cursor: pointer; font-weight: 500; box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3); }
-.search-btn:hover { background-color: #357abd; }
+.search-btn:hover:not(:disabled) { background-color: #357abd; }
+.search-btn:disabled { background-color: #a4c4e8; cursor: not-allowed; box-shadow: none; }
+
+.export-btn { background-color: #27ae60; color: white; border: none; padding: 9px 20px; border-radius: 6px; cursor: pointer; font-weight: 500; box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3); }
+.export-btn:hover:not(:disabled) { background-color: #1e8449; }
+.export-btn:disabled { background-color: #95c9a8; cursor: not-allowed; box-shadow: none; }
 
 .control-row { display: flex; align-items: center; gap: 30px; padding-top: 15px; border-top: 1px solid #f0f0f0; }
 
@@ -347,16 +391,10 @@ export default {
 .empty-state { text-align: center; color: #999; padding: 40px; }
 
 /* Pagination */
-.pagination-bar {
-    padding: 15px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px solid #eee;
-}
-.actions button {
-    margin-left: 10px;
-    padding: 5px 15px;
-    cursor: pointer;
-}
+.pagination-bar { padding: 15px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; }
+.actions button { margin-left: 10px; padding: 5px 15px; cursor: pointer; }
+
+.page-size-selector { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #666; }
+.page-size-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; outline: none; font-size: 14px; cursor: pointer; }
+.page-size-select:focus { border-color: #4a90e2; }
 </style>

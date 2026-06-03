@@ -1,5 +1,23 @@
 <template>
   <div class="block-container">
+    <div v-if="tableDialog.show" class="modal-overlay">
+      <div class="modal-content">
+        <h3 style="margin-top: 0;">插入表格</h3>
+        <div class="form-group">
+          <label>列數 (Rows):</label>
+          <input type="number" v-model="tableDialog.rows" min="1" class="process-title-input" style="width: 80px; text-align: center;"/>
+        </div>
+        <div class="form-group">
+          <label>行數 (Columns):</label>
+          <input type="number" v-model="tableDialog.cols" min="1" class="process-title-input" style="width: 80px; text-align: center;"/>
+        </div>
+        <div class="modal-actions">
+          <button @click="cancelTableDialog" class="btn-cancel">取消</button>
+          <button @click="confirmTableDialog" class="btn-confirm">確定</button>
+        </div>
+      </div>
+    </div>
+
     <div v-for="(blockItem, blockIndex) in localBlockContents.data" :key="blockItem.id" class="block-item-wrapper" :class="{'child-block-container': blockIndex > 0}">
       <div class="block-header">
         <label>{{ step }}.{{ tier }}{{ blockIndex > 0 ? '.' + blockIndex : '' }}</label>
@@ -43,6 +61,12 @@
         </div>
         
         <EditorContent v-if="blockItem.option !== 0 && blockItem.option !== 3" :editor="editors[blockItem.id]" class="editor-content" />
+
+        <div v-if="blockItem.option === 2" class="explain-box-container">
+          <div class="explain-label">💡 表格說明 (Explain)：</div>
+          <EditorContent :editor="explainEditors[blockItem.id]" class="editor-content" />
+        </div>
+
         <div v-if="blockItem.option == 1 && blockItem.files.length > 0" class="files-block">
           <ul class="preview-grid">
             <li v-for="(fileItem, index) in blockItem.files" :key="index" class="preview-item">
@@ -97,14 +121,42 @@ const localBlockContents = reactive({ ...props.blockEditors }) // shallow copy i
 
 const titleEditor = reactive({})
 const editors = reactive({})         // { [idx]: Editor }
+const explainEditors = reactive({}) // ✅ 新增：用來存放表格說明的編輯器實例
 const activeEditor = ref(null)
 const fileInputRefs = ref([])        // array-style refs per block index
 
+const tableDialog = reactive({
+  show: false,
+  rows: 3,
+  cols: 4,
+  blockItem: null
+});
+
+// 加入兩個控制方法：
+const confirmTableDialog = () => {
+  let r = parseInt(tableDialog.rows);
+  let c = parseInt(tableDialog.cols);
+  if (isNaN(r) || r < 1) r = 3;
+  if (isNaN(c) || c < 1) c = 4;
+  
+  tableDialog.blockItem.jsonContent = initialTableDoc(r, c);
+  nextTick(() => initBlockEditor(tableDialog.blockItem));
+  tableDialog.show = false;
+};
+
+const cancelTableDialog = () => {
+  // 取消的話，把 radio 退回「無」
+  tableDialog.blockItem.option = 0;
+  tableDialog.blockItem.jsonContent = null;
+  tableDialog.show = false;
+};
+
 // ---------- tiptap extension presets ----------
 const baseExt = [Paragraph, Text, TextStyle, Color.configure({ types: ['textStyle'] })]
-const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, Placeholder.configure({ placeholder: '請輸入標題' })]
-const textExt  = [Document, ...baseExt, Placeholder.configure({ placeholder: '請輸入文字內容' }), Image.configure({ inline: true, allowBase64: true })]
+const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, History, Placeholder.configure({ placeholder: '請輸入標題' })]
+const textExt  = [Document, ...baseExt, History, Placeholder.configure({ placeholder: '請輸入文字內容' }), Image.configure({ inline: true, allowBase64: true })]
 const tableExt = [Document.extend({ content: 'table' }), ...baseExt, History, Focus.configure({ className: 'has-focus', mode: 'all' }),, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ inline: true, allowBase64: true })]
+const explainExt = [Document.extend({ content: 'paragraph' }), ...baseExt, History, Placeholder.configure({ placeholder: '請輸入此表格的說明內容...' })]
 
 // ---------- helpers ----------
 const deepClone = v => (v == null ? v : JSON.parse(JSON.stringify(v)))
@@ -179,8 +231,12 @@ const initTitleEditor = (blockItem) => {
 
 const initBlockEditor = (blockItem) => {
   const id = blockItem.id;
-  editors[id]?.destroy()
-  delete editors[id]
+  editors[id]?.destroy();
+  delete editors[id];
+
+  // 清理 explain 編輯器 (如果有的話)
+  explainEditors[id]?.destroy()
+  delete explainEditors[id]
 
   if (blockItem.option === 0 || blockItem.option === 3) return
 
@@ -210,6 +266,25 @@ const initBlockEditor = (blockItem) => {
   editors[id] = ed
 
   if (!blockItem.jsonContent) blockItem.jsonContent = ed.getJSON()
+
+  // ✅ 功能 3: 如果是表格模式，初始化說明文字的編輯器
+  if (blockItem.option === 2) {
+    const exEd = new Editor({
+      content: deepClone(blockItem.explain_json || initialDoc()),
+      extensions: explainExt,
+      editorProps: { attributes: { class: 'editor-content' }, handlePaste: (view, event) => handleTextPaste(view, event) },
+      onFocus: ({ editor }) => setActiveEditor(editor),
+      onUpdate: ({ editor }) => {
+        blockItem.explain_json = editor.getJSON();
+        blockItem.explain_text = editor.getText(); // 同步抓出純文字
+      }
+    })
+    explainEditors[id] = exEd;
+    if (!blockItem.explain_json) {
+      blockItem.explain_json = exEd.getJSON();
+      blockItem.explain_text = exEd.getText();
+    }
+  }
 }
 
 // 強制將 Table 的第一列轉換為 tableHeader
@@ -329,9 +404,22 @@ function handleCopy(view, event) {
 function handlePaste(view, event) {
   const { state, dispatch } = view;
   const sel = state.selection;
-  console.log("Dynamic block paste function")
-  
-  // 1. 取得並解析內容
+  console.log("Dynamic block paste function");
+
+  // =================================================================
+  // 🌟 關鍵新增：檢查剪貼簿是否包含 HTML 格式的表格 (例如從 Word 複製)
+  // =================================================================
+  const htmlData = event.clipboardData?.getData('text/html');
+  if (htmlData && htmlData.includes('<table')) {
+    console.log("偵測到 HTML 表格，放手交給 Tiptap 原生引擎處理！");
+    // return false 代表「取消攔截」，讓 Tiptap 底層的 ProseMirror 接管貼上行為。
+    // 它會自動解析 HTML 中的 colspan 和 rowspan，完美還原 Word 表格！
+    return false; 
+  }
+
+  // =================================================================
+  // 往下是你原本的 Excel 純文字解析邏輯 (沒有 HTML 時才觸發)
+  // =================================================================
   const raw = event.clipboardData?.getData('text/plain') || '';
   if (!raw) return false;
 
@@ -345,23 +433,18 @@ function handlePaste(view, event) {
 
   if (!(sel instanceof CellSelection)) {
     let textToPaste = raw;
-
     textToPaste = textToPaste.replace(/(\r\n|\n|\r)+$/, '');
-
     if (textToPaste.length >= 2 && textToPaste.startsWith('"') && textToPaste.endsWith('"')) {
        textToPaste = textToPaste.slice(1, -1);
        textToPaste = textToPaste.replace(/""/g, '"');
     }
-
     textToPaste = textToPaste.replace(/\r\n/g, '\n');
     dispatch(state.tr.insertText(textToPaste));
 
     const anchorPath = view.state.selection.$anchor.path;
     if(anchorPath && anchorPath.length > 4) {
-      const startRowIndex = anchorPath[4];
+      startRowIndex = anchorPath[4];
     }
-
-    // 阻止瀏覽器原生貼上 (避免重複)
     event.preventDefault(); 
     return true; 
   }
@@ -370,10 +453,8 @@ function handlePaste(view, event) {
   startRowIndex = rect.top;
   startColIndex = rect.left;
 
-  // [保護] 禁止貼在 Index 0
   if (startRowIndex < 0 || startColIndex < 0) return false;
 
-  // 3. 紀錄貼上的欄位
   let M = view.state.selection.$anchor.node(1).childCount;
   let N = view.state.selection.$anchor.node(2).childCount;
 
@@ -399,7 +480,6 @@ function handlePaste(view, event) {
     })
   })
 
-  // 4. 從尾部節點開始更新欄位
   if (targets.length === 0) return true;
   targets.sort((a, b) => b.cellPos - a.cellPos);
 
@@ -513,6 +593,7 @@ onBeforeUnmount(() => {
   emit('update-block', localBlockContents)
   titleEditor.value?.destroy()
   Object.values(editors).forEach(e => e.destroy())
+  Object.values(explainEditors).forEach(e => e.destroy()) // ✅ 清除說明編輯器
 })
 
 // ---------- watchers / emit ----------
@@ -533,7 +614,7 @@ watch(() => props.blockEditors.tier, t => {
 
 // ---------- UI handlers ----------
 const addSmallBlock = () => {
-  const newBlock = { option: 0, jsonHeader: null, jsonContent: null, files: [], id: uuidv1() };
+  const newBlock = { option: 0, jsonHeader: null, jsonContent: null, explain_json: null, explain_text: null, files: [], id: uuidv1() };
   localBlockContents.data.push(newBlock);
   initTitleEditor(newBlock);
 }
@@ -543,10 +624,13 @@ const removeSmallBlock = (idx) => {
   
   // 刪除陣列前，先抓到 id，並用 id 把編輯器徹底銷毀
   const id = localBlockContents.data[idx].id;
-  titleEditor[id]?.destroy()
-  editors[id]?.destroy()
-  delete titleEditor[id]
-  delete editors[id]
+  titleEditor[id]?.destroy();
+  editors[id]?.destroy();
+  explainEditors[id]?.destroy(); // ✅ 刪除時也摧毀 explain
+  delete titleEditor[id];
+  delete editors[id];
+  delete explainEditors[id];
+  localBlockContents.data.splice(idx, 1);
   
   // 執行刪除
   localBlockContents.data.splice(idx, 1)
@@ -556,7 +640,6 @@ const radioInputChange = (blockItem) => {
   const opt = blockItem.option;
   
   if (opt === 3) {
-    // ★ 將 blockItem 傳出去給父元件
     emit('open-doc-search', blockItem);
     return;
   }
@@ -564,7 +647,15 @@ const radioInputChange = (blockItem) => {
   const tEd = titleEditor[blockItem.id];
   if (tEd) { tEd.setEditable(blockItem.option !== 3); }
 
-  blockItem.jsonContent = null;
+  // ✅ 功能 2 修改：若選擇「表格」，打開我們自己寫的彈窗，暫停後續執行
+  if (opt === 2) {
+    tableDialog.blockItem = blockItem;
+    tableDialog.show = true;
+    return; // 👈 這裡很重要，return 掉，等使用者按確定再初始化 Editor
+  } else {
+    blockItem.jsonContent = null;
+  }
+
   if (opt !== 1) blockItem.files = [];
   nextTick(() => initBlockEditor(blockItem));
 }
@@ -736,6 +827,41 @@ const handleImageUpload = async (evt, blockItem) => {
   cursor: pointer;
   transition: background-color 0.3s ease, transform 0.2s ease;
 }
+
+.explain-box-container {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+}
+.explain-label {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+.explain-editor-input {
+  min-height: 40px;
+  background-color: white;
+  border: 1px solid #eee;
+  padding: 5px;
+}
+
+/* ✅ 新增的彈窗樣式 */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0, 0, 0, 0.5); z-index: 9999;
+  display: flex; justify-content: center; align-items: center;
+}
+.modal-content {
+  background: white; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;
+}
+.form-group { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.btn-cancel { background: #f5f5f5; border: 1px solid #ddd; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+.btn-confirm { background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+.btn-confirm:hover { background: #0056b3; }
 
 .remove-btn:hover { background-color: #c82333; transform: scale(1.1); }
 </style>

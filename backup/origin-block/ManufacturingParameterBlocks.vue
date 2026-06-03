@@ -1,108 +1,119 @@
 <!-- ManufacturingParameterBlocks.vue -->
 <template>
-  <div class="blk-wrap">
-    <button class="btn add" @click="addBlock">新增下一層</button>
+  <div>
+    <!-- ★ 當沒有機台群組時，顯示大大的提示區塊 -->
+    <div v-if="!hasAnyMachineGroup" style="font-size: 16px; font-weight: bold; text-align: center; padding: 40px; background-color: #f4f9ff; border: 1px dashed #1666C0; border-radius: 8px; color: #1666C0; margin-top: 10px;">
+      此式樣 NO 沒有任何群組機台，因此請依照「2. 製作條件規範」進行製造參數設定與確認
+    </div>
 
-    <div v-for="(b,i) in blocks" :key="b.id" class="blk">
-      <div class="blk-hd">
-        <div><b>程式代碼：</b>{{ b.code || '(尚未配號)' }}</div>
+    <!-- ★ 原本的參數編輯區塊 (有群組機台才顯示) -->
+    <div v-else class="blk-wrap">
+      <button class="btn add" @click="addBlock">新增下一層</button>
 
-        <div class="copybox">
-          <label>參數代碼：</label>
-          <input v-model="copyCode" placeholder="輸入要複製的代碼" />
-          <button class="btn info" @click="copyFromCode(i)">複製</button>
-        </div>
+      <div v-for="(b,i) in blocks" :key="b.id" class="blk">
+        <div class="blk-hd">
+          <div><b>程式代碼：</b>{{ b.code || '(尚未配號)' }}</div>
 
-        <div class="ops">
-          <button class="btn info" @click="addBlock">新增同層</button>
-          <button class="btn info" @click="duplicateBlock(i)">複製模塊</button>
-          <button class="btn danger" @click="delBlock(i)">刪除</button>
-        </div>
-      </div>
+          <div class="copybox">
+            <label>程式代碼：</label>
+            <input v-model="copyCode" placeholder="輸入要複製的代碼" />
+            <button class="btn info" @click="copyFromCode(i)">複製</button>
+          </div>
 
-      <!-- Parameter (Table 2) -->
-      <div v-if="hasAnyMachineGroup" class="menu" :class="{ 'menu-error': !blocks[i].data.metadata.groupCode || !blocks[i].data.metadata.machines }">
-        <div class="l">
-          <label>機檯群組：</label>
-          <select v-model="blocks[i].data.metadata.groupCode" @change="onGroupChange(i)">
-            <option value="">-- 請選擇群組 --</option>
-            <option v-for="[groupCode, groupInfo] in groupKeys" :key="groupCode" :value="groupCode">{{ groupInfo.name }}</option>
-          </select>
-
-          <template v-if="blocks[i].data.metadata.groupCode">
-            <label style="margin-left: 12px;">流程順序：</label>
-            <div class="custom-select" tabindex="0" @focusout="onFocusOut(i, $event)">
-              <div class="select-trigger" @click="toggleProcessMenu(i)">
-                {{ (blocks[i].data.metadata.processOrder && blocks[i].data.metadata.processOrder.length > 0) ? blocks[i].data.metadata.processOrder.join('、') : '-- 請選擇 --' }}
-                <span class="arrow">▼</span>
-              </div>
-              
-              <div class="select-options" v-show="openProcessOrderMenu === i">
-                <label v-for="n in getStepCount(i)" :key="n" class="option-item" @mousedown.prevent>
-                  <input type="checkbox" :checked="blocks[i].data.metadata.processOrder?.includes(n)" @change="toggleProcessOrder(i, n)">{{ n }}
-                </label>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <div v-if="allowColor" class="r">
-          <i class="dot blue"  @click="paramEditors[i]?.chain().focus().setColor('blue').run()"></i>
-          <i class="dot black" @click="paramEditors[i]?.chain().focus().setColor('null').run()"></i>
-        </div>
-      </div>
-
-      <div v-if="blocks[i].data.metadata.groupCode" class="machine-list-panel">
-        <div class="panel-head">
-          <label>機台選擇：</label>
-          <div class="actions">
-            <button class="btn small" @click.prevent="selectAllMachines(i)">全選</button>
-            <button class="btn small danger" @click.prevent="deselectAllMachines(i)">全部取消</button>
+          <div class="ops">
+            <button class="btn info" @click="addBlock">新增同層</button>
+            <button class="btn info" @click="duplicateBlock(i)">複製模塊</button>
+            <button class="btn danger" @click="delBlock(i)">刪除</button>
           </div>
         </div>
-        
-        <!-- <div class="machine-grid">
-          <label v-for="m in getGroupMachines(i)" :key="m.code" class="machine-item">
-            <input type="checkbox" :checked="isMachineSelected(i, m.code)" @change="toggleMachine(i, m)">{{ m.name }}
-          </label>
-        </div> -->
-        <div class="machine-grid">
-          <label v-for="m in getGroupMachines(i)" :key="m.code" class="machine-item" :class="{'disabled': isMachineDisabled(i, m.code),'conflict': isMachineConflict(i, m.code)}">
-            <input type="checkbox" :checked="isMachineSelected(i, m.code)" @change="toggleMachine(i, m)" :disabled="isMachineDisabled(i, m.code)">{{ m.name }}
-          </label>
+
+        <!-- Parameter (Table 2) -->
+        <div v-if="hasAnyMachineGroup" class="menu" :class="{ 'menu-error': !blocks[i].data.metadata.groupCode || !blocks[i].data.metadata.machines }">
+          <div class="l">
+            <label>機檯群組：</label>
+            <select v-model="blocks[i].data.metadata.groupCode" @change="onGroupChange(i)">
+              <option value="">-- 請選擇群組 --</option>
+              <option v-for="[groupCode, groupInfo] in groupKeys" :key="groupCode" :value="groupCode">{{ groupInfo.name }}</option>
+            </select>
+
+            <template v-if="blocks[i].data.metadata.groupCode">
+              <label style="margin-left: 12px;">流程順序：</label>
+              <div class="custom-select" tabindex="0" @focusout="onFocusOut(i, $event)" :style="blocks[i].data.metadata.isParamNA ? 'opacity: 0.5; pointer-events: none; background-color: #f5f5f5;' : ''">
+                <div class="select-trigger" @click="toggleProcessMenu(i)">
+                  {{ (blocks[i].data.metadata.processOrder && blocks[i].data.metadata.processOrder.length > 0) ? blocks[i].data.metadata.processOrder.join('、') : '-- 請選擇 --' }}
+                  <span class="arrow">▼</span>
+                </div>
+                
+                <div class="select-options" v-show="openProcessOrderMenu === i">
+                  <label v-for="n in getStepCount(i)" :key="n" class="option-item" @mousedown.prevent>
+                    <input type="checkbox" :checked="blocks[i].data.metadata.processOrder?.includes(n)" @change="toggleProcessOrder(i, n)">{{ n }}
+                  </label>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div v-if="allowColor" class="r">
+            <i class="dot blue"  @click="paramEditors[i]?.chain().focus().setColor('blue').run()"></i>
+            <i class="dot black" @click="paramEditors[i]?.chain().focus().setColor('null').run()"></i>
+          </div>
         </div>
+
+        <div v-if="blocks[i].data.metadata.groupCode" class="machine-list-panel">
+          <div class="panel-head">
+            <label>機台選擇：</label>
+            <div class="actions">
+              <button class="btn small" @click.prevent="selectAllMachines(i)">全選</button>
+              <button class="btn small danger" @click.prevent="deselectAllMachines(i)">全部取消</button>
+            </div>
+          </div>
+          
+          <!-- <div class="machine-grid">
+            <label v-for="m in getGroupMachines(i)" :key="m.code" class="machine-item">
+              <input type="checkbox" :checked="isMachineSelected(i, m.code)" @change="toggleMachine(i, m)">{{ m.name }}
+            </label>
+          </div> -->
+          <div class="machine-grid">
+            <label v-for="m in getGroupMachines(i)" :key="m.code" class="machine-item" :class="{'disabled': isMachineDisabled(i, m.code),'conflict': isMachineConflict(i, m.code)}">
+              <input type="checkbox" :checked="isMachineSelected(i, m.code)" @change="toggleMachine(i, m)" :disabled="isMachineDisabled(i, m.code)">{{ m.name }}
+            </label>
+          </div>
+        </div>
+
+        <div class="status-message-area">
+    
+          <div v-if="!hasAnyMachineGroup" class="hint empty">
+            此適用工程目前沒有可用的機台群組，無需設定。
+          </div>
+
+          <div v-else-if="!blocks[i].data.metadata.groupCode" class="hint info">
+            請先從上方選單選擇一個「機檯群組」。
+          </div>
+
+          <div v-else-if="blocks[i].data.metadata.machines.length === 0" class="hint warning">
+            請勾選上方至少一台機台，系統將以「第一台」作為基準載入 PMS 表格。
+          </div>
+
+          <div v-else-if="pmsLoading[b.id]" class="hint loading">
+            正在載入 PMS 參數與比對機台相容性...
+          </div>
+
+          <div v-else-if="blocks[i].data.metadata.isParamNA" class="hint info" style="background-color: #f4f9ff; border-color: #1666C0;">
+            <label style="color: #1666C0; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" checked disabled /> 
+              此基準機台無點位資料，系統已自動設為無需設定機台參數 (N/A)。 請依照「2. 製作條件規範」進行製造參數設定與確認
+            </label>
+          </div>
+
+          <div v-else-if="paramEditors[i]" class="editor-container">
+            <EditorContent :editor="paramEditors[i]" class="ed ed-param"/>
+          </div>
+
+        </div>
+
+        <!-- 完全沒有機台群組：只顯示一行說明，整個 Step 視為「不需填寫」 -->
+        <!-- <div v-else class="hint empty">此適用工程沒有任何機台群組，不需設定 PMS。</div> -->
       </div>
-
-      <div class="status-message-area">
-  
-        <div v-if="!hasAnyMachineGroup" class="hint empty">
-          此適用工程目前沒有可用的機台群組，無需設定。
-        </div>
-
-        <div v-else-if="!blocks[i].data.metadata.groupCode" class="hint info">
-          請先從上方選單選擇一個「機檯群組」。
-        </div>
-
-        <div v-else-if="blocks[i].data.metadata.machines.length === 0" class="hint warning">
-          請勾選上方至少一台機台，系統將以「第一台」作為基準載入 PMS 表格。
-        </div>
-
-        <div v-else-if="pmsLoading[i]" class="hint loading">
-          正在載入 PMS 參數與比對機台相容性...
-        </div>
-
-        <div v-else-if="pmsEmpty[i]" class="hint error">
-          此基準機台尚無 PMS 設定資料，無法編輯。
-        </div>
-
-        <div v-else-if="paramEditors[i]" class="editor-container">
-          <EditorContent :editor="paramEditors[i]" class="ed ed-param"/>
-        </div>
-
-      </div>
-
-      <!-- 完全沒有機台群組：只顯示一行說明，整個 Step 視為「不需填寫」 -->
-      <!-- <div v-else class="hint empty">此適用工程沒有任何機台群組，不需設定 PMS。</div> -->
     </div>
   </div>
 </template>
@@ -185,6 +196,10 @@ const groups = computed(() => {
 })
 const hasAnyMachineGroup = computed(() => Object.keys(groups.value || {}).length > 0);
 const groupKeys = computed(() => Object.entries(groups.value));
+
+watch(hasAnyMachineGroup, (val) => {
+  emit('machine-group-info', { hasAnyMachineGroup: val });
+}, { immediate: true });
 
 /* ===== PMS table template ===== */
 const LOCK_COLS = [0, 1, 2];
@@ -513,46 +528,59 @@ async function updateBaselineDependencies(i, forceReload = false) {
   if (!blk.data.metadata.machines || blk.data.metadata.machines.length === 0) return [];
 
   const baseline = blk.data.metadata.machines[0];
-  const logs = []; // 收集變更紀錄
+  const logs = []; 
   
-  pmsLoading.value[i] = true;
+  pmsLoading.value[blk.id] = true; // ★ 改用 blk.id
 
   try {
-    // 1. 呼叫後端 API (一次取得 相容清單 + 最新表格)
     const { data: res } = await axios.post(`${API_BASE_URL}/mes/pms/filter-by-pms-baseline`, { baseline_code: baseline });
-    
     const validCodes = new Set(res?.data?.valid_machines || []);
     const latestPmsRows = res?.data?.pms_table_rows || [];
-    // 2. 更新機台相容性 (反灰 & 紅底邏輯)
-    const badSet = new Set();
     
-    // ★ 修正：直接從全域資料找當前 Block 群組的機台
+    const badSet = new Set();
     const currentGroupCode = blk.data.metadata.groupCode;
-    const currentGroupInfo = groups.value[currentGroupCode]; // groups 是 computed
+    const currentGroupInfo = groups.value[currentGroupCode]; 
     
     if (currentGroupInfo && currentGroupInfo.machines) {
       Object.values(currentGroupInfo.machines).forEach(m => {
         if (!validCodes.has(m.code)) badSet.add(m.code);
       });
     }
-    incompatibleSets.value[blk.id] = badSet;
 
-    // 檢查「已選機台」是否有不相容 (變更通知)
-    const conflictMachines = blk.data.metadata.machines.filter(machineCode => badSet.has(machineCode));
-    if (conflictMachines.length > 0) {
-      logs.push(`⚠️ [Block ${i+1}] 偵測到不相容機台 (PMS 定義不同): ${conflictMachines.map(m=>m.name).join(', ')}`);
-    }
-
+    // ★ 任務 2 & 3：當 API 判定沒有 PMS 參數 (N/A) 時
     if (latestPmsRows.length === 0) {
-      pmsEmpty.value[i] = true;
-      // 若原本有編輯器，要銷毀，避免畫面顯示舊的或壞掉的編輯器
+      blk.data.metadata.isParamNA = true; 
+      incompatibleSets.value[blk.id] = new Set(); // 解除鎖定，讓使用者可以多選其他 N/A 機台！
+
+      // 無參數時，自動清空流程順序
+      blk.data.metadata.processOrder = [];
+
+      // 釋放程式號碼 (避免浪費)
+      if (blk.code) {
+        try { await releaseProgramCode(blk.code.split("-").at(-1)); } catch (e) {}
+        blk.code = '';
+        blk.data.metadata.programs = [];
+      }
+
       if (paramEditors.value[i]) {
         paramEditors.value[i].destroy();
         paramEditors.value[i] = null;
       }
-      // 直接結束函式，不再往下執行
-      return logs;
+      return logs; // 安全離開
     }
+
+    // ★ 若有資料，鎖定不相容機台，並確保 N/A 為 false
+    incompatibleSets.value[blk.id] = badSet;
+    blk.data.metadata.isParamNA = false;
+
+    // 若切換回「有參數」機台，且原本流程順序被清空了，若是單一步驟自動補回 [1]
+    if (!blk.data.metadata.processOrder || blk.data.metadata.processOrder.length === 0) {
+      const count = getStepCount(i);
+      if (count === 1) blk.data.metadata.processOrder = [1];
+    }
+    
+    // 任務 4：這是從 N/A 機台切換回「有參數機台」的情境，把程式號碼要回來！
+    if (!blk.code) { await allocateNewCode(i); }
 
     // 3. PMS 表格同步 (Sync / Diff)
     const hasExistingData = paramEditors.value[i] || (blk.data.arrayParameterData && blk.data.arrayParameterData.length > 0);
@@ -609,10 +637,9 @@ async function updateBaselineDependencies(i, forceReload = false) {
     });
   } catch (e) {
     console.error('updateBaselineDependencies error', e);
-    // ★ 修正：發生錯誤時，標記為 Empty 或顯示錯誤，避免畫面留白
-    pmsEmpty.value[i] = true; 
+    pmsEmpty.value[blk.id] = true;
   } finally {
-    pmsLoading.value[i] = false;
+    pmsLoading.value[blk.id] = false; // ★ 改用 blk.id
   }
 
   return logs;
@@ -651,9 +678,14 @@ function syncPmsData(savedRows, templateRows) {
 
 function addBlock () {
   const id = idSeq++;
-  blocks.value.push({ id, code: '', data: { metadata: { specCode: "", machines: [], machines_name: [], processOrder: [], groupCode: "", groupName: "", programs: [] } } });
+  blocks.value.push({ 
+    id, 
+    code: '', 
+    data: { 
+      metadata: { specCode: "", machines: [], machines_name: [], processOrder: [], groupCode: "", groupName: "", programs: [], isParamNA: false } 
+    } 
+  });
   pmsLoading.value[id] = false;
-  pmsEmpty.value[id] = false;
   syncToParent();
 }
 async function delBlock (i) {
@@ -822,34 +854,13 @@ function isMachineConflict(i, mCode) {
   return badSet && badSet.has(mCode) && isSelected;
 }
 /* ===== [修正] 勾選/取消單一機台 (取代原本的 onMachineCheck) ===== */
-// async function toggleMachine(i, machine) {
-//   const blk = blocks.value[i];
-//   const machines = blk.data.metadata.machines;
-//   const machinies_name = blk.data.metadata.machines_name;
-
-//   if (!machines.some(machineCode => machineCode == machine.code)) {
-//     machines.push(machine.code); // 加入
-//     machinies_name.push(machine.name);
-//     if (machines.length === 1) await updateBaselineDependencies(i, true);
-//   } else {
-//     const idx = machines.findIndex(machineCode => machineCode == machine.code);
-//     machines.splice(idx, 1);
-//     machinies_name.splice(idx, 1);
-//     if (machines.length == 0) {
-//       incompatibleSets.value[blk.id] = new Set();
-//       if (paramEditors.value[i]) paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
-//     }
-//   }
-
-//   syncToParent();
-// }
 async function toggleMachine(i, machine) {
   const blk = blocks.value[i];
   const machines = blk.data.metadata.machines;
   const machinies_name = blk.data.metadata.machines_name;
 
   if (!machines.some(machineCode => machineCode == machine.code)) {
-    machines.push(machine.code); // 加入
+    machines.push(machine.code); 
     machinies_name.push(machine.name);
     if (machines.length === 1) await updateBaselineDependencies(i, true);
   } else {
@@ -858,12 +869,14 @@ async function toggleMachine(i, machine) {
     machinies_name.splice(idx, 1);
     
     if (machines.length == 0) {
-      // 情況 A：全部取消了，徹底清空反灰名單與編輯器
       incompatibleSets.value[blk.id] = new Set();
       if (paramEditors.value[i]) paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
+      
+      // ★ 任務 4：完全清空機台時，如果原本是 N/A，要幫他把群組的程式號碼配回來
+      blk.data.metadata.isParamNA = false;
+      if (!blk.code) await allocateNewCode(i);
+      
     } else if (idx === 0) {
-      // ★ 情況 B：取消的是「第一台」(基準機台)！
-      // 雖然還有其他機台，但基準改變了，必須強制更新 PMS 基準與反灰名單
       await updateBaselineDependencies(i, true);
     }
   }
@@ -931,26 +944,24 @@ async function selectAllMachines(i) {
   syncToParent()
 }
 /* 2. 全部取消：純前端操作，不呼叫 API */
-function deselectAllMachines(i) {
+async function deselectAllMachines(i) {
   const blk = blocks.value[i];
   
-  // 清空資料
   blk.data.metadata.machines = [];
   blk.data.metadata.machines_name = [];
-  blk.data.metadata.programs = [];
-  blk.code = '';
+  blk.data.metadata.isParamNA = false; // ★ 重置
+  // ★ 注意：這裡不要清空 programs 和 code！保留群組的號碼！
   
-  // ★ 直接清空反灰狀態，不需要問後端
-  incompatibleSets.value[blk.id] = new Set()
-  
-  // 清空編輯器
+  incompatibleSets.value[blk.id] = new Set();
   if (paramEditors.value[i]) {
-     paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
+    paramEditors.value[i].commands.setContent(buildParamDocFromRows([[]]));
   }
   
-  // 狀態重置
-  pmsLoading.value[i] = false;
-  pmsEmpty.value[i] = false;
+  pmsLoading.value[blk.id] = false;
+  pmsEmpty.value[blk.id] = false;
+  
+  // ★ 任務 4：如果原本是 N/A 導致號碼被刪了，現在幫他配回來
+  if (!blk.code) await allocateNewCode(i);
   
   syncToParent();
 }
@@ -1025,33 +1036,30 @@ async function onGroupChange (i) {
   const g = b.data.metadata.groupCode || '';
   groupMachinesMap.value = [...specGroupsMap.value[groupsSpecMap.value[g]][g].machines];
 
-  // 釋放舊號碼
   if (b.code) {
     try { await releaseProgramCode(b.code.split("-").at(-1)); } catch (e) {}
     b.code = '';
   }
 
-  // 清掉機台 & editor & PMS 狀態
   b.data.metadata.machines = [];
   b.data.metadata.machines_name = [];
-  b.data.metadata.processOrder = []; // [新增] 切換群組時重置流程順序
-  b.data.metadata.specCode = '';  // 重新由 group 推 specCode
+  b.data.metadata.processOrder = []; 
+  b.data.metadata.specCode = '';  
+  b.data.metadata.isParamNA = false; 
   if (paramEditors.value[i]) {
     paramEditors.value[i].destroy();
     paramEditors.value[i] = null;
   }
-  pmsLoading.value[i] = false;
-  pmsEmpty.value[i]   = false;
+  pmsLoading.value[b.id] = false; // ★
+  pmsEmpty.value[b.id]   = false; // ★
 
-  // 有選群組 → 直接配號
   if (g) {
-    // ★ [新增] 自動判斷：若只有 1 個步驟，自動幫選 "1"
     const count = getStepCount(i);
     incompatibleSets.value[b.id] = new Set();
     if (count === 1) {
       b.data.metadata.processOrder = [1];
     }
-    allocateNewCode(i);
+    await allocateNewCode(i); // ★ 加上 await，確保配號完成才放行
   }
   syncToParent();
 }
@@ -1156,25 +1164,28 @@ function runParamValueValidation (ed) {
       let maxSoFar = value[validIndices[0]];
       for (let i = 1; i < validIndices.length; i++) {
           const item = value[validIndices[i]];
-          if (item < maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
           else maxSoFar = item;
       }
 
       let minSoFar = value[validIndices.at(-1)];;
       for (let i = validIndices.length - 2; i >= 0; i--) {
           const item = value[validIndices[i]];
-          if (item > minSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
           else minSoFar = item;
       }
     }
 
     if (valueStatus.filter(status => status == 'empty').length != 5) {
-      valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
-      valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
-      if (valueStatus[2] == 'empty') {
-        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
-        valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+      valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+      if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] != 'empty' || valueStatus[4] != 'empty')) { }
+      else if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] == 'empty' || valueStatus[4] == 'empty')) {
+        valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
         valueStatus[4] = (valueStatus[4] == 'invalid') ? 'invalid' : 'valid';
+      }
+      else if ((valueStatus[3] != 'empty' || valueStatus[4] != 'empty') && (valueStatus[0] == 'empty' || valueStatus[1] == 'empty')) {
+        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
       }
     }
 
@@ -1327,9 +1338,28 @@ async function initializeBlocks() {
 
   // 2. 還原資料 (如果有傳入 dataBlocks)
   if (props.dataBlocks && props.dataBlocks.length > 0) {
-    blocks.value = [...props.dataBlocks];
+    
+    // ★ 新增：資料淨化 (Data Sanitization)
+    // 過濾掉那些「沒有選擇機台群組」，或者「選擇的群組已經不存在於目前適用工程中」的舊草稿模塊
+    const validBlocks = props.dataBlocks.filter(blk => {
+      const gCode = blk.data?.metadata?.groupCode;
+      // 判斷條件：1. 必須有 groupCode 且 2. 這個 groupCode 必須存在於目前的 groups 清單中
+      return gCode && groups.value[gCode]; 
+    });
+
+    // ★ 檢查是否因為淨化而刪除了某些區塊，準備提示訊息
+    const removedCount = props.dataBlocks.length - validBlocks.length;
+    if (removedCount > 0) {
+       console.log(`[初始化清理] 已自動移除 ${removedCount} 個無效(無機台群組)的參數模塊。`);
+    }
+
+    // 將淨化後的資料賦值給畫面使用的 blocks
+    blocks.value = [...validBlocks];
+    
     blocks.value.forEach(blk => {
-      if (blk.data.metadata.programs.length > 0) blk.code = blk.data.metadata.programs[0].programCode;
+      if (blk.data.metadata.programs && blk.data.metadata.programs.length > 0) {
+        blk.code = blk.data.metadata.programs[0].programCode;
+      }
     })
     idSeq = blocks.value.length + 1;
 
@@ -1349,7 +1379,7 @@ async function initializeBlocks() {
         }
 
         // B. 執行 PMS 比對 (如果是舊資料)
-        if (b.data.metadata.machines.length > 0) {
+        if (b.data.metadata.machines && b.data.metadata.machines.length > 0) {
           // false = 載入模式 (保留舊值，比對結構)
           const logs = await updateBaselineDependencies(i, false);
           return logs || [];
@@ -1360,12 +1390,22 @@ async function initializeBlocks() {
 
     // 4. 通知變更
     const allLogs = results.flat();
+    
+    // 將移除無效模塊的提示加入到 logs 中一併顯示
+    if (removedCount > 0) {
+        allLogs.unshift(`自動清理：已移除 ${removedCount} 個因系統設定變更而失效（無可用機台群組）的舊參數模塊。`);
+    }
+
+    console.log("allLogs: ", allLogs)
     if (allLogs.length > 0) {
-      alert(`載入草稿時偵測到機台規範變更，系統已自動調整表格內容：\n\n${allLogs.join('\n')}`);
+      alert(`載入草稿時偵測到規範變更，系統已自動調整內容：\n\n${allLogs.join('\n')}`);
     }
 
   } 
-  else if (blocks.value.length === 0) {
+  
+  // ★ 只有當系統判定「有機台群組可以選」，且目前畫面是空的，才自動新增一個空白模塊
+  // 如果根本沒有機台群組 (hasAnyMachineGroup 為 false)，就不該產生空模塊
+  if (blocks.value.length === 0 && hasAnyMachineGroup.value) {
     addBlock();
   }
 }

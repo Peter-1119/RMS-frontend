@@ -1,7 +1,7 @@
 <template>
   <div class="blk-wrap">
     <!-- 沒有任何 PMS + 條件 → 禁用按鈕 -->
-    <button class="btn add" @click="addBlock" :disabled="noAnyParams">新增下一層</button>
+    <button v-if="!noAnyParams" class="btn add" @click="addBlock">新增下一層</button>
 
     <div v-for="(b,i) in blocks" :key="b.id" class="blk">
       <div class="blk-hd">
@@ -30,7 +30,7 @@
           <button class="btn info" @click="copyFromCode(i)">複製</button>
         </div>
         <div class="ops">
-          <button class="btn info" @click="addBlock" :disabled="noAnyParams">新增同層</button>
+          <button v-if="!noAnyParams" class="btn info" @click="addBlock">新增同層</button>
           <button class="btn info" @click="duplicateBlock(i)">複製模塊</button>
           <button class="btn danger" @click="delBlock(i)">刪除</button>
         </div>
@@ -64,7 +64,7 @@
           </div>
           <EditorContent v-if="condEditors[i]" :editor="condEditors[i]" class="ed ed-cond"/>
         </div>
-        <p v-else class="hint empty">此機台無條件參數</p>
+        <p v-else class="hint empty">此機台無製品特性條件</p>
 
         <!-- ===== PMS 參數表 (Parameter) ===== -->
         <div v-if="hasPms">
@@ -1595,14 +1595,14 @@ function runParamValueValidation(ed) {
       let maxSoFar = value[validIndices[0]];
       for (let i = 1; i < validIndices.length; i++) {
           const item = value[validIndices[i]];
-          if (item < maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
           else maxSoFar = item;
       }
 
       let minSoFar = value[validIndices.at(-1)];;
       for (let i = validIndices.length - 2; i >= 0; i--) {
           const item = value[validIndices[i]];
-          if (item > minSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
           else minSoFar = item;
       }
     }
@@ -1773,7 +1773,10 @@ watch(() => props.dataBlocks, async (newBlocks) => {
       idSeq = blocks.value.length + 1;
     }
 
-    nextTick(runAllValidations)
+    nextTick(() => {
+      runAllValidations()
+      syncToParent() // 👈 【修正 2】資料還原完畢後，主動觸發 Emit，把最新狀態推給父層！
+    })
     lastExternalDataJson.value = json
   }, { deep: true }
 )

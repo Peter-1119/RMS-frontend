@@ -92,7 +92,7 @@ const tableEditorExtensions = [
   Focus.configure({ className: 'has-focus', mode: 'all' }),
   CustomTableRow, CustomTableHeader, CustomTableCell, History,
 ]
-const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, Placeholder.configure({ placeholder: '請輸入項目說明...' })];
+const titleExt = [Document.extend({ content: 'paragraph' }), ...baseExt, History, Placeholder.configure({ placeholder: '請輸入項目說明...' })];
 
 // 鎖定不可編輯欄（用在 from PMS 的 arrayData）
 const LOCKCOLS = [0, 1, 2];
@@ -163,30 +163,34 @@ function validateTableContent(editor, rowsToCheck = null) {
       valueStatus.push(status);
     }
 
+    // Compare relation from left to right
     const validIndices = [0, 1, 2, 3, 4].filter(i => valueStatus[i] === 'valid');
     if (validIndices.length > 1){
       let maxSoFar = value[validIndices[0]];
       for (let i = 1; i < validIndices.length; i++) {
           const item = value[validIndices[i]];
-          if (item < maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
           else maxSoFar = item;
       }
 
       let minSoFar = value[validIndices.at(-1)];;
       for (let i = validIndices.length - 2; i >= 0; i--) {
           const item = value[validIndices[i]];
-          if (item > minSoFar) valueStatus[validIndices[i]] = 'invalid';
+          if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
           else minSoFar = item;
       }
     }
 
-    if (valueStatus.filter(status => status == 'empty').length != 5) {
-      valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
-      valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
-      if (valueStatus[2] == 'empty') {
-        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
-        valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+    if (valueStatus.filter(status => status == 'empty').length != 5 && valueStatus[2] == 'empty') {
+      valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+      if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] != 'empty' || valueStatus[4] != 'empty')) { }
+      else if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] == 'empty' || valueStatus[4] == 'empty')) {
+        valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
         valueStatus[4] = (valueStatus[4] == 'invalid') ? 'invalid' : 'valid';
+      }
+      else if ((valueStatus[3] != 'empty' || valueStatus[4] != 'empty') && (valueStatus[0] == 'empty' || valueStatus[1] == 'empty')) {
+        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
       }
     }
 
@@ -214,7 +218,7 @@ function exportTableData() {
   if (!ed || !ed.state) {
     Object.assign(localBlockData.data, {jsonHeader, arrayData: [], jsonContent: null, pmsData: []});
     emit('update-table-data', localBlockData);
-    return { jsonHeader, arrayData: [], jsonContent: null };
+    return { jsonHeader, arrayData: [], jsonContent: null, pmsData: [] }; // 補上 pmsData
   }
 
   const arrayData = editor.value.state.doc.content.firstChild.content.content.slice(1).map(rowNode => { return rowNode.content.content.slice(1).map(cellNode => getText(cellNode)); });
@@ -227,6 +231,57 @@ function exportTableData() {
   return { jsonHeader, arrayData, jsonContent: ed.getJSON(), pmsData };
 }
 
+// [新增輔助函式]：負責初始化或更新表格 Editor
+function setupTableEditor(content, rowCount) {
+  if (!editor.value) {
+    // 第一次建立 editor
+    editor.value = new Editor({
+      content,
+      extensions: tableEditorExtensions,
+      editorProps: {
+        handleDOMEvents: { drop: () => true, dragstart: () => true, copy: (view, event) => handleCopy(view, event), keydown: (view, event) => handleKeydown(view, event), paste: (view, event) => handlePaste(view, event), mousedown: (view, event) => handleMousedown(view, event) },
+        handleKeyDown(view, event) {
+          if (!['Backspace','Delete'].includes(event.key)) return false;
+          const sel = view.state.selection
+          if (!(sel instanceof CellSelection)) return false
+          const { state } = view; let tr = state.tr; const cells=[]
+          sel.forEachCell((cell,pos) => {
+            const isHeader = cell.type.name === 'tableHeader'
+            const editable = cell.attrs?.contenteditable !== false
+            if (!isHeader && editable) cells.push({ cell, pos })
+          })
+          if (!cells.length) { event.preventDefault(); return true }
+          for (let i = cells.length - 1; i >= 0; i--) {
+            const { cell, pos } = cells[i]
+            const empty = state.schema.nodes.paragraph.create()
+            const newCell = cell.type.create(cell.attrs, empty, cell.marks)
+            tr = tr.replaceWith(pos, pos + cell.nodeSize, newCell)
+          }
+          view.dispatch(tr); event.preventDefault(); return true
+        }
+      },
+      onSelectionUpdate: () => { selectionUpdateTrigger.value++ },
+      onUpdate: ({ editor: currEditor }) => {
+        markCurrentRowDirty(currEditor);
+        rowFocusCheck(currEditor);
+
+        if (validateTimer) clearTimeout(validateTimer)
+        validateTimer = setTimeout(() => {
+          const rows = Array.from(dirtyRows);
+          if (rows.length) {
+            validateTableContent(currEditor, rows);
+            dirtyRows.clear();
+          }
+        }, 200);
+      },
+    });
+  } else {
+    // 已經有 editor → 只重設內容
+    editor.value.commands.setContent(content, false);
+  }
+  // 觸發初始驗證
+  validateTableContent(editor.value, new Set(Array.from({length: rowCount - 1}, (v, i) => rowCount - i - 1)));
+}
 function initOrReloadFromProps() {
   const blk = props.managementBlock || {};
   const data = blk.data || {};
@@ -258,69 +313,29 @@ function initOrReloadFromProps() {
 
   const jsonContent = data.jsonContent || null;
   const arrayData = Array.isArray(data.arrayData) ? data.arrayData : [];
+  const pmsData = Array.isArray(data.pmsData) ? data.pmsData : [];
 
   // ✅ 完全沒有內容（沒有草稿 json，也沒有 PMS arrayData）→ 不建立 editor 只保留「選擇的機台無任何參數」提示
-  if (!jsonContent && !arrayData.length) return;
+  if (!jsonContent && !arrayData.length) { 
+    if (editor.value) {
+        editor.value.destroy();
+        editor.value = null;
+    }
+    return; 
+  }
+
   // 🔥 [修改這裡]：如果是 jsonContent，先通過遷移函式處理
   let content;
   if (jsonContent) {
-    // 檢查並修補舊資料
     content = jsonContent;
   } else {
-    // 如果沒有 json，則從 arrayData 產生 (這原本就會產生正確的 ActionCell)
-    content = getInitialTableContent(arrayData);
+    // ⭐ 將 pmsData 的鎖定狀態 (index 0) 傳給生成函式
+    const pmsIndex = pmsData.length ? pmsData.map(p => p[0]) : null;
+    content = getInitialTableContent(arrayData, pmsIndex);
   }
 
-  if (!editor.value) {
-    // 第一次建立 editor
-    editor.value = new Editor({
-      content,
-      extensions: tableEditorExtensions,
-      editorProps: {
-        handleDOMEvents: { drop: () => true, dragstart: () => true, copy: (view, event) => handleCopy(view, event), keydown: (view, event) => handleKeydown(view, event), paste: (view, event) => handlePaste(view, event), mousedown: (view, event) => handleMousedown(view, event) },
-        handleKeyDown(view, event) {
-          if (!['Backspace','Delete'].includes(event.key)) return false;
-          const sel = view.state.selection
-          if (!(sel instanceof CellSelection)) return false
-          const { state } = view; let tr = state.tr; const cells=[]
-          sel.forEachCell((cell,pos) => {
-            const isHeader = cell.type.name === 'tableHeader'
-            const editable = cell.attrs?.contenteditable !== false
-            if (!isHeader && editable) cells.push({ cell, pos })
-          })
-          if (!cells.length) { event.preventDefault(); return true }
-          for (let i = cells.length - 1; i >= 0; i--) {
-            const { cell, pos } = cells[i]
-            const empty = state.schema.nodes.paragraph.create()
-            const newCell = cell.type.create(cell.attrs, empty, cell.marks)
-            tr = tr.replaceWith(pos, pos + cell.nodeSize, newCell)
-          }
-          view.dispatch(tr); event.preventDefault(); return true
-        }
-      },
-      onSelectionUpdate: () => { selectionUpdateTrigger.value++ },
-      onUpdate: ({ editor: currEditor }) => {
-        // 先標記目前 row 是 dirty
-        markCurrentRowDirty(currEditor);
-        rowFocusCheck(currEditor);
-
-        // 2️⃣ 驗證：稍微 debounce，只檢查 dirtyRows
-        if (validateTimer) clearTimeout(validateTimer)
-        validateTimer = setTimeout(() => {
-          const rows = Array.from(dirtyRows);
-          if (rows.length) {
-            validateTableContent(currEditor, rows);
-            dirtyRows.clear();
-          }
-        }, 200);
-      },
-    });
-    validateTableContent(editor.value, new Set(Array.from({length: arrayData.length - 1}, (v, i) => arrayData.length - i - 1)));
-  } else {
-    // 已經有 editor → 只重設內容
-    editor.value.commands.setContent(content, false);
-    validateTableContent(editor.value, new Set(Array.from({length: arrayData.length - 1}, (v, i) => arrayData.length - i - 1)));
-  }
+  // 統一交給輔助函式處理
+  setupTableEditor(content, arrayData.length);
 }
 // [新增功能] 比對並更新 PMS (呼叫後端)
 async function syncPmsWithBackend() {
@@ -346,7 +361,9 @@ async function syncPmsWithBackend() {
       alert(msg + addmsg + delmsg);
 
       const newContent = getInitialTableContent(PMSData.map(pms => pms.slice(1)), PMSData.map(pms => pms[0]));
-      editor.value.commands.setContent(newContent);
+
+      setupTableEditor(newContent, PMSData.length);
+      // editor.value.commands.setContent(newContent);
       
       // 觸發一次儲存以更新父層資料
       exportTableData();

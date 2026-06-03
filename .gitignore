@@ -27,3 +27,5 @@ Thumbs.db
 # If you want to keep package-lock.json, remove the line below.
 # yarn.lock
 # pnpm-lock.yaml
+
+docs-design/

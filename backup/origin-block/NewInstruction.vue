@@ -44,7 +44,15 @@
               </div>
               <div class="form-group">
                 <label for="machines">適用機台：</label>
-                <input class="input-machine" type="text" id="machines" :value="'    --- 請選擇機台 ---    '" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/>
+                <input 
+                  class="input-machine" 
+                  type="text" 
+                  id="machines" 
+                  :value="form.attribute.applyProject === 'WMQ其他' ? '    --- 無須選擇機台 ---    ' : '    --- 請選擇機台 ---    '" 
+                  @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" 
+                  readonly
+                />
+                <!-- <input class="input-machine" type="text" id="machines" :value="'    --- 請選擇機台 ---    '" @click="machinesListVisible=(form.attribute.applyProject.length > 0 && !machinesListVisible)" readonly/> -->
               </div>
               <div class="form-group"><label for="space"></label>
                 <div v-if="machines_tag.length" class="machine-tags">
@@ -136,7 +144,12 @@
         <!-- Step 5 -->
         <section :ref="el => sectionRefs[4].value = el" class="step-section">
           <h2>4. 製造條件參數一覽表</h2>
+          <div v-if="form.attribute.isParamNA" style="font-size: 16px; font-weight: bold; text-align: center; padding: 40px; background-color: #f4f9ff; border: 1px dashed #1666C0; border-radius: 8px; color: #1666C0;">
+            請依照「3. 管理條件」進行製造參數設定與確認
+          </div>
+
           <ManufacturingConditionRuleBlocks
+            v-else
             :data-blocks="mcrBlocks"
             :cond-template="condTemplate"
             :param-template="paramTemplate"
@@ -172,9 +185,8 @@
         </section>
 
         <!-- Step 7 -->
-        <section :ref="el => sectionRefs[6].value = el" class="step-section">
+        <!-- <section :ref="el => sectionRefs[6].value = el" class="step-section">
           <h2>6. 相關文件</h2>
-          <!-- 原本 Step 7 的 DocSearchWindow 區塊 -->
           <div class="relative-document">
             <button class="layer-action-btn add" @click="docWindowVisible=true">新增文件</button>
           </div>
@@ -196,12 +208,11 @@
             @add-new-forms="addRelativeDocument" 
             @close-window="docWindowVisible=false">
           </FormSearchWindow>
-        </section>
+        </section> -->
 
         <!-- Step 8 -->
-        <section :ref="el => sectionRefs[7].value = el" class="step-section">
+        <!-- <section :ref="el => sectionRefs[7].value = el" class="step-section">
           <h2>7. 使用表單</h2>
-          <!-- 原本 Step 8 的 FormSearchWindow 區塊 -->
           <div class="used-form">
             <button class="layer-action-btn add" @click="formWindowVisible=true">新增表單</button>
           </div>
@@ -216,6 +227,74 @@
               <button class="remove-btn" @click="formRemove(formInfo.id)">x</button>
             </div>
           </div>
+          <FormSearchWindow 
+            v-if="formWindowVisible"
+            headerName="表單選取"
+            documentType="form"
+            @add-new-forms="addUsedForm" 
+            @close-window="formWindowVisible=false">
+          </FormSearchWindow>
+        </section> -->
+
+        <section :ref="el => sectionRefs[6].value = el" class="step-section">
+          <h2>6. 相關文件</h2>
+          
+          <div class="relative-document" style="display: flex; justify-content: space-between; align-items: center;">
+            <button class="layer-action-btn add" @click="docWindowVisible=true">新增文件</button>
+            
+            <div v-if="isRevisionDoc" class="color-picker-group">
+              <span style="font-size: 14px; color: #666; margin-right: 8px;">文字顏色:</span>
+              <i class="dot blue" @click="setDocColor('blue')" title="設為藍色"></i>
+              <i class="dot black" @click="setDocColor('black')" title="設為黑色"></i>
+            </div>
+          </div>
+
+          <div v-for="(docInfo, docIndex) in relativeDocuments" class="document-block" :class="{ 'is-selected': selectedDocId === docInfo.id }" :key="docInfo.id" @click="selectedDocId = docInfo.id">
+            <div class="doc-info-block" :style="{ color: docInfo.color === 'blue' ? 'blue' : 'black' }">
+              <label class="doc-label no" :style="{ borderColor: docInfo.color === 'blue' ? 'blue' : '#ddd' }">6.{{ docIndex + 1 }}</label>
+              <label class="doc-label id" :style="{ borderColor: docInfo.color === 'blue' ? 'blue' : '#ddd' }">{{ docInfo.docId }}</label>  
+              <label class="doc-label name">{{ docInfo.docName }}</label>
+            </div>
+            
+            <div class="doc-btn-block">
+              <button class="remove-btn" @click.stop="relativeDocumentRemove(docInfo.id)">x</button>
+            </div>
+          </div>
+          
+          <FormSearchWindow 
+            v-if="docWindowVisible"
+            headerName="相關文件選取"
+            documentType="document"
+            @add-new-forms="addRelativeDocument" 
+            @close-window="docWindowVisible=false">
+          </FormSearchWindow>
+        </section>
+
+        <section :ref="el => sectionRefs[7].value = el" class="step-section">
+          <h2>7. 使用表單</h2>
+          
+          <div class="used-form" style="display: flex; justify-content: space-between; align-items: center;">
+            <button class="layer-action-btn add" @click="formWindowVisible=true">新增表單</button>
+            
+            <div v-if="isRevisionDoc" class="color-picker-group">
+              <span style="font-size: 14px; color: #666; margin-right: 8px;">文字顏色:</span>
+              <i class="dot blue" @click="setFormColor('blue')" title="設為藍色"></i>
+              <i class="dot black" @click="setFormColor('black')" title="設為黑色"></i>
+            </div>
+          </div>
+
+          <div v-for="(formInfo, formIndex) in usedForms" class="form-block" :class="{ 'is-selected': selectedFormId === formInfo.id }" :key="formInfo.id" @click="selectedFormId = formInfo.id">
+            <div class="form-info-block" :style="{ color: formInfo.color === 'blue' ? 'blue' : 'black' }">
+              <label class="form-label no" :style="{ borderColor: formInfo.color === 'blue' ? 'blue' : '#ddd' }">7.{{ formIndex + 1 }}</label>
+              <label class="form-label id" :style="{ borderColor: formInfo.color === 'blue' ? 'blue' : '#ddd' }">{{ formInfo.formId }}</label>  
+              <label class="form-label name">{{ formInfo.formName }}</label>
+            </div>
+            
+            <div class="form-btn-block">
+              <button class="remove-btn" @click.stop="formRemove(formInfo.id)">x</button>
+            </div>
+          </div>
+          
           <FormSearchWindow 
             v-if="formWindowVisible"
             headerName="表單選取"
@@ -263,7 +342,6 @@
 
 <script setup>
 defineOptions({ name: 'new-instruction' })
-
 import axios from 'axios'
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick, onActivated } from 'vue'
 import { useRoute } from 'vue-router'
@@ -278,20 +356,38 @@ import FormSearchWindow from '@/components/FormSearchWindow.vue'
 import WordPreview from '@/components/WordPreview.vue'
 import EipReviewWindow from '@/components/EipReviewWindow.vue'
 import { useDraftToken } from '@/composables/useDraftToken'
-import { loadPersonnel, initDoc, saveDraftAll, loadDraftAll, loadSnapshotDraftAll } from '@/api/docsApi'
-const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
+import { loadPersonnel, initDoc, saveDraftAll, loadDraftAll, loadSnapshotDraftAll, releaseProgramCode, fetchInstructionLatestDocVersion } from '@/api/docsApi'
+// const { token: draftToken, setToken, clearToken } = useDraftToken('rms:draft:new-instruction')
 
 const API_BASE_URL = import.meta.env.VITE_APP_API_BASE_URL
 
 const route = useRoute()
 
-const mode = computed(() => route.query.mode || '')
+const mode = computed(() => route.query.mode || 'new')
+const currentToken = computed(() => route.query.token || '')
+
+// 2. 動態決定這個實例的 LocalStorage Key (這跟我們在 App.vue 刪除時的邏輯完全對應！)
+const storageKey = computed(() => {
+  console.log("mode: ", mode.value);
+  if (mode.value === 'new') {
+    console.log("new instruction draft");
+    return 'rms:draft:new-instruction'; // 新建模式維持原樣
+  } else {
+    // 草稿和變版模式，使用 token 作為專屬的 Key
+    console.log("instruction draft: ", currentToken.value);
+    return `rms:draft:${currentToken.value}`; 
+  }
+})
+
+// 3. 把動態的 Key 傳給 composable (注意：useDraftToken 內部可能只吃初始值，所以要傳入 .value)
+const { token: draftToken, setToken, clearToken } = useDraftToken(storageKey.value)
+
 const isRejectedDoc = computed(() => mode.value === 'rejected')
 const isSubmittedDoc = computed(() => mode.value === 'submitted')
 const rmsId = computed(() => route.query.rms_id || '')
 
 // ⭐ 判斷是不是變版模式
-const isRevisionDoc = computed(() => form.documentVersion > 1);
+const isRevisionDoc = computed(() => true || form.documentVersion > 1);
 // const isRevisionDoc = computed(() => route.query.mode === 'revision')
 
 // --- ensure we have a server-side token row ---
@@ -432,24 +528,33 @@ const goToStep = scrollToStep;
 const isStep1Valid = computed(() => {
   // 版本：可能是 number 或 string，統一轉成 float
   const versionNum = parseFloat(String(form.documentVersion ?? '0'));
+  
+  // ★ 新增：判斷是否為「WMQ其他」
+  const isWMQOther = form.attribute.applyProject === 'WMQ其他';
 
-  // Left block 必填欄位
+  // Left block 必填欄位 (根據是否為 WMQ其他 動態排除 inputMachines)
   const leftFields = [
     form.documentName,
     form.documentVersion,
     form.attribute.applyProject,
-    form.attribute.inputMachines,
     form.department,
     form.author,
     form.confirmer,
     form.approver,
   ];
+  
+  // 如果不是 WMQ其他，才強制檢查 inputMachines (這代表機台字串)
+  if (!isWMQOther) {
+    leftFields.push(form.attribute.inputMachines);
+  }
 
   // 槽：選了機台才算有填
   const hasMachines = (Array.isArray(form.attribute.machines) && form.attribute.machines.length > 0);
 
-  // 先檢查左邊欄位 & 機台
-  if (!hasMachines) return false;
+  // ★ 修改：不是 WMQ其他 的情況下，才必須要有選擇機台
+  if (!isWMQOther && !hasMachines) return false;
+  
+  // 檢查基本屬性是否全都有填
   if (leftFields.some(v => !String(v ?? '').trim())) return false;
 
   // 版本 > 1.0 時，右側「變更理由」「變更要點」也變成必填
@@ -499,22 +604,35 @@ const isStep3Valid = computed(() => {
   return false
 })
 const isStep4Valid = computed(() => {
-  const pmsStatus = isPmsTableValid()      // true / false / null
-  const hasDynamic = (managementBlocks.value || []).length > 0
+  // 1. 直接拿你的狀態變數來判斷到底有沒有 PMS 和 自訂區塊
+  const hasPms = hasPmsForStep3.value; 
+  const hasDynamic = (managementBlocks.value || []).length > 0;
 
-  // 是否「這一步有東西要填」
-  const hasAnyContent = (pmsStatus !== null) || hasDynamic
-  if (!hasAnyContent) {
-    // ✅ 規則 1：沒有 PMS & 沒有 DynamicBlock → Step4 不需要填寫
-    return null          // 用 null 代表「不適用」
+  // 2. ✅ 規則 1：沒有 PMS & 沒有 DynamicBlock → Step4 完全不需要填寫
+  if (!hasPms && !hasDynamic) {
+    return null; // 用 null 代表「不適用」，讓左側導覽列保持綠色打勾或原樣
   }
 
-  let ok = true
-  if (pmsStatus !== null) { ok = ok && pmsStatus }
-  if (hasDynamic) { ok = ok && areDynamicBlocksValid(managementBlocks.value) }
-  return ok
+  let ok = true;
+  
+  // 3. 有 PMS 才去呼叫驗證函數
+  console.log("3. 生產基本條件: ", hasPms);
+  if (hasPms) { 
+    // 只要有錯誤就會變成 false
+    ok = ok && (isPmsTableValid() === true); 
+  }
+  
+  // 4. 有自訂區塊才去驗證自訂區塊
+  if (hasDynamic) { 
+    ok = ok && areDynamicBlocksValid(managementBlocks.value); 
+  }
+  
+  return ok;
 })
 const isStep5Valid = computed(() => {
+  // ★ 第一步：如果勾選 N/A，直接視為通過 (左側變綠燈)
+  if (form.attribute.isParamNA) return true;
+  
   const hasCond = hasCondForMcr.value
   const hasPms  = hasPmsForMcr.value
   const blocksArr = mcrBlocks.value || []
@@ -529,41 +647,48 @@ const isStep5Valid = computed(() => {
 
   let ok = true
 
-  // 🔸 [新增] 每個 block 都要至少選一個 specification / programLinks
+  // 🔸 檢查必填項目 (排除 N/A)
   for (const b of blocksArr) {
+    if (b.data?.metadata?.isNA) continue; // ★ 如果是 N/A，直接跳過檢查
+
     const hasPrograms =
-      (Array.isArray(b.data?.metadata.programs) && b.data?.metadata.programs.length > 0) ||
-      (b.specCode && String(b.specCode).trim() !== '')
+      (Array.isArray(b.data?.metadata?.programs) && b.data?.metadata?.programs.length > 0) ||
+      (b.specCode && String(b.specCode).trim() !== '') || 
+      (Array.isArray(b.programLinks) && b.programLinks.length > 0)
+      
     if (!hasPrograms) {
       ok = false
       break
     }
   }
 
-  // ---- 条件 table 檢查 ----
+  // ★ 篩選出需要驗證的 activeBlocks
+  const activeBlocks = blocksArr.filter(b => !b.data?.metadata?.isNA);
+
+  // ---- 條件 table 檢查 ----
   if (ok && hasCond) {
-    for (const b of blocksArr) {
+    for (const b of activeBlocks) {
       const v = isConditionTableValidForBlock(b)
       if (v === false) {
         ok = false
         break
       }
     }
-    if (ok && hasConditionDuplicates(blocksArr)) {
+    if (ok && hasConditionDuplicates(activeBlocks)) {
       ok = false
     }
   }
 
   // ---- PMS table 檢查 ----
   if (ok && hasPms) {
-    for (const b of blocksArr) {
+    for (const b of activeBlocks) {
       const v = isParamTableValidForBlock(b)
       if (v === false) {
         ok = false
         break
       }
     }
-    if (ok && hasParamTableDuplicates(blocksArr)) {
+    if (ok && hasParamTableDuplicates(activeBlocks)) {
       ok = false
     }
   }
@@ -687,11 +812,17 @@ const isDynamicBlockValid = (block) => {
 const collectValidationErrors = () => {
   const errors = [];
 
+  // ★ 新增：判斷是否為「WMQ其他」
+  const isWMQOther = form.attribute.applyProject === 'WMQ其他';
+
   // --- Step 1: 基本屬性 ---
   const ver = parseFloat(String(form.documentVersion ?? '0'));
   if (!form.documentName) errors.push('【基本屬性】文件名稱未填寫');
   if (!form.attribute.applyProject) errors.push('【基本屬性】適用工程未選擇');
-  if (!form.attribute.machines.length) errors.push('【基本屬性】適用機台未選擇');
+  
+  // ★ 修改：只有「非 WMQ其他」才報錯機台未選擇
+  if (!isWMQOther && !form.attribute.machines.length) errors.push('【基本屬性】適用機台未選擇');
+  
   if (!form.department) errors.push('【基本屬性】制訂單位未填寫');
   if (!form.author) errors.push('【基本屬性】制訂者未填寫');
   if (!form.confirmer) errors.push('【基本屬性】確認者未填寫');
@@ -739,11 +870,16 @@ const collectValidationErrors = () => {
   const hasCond = hasCondForMcr.value;
   const hasPmsMcr = hasPmsForMcr.value;
   
-  if (hasCond || hasPmsMcr) {
+  // ★ 修改判斷順序：先判斷 N/A
+  if (form.attribute.isParamNA) {
+    // 勾選了 N/A，跳過此章節的所有錯誤檢查，不阻擋匯出 Word
+  } else if (hasCond || hasPmsMcr) {
     if (mcrBlocks.value.length === 0) {
       errors.push('【4. 製造條件參數】至少需新增一個參數模塊');
     } else {
       mcrBlocks.value.forEach((blk, idx) => {
+        if (blk.data?.metadata?.isNA) return; // ★ 如果是 N/A，跳過報錯
+
         const prefix = `【4. 製造條件參數 - 層級 ${idx + 1}】`;
         
         // 檢查製程配號
@@ -760,9 +896,10 @@ const collectValidationErrors = () => {
         }
       });
       
-      // 檢查重複
-      if (hasCond && hasConditionDuplicates(mcrBlocks.value)) errors.push('【4. 製造條件參數】存在重複的條件組合');
-      if (hasPmsMcr && hasParamTableDuplicates(mcrBlocks.value)) errors.push('【4. 製造條件參數】存在重複的參數設定');
+      // ★ 檢查重複時，只拿有啟用的區塊來比對
+      const activeBlocks = mcrBlocks.value.filter(b => !b.data?.metadata?.isNA);
+      if (hasCond && hasConditionDuplicates(activeBlocks)) errors.push('【4. 製造條件參數】存在重複的條件組合');
+      if (hasPmsMcr && hasParamTableDuplicates(activeBlocks)) errors.push('【4. 製造條件參數】存在重複的參數設定');
     }
   }
 
@@ -789,7 +926,7 @@ const form = reactive({
   documentID: '',
   documentName: '',
   documentVersion: 1.0,
-  attribute: { applyProject: '', machines: [], specifications: [], inputMachines: '', scopeUnits: "" },
+  attribute: { applyProject: '', machines: [], specifications: [], inputMachines: '', scopeUnits: "", isParamNA: false },
   department: '',
   author_id: '',
   author: '',
@@ -805,13 +942,20 @@ const form = reactive({
 // ---------- popups ----------
 const projectsListVisible = ref(false)
 const machinesListVisible = ref(false)
-function applyProjectChange() {
-  form.attribute.machines = [];
-  form.attribute.inputMachines = "";
+async function applyProjectChange() {
+  const isWMQOther = form.attribute.applyProject === 'WMQ其他';
+
+  // ★ 修改處：加入 isParamNA: isWMQOther，一旦選了 WMQ其他 就直接給 N/A
+  Object.assign(form.attribute, { machines: [], specifications: [], inputMachines: "", scopeUnits: "", isParamNA: isWMQOther });   // Reset form information
+  machines_tag.value = [];
+
   processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null };
   flowVersion.value++;
 
   managementSpecific.value = { ...managementSpecific.value, data: { jsonContent: null, arrayData: [] } };
+  await nextTick();
+  ManagementSpecificBlockComponent.value.initOrReloadFromProps();
+
   hasPmsForStep3.value = false;
   hasPmsForMcr.value  = false;
   hasCondForMcr.value = false;
@@ -832,6 +976,10 @@ const getMachines = async (payload) => {
   form.attribute.specifications = Object.entries(specifications).map(([code, name]) => { return { code, name } });
   form.attribute.inputMachines = machines.map(m => m.name).join(', ');
   machines_tag.value = [...processMachineTag(form.attribute.machines, form.attribute.inputMachines)];
+
+  const res = await fetchInstructionLatestDocVersion(form.attribute.applyProject, form.attribute.machines);
+  form.documentID = (res.document_version || 1.0) == 1 ? "" : res.document_id;
+  form.documentVersion = res.document_version || 1.0;
 
   // Process flow data update
   processFlowData.value = { mode: 'table', cols: 9, header_json: null, items: [], file: null };
@@ -1208,6 +1356,7 @@ function hasNonEmptyFlowCell(docJson) {
 
 // process-flow <-> blocks (step_type = 0)
 function serializeProcessFlowToBlocks(pf) {
+  console.log("serializeProcessFlowToBlocks: ", pf)
   if (pf.mode === 'table') {
     return [{
       step_type: 0,
@@ -1317,7 +1466,7 @@ const loadPmsTemplate = async (machineCode) => {
 
 // handler for ManagementSpecificBlock
 const updateManagementTableData = (payload) => {
-  console.log("updateManagementTableData: ", payload);
+//   console.log("updateManagementTableData: ", payload);
   managementSpecific.value = payload;
 }
 
@@ -1331,7 +1480,7 @@ const addManagementLayer = () => {
   })
 }
 const removeManagementLayer = id => {
-  console.log("managementBlocks: ", managementBlocks.value);
+//   console.log("managementBlocks: ", managementBlocks.value);
   managementBlocks.value = managementBlocks.value.filter(b => b.id !== id).map((b, i) => ({...b, tier: i + 2}));
 }
 const updateManagementBlockData = payload => {
@@ -1381,7 +1530,7 @@ const loadManagementFromBlocks = async (payload) => {
 
   (payload.blocks || []).forEach((blk, i) => {
     const first = (blk.data || [])[0]
-    if (i === 0 && first && first.option === 2) {
+    if (i === 0 && blk.tier == 1 && first && first.option === 2) {
       managementSpecific.value = { id: 0, step: 3, tier: blk.tier, data: { jsonContent: first.jsonContent || null, arrayData: [] } };
     } else {
       managementBlocks.value.push({
@@ -1398,7 +1547,6 @@ const loadManagementFromBlocks = async (payload) => {
     }
   })
   
-  console.log("managementBlocks: ", managementBlocks.value);
   await nextTick();  // Waiting props update to child component
   ManagementSpecificBlockComponent.value.initOrReloadFromProps();
   const {jsonHeader, arrayData, jsonContent, pmsData} = ManagementSpecificBlockComponent.value.exportTableData();
@@ -1420,6 +1568,7 @@ const loadManagementFromBlocks = async (payload) => {
 function extractPlainTextFromNode(node) {
   if (!node) return ''
   if (node.type === 'text' && node.text) return node.text
+  if (node.type === 'image') return '[IMAGE]'
   const children = node.content || []
   let out = ''
   for (const child of children) {
@@ -1471,17 +1620,67 @@ function isPmsTableValid() {
     const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
 
     // 欄位 index 對應： 0 "按鈕", 1 "項次", 2 "槽體", 3 "管理項目", 4 "規格下限(OOS-)", 5 "操作下限(OOC-)," 6 "設定值", 7 "操作上限(OOC+)", 8 "規格上限(OOS+)"
-    const cellStatus = cells.slice(3, 8).map(cell => {
-      const text = getText(cell);
+    const value = [];
+    const valueStatus = [];
+    for(let index = 3; index < 8; index++) {
+      const txt = getText(cells[index]);
       let status = 'empty';
-      let val = Number(text);
-      if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
-      return status;
-    });
+      let val = Number(txt);
 
-    if (cellStatus.some(status => status == 'invalid')) return false;
-    if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
-    if (cellStatus.every(status => status == 'empty')) return false;
+      if (txt) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+      
+      value.push(val);
+      valueStatus.push(status);
+    }
+
+    // Compare relation from left to right
+    const validIndices = [0, 1, 2, 3, 4].filter(i => valueStatus[i] === 'valid');
+    if (validIndices.length > 1){
+      let maxSoFar = value[validIndices[0]];
+      for (let i = 1; i < validIndices.length; i++) {
+          const item = value[validIndices[i]];
+          if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+          else maxSoFar = item;
+      }
+      // console.log('inst mana valueStatus: ', valueStatus);
+
+      let minSoFar = value[validIndices.at(-1)];;
+      for (let i = validIndices.length - 2; i >= 0; i--) {
+          const item = value[validIndices[i]];
+          if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
+          else minSoFar = item;
+      }
+      // console.log('inst mana valueStatus: ', valueStatus);
+    }
+
+    if (valueStatus.filter(status => status == 'empty').length != 5 && valueStatus[2] == 'empty') {
+      valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+      if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] != 'empty' || valueStatus[4] != 'empty')) { }
+      else if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] == 'empty' || valueStatus[4] == 'empty')) {
+        valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[4] = (valueStatus[4] == 'invalid') ? 'invalid' : 'valid';
+      }
+      else if ((valueStatus[3] != 'empty' || valueStatus[4] != 'empty') && (valueStatus[0] == 'empty' || valueStatus[1] == 'empty')) {
+        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
+      }
+    }
+
+    // console.log('inst mana valueStatus: ', r, value, valueStatus.some(status => status == 'invalid' || status == 'empty'))
+    if (valueStatus.some(status => status == 'invalid' || status == 'empty')) return false;
+
+    // const cellStatus = cells.slice(3, 8).map(cell => {
+    //   const text = getText(cell);
+    //   let status = 'empty';
+    //   let val = Number(text);
+    //   if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+    //   return status;
+    // });
+
+
+    // if (cellStatus.some(status => status == 'invalid')) return false;
+    // if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+    // if (cellStatus.every(status => status == 'empty')) return false;
   }
 
   return true;
@@ -1491,6 +1690,7 @@ function isPmsTableValid() {
 function isDynamicBlockItemValid(item) {
   const titleText = extractPlainTextFromDocJson(item.jsonHeader)
   const hasTitle = titleText.length > 0
+  console.log("hasTitle: ", hasTitle, titleText);
 
   // 👉 只要這個項目存在，title 一律必填
   if (!hasTitle) {
@@ -1515,9 +1715,7 @@ function isDynamicBlockItemValid(item) {
     const doc = item.jsonContent
     if (!doc || typeof doc !== 'object') return false
 
-    const tables = Array.isArray(doc.content)
-      ? doc.content.filter(n => n.type === 'table')
-      : []
+    const tables = Array.isArray(doc.content) ? doc.content.filter(n => n.type === 'table') : []
     if (!tables.length) return false
 
     const tableNode = tables[0]
@@ -1531,12 +1729,14 @@ function isDynamicBlockItemValid(item) {
 
       let rowHasText = false
       for (const cell of cells) {
-        const cellText = extractPlainTextFromNode(cell).trim()
+        const cellText = extractPlainTextFromNode(cell).trim();
+        console.log("cellText: ", cellText);
         if (cellText) {
           rowHasText = true
           break
         }
       }
+      console.log("rowHasText: ", rowHasText);
       if (!rowHasText) {
         // 有一列完全空 → 視為未填完
         return false
@@ -1570,26 +1770,54 @@ const hasPmsForMcr   = ref(false)   // 此機台 PMS（製造條件一覽表用�
 const hasCondForMcr  = ref(false)   // 此機台 條件參數 是否有資料
 
 const loadMcrTemplates = async (machineCode) => {
+  // ★ 新增：取得當前是否為 WMQ其他
+  const isWMQOther = form.attribute.applyProject === 'WMQ其他';
+
   if (!machineCode) {
     paramTemplate.value = null
     condTemplate.value = null
+    form.attribute.isParamNA = true // 沒選機台直接當作 N/A
     return
   }
 
   try {
     const API = import.meta.env.VITE_APP_API_BASE_URL
-
     const [pmsRes, condRes] = await Promise.all([
       axios.get(`${API}/mes/pms/machine-parameters-set-attribute`, {
         params: { machine_id: machineCode },
       }),
       axios.get(`${API}/conditions/search-conditions-by-machines`, {
-        params: { keyword: machineCode },   // 用機台代碼當 keyword
+        params: { keyword: machineCode }, 
       }),
     ])
 
     hasPmsForMcr.value = pmsRes.data.data.table_rows.length > 0
     hasCondForMcr.value = condRes.data.data.conditions.length > 0
+
+    const isNA = !hasPmsForMcr.value && !hasCondForMcr.value;
+    
+    // ★ 修改：如果是沒有參數的機台，或適用工程為 WMQ其他，通通強制設為 N/A
+    const finalIsNA = isNA || isWMQOther;
+
+    if (finalIsNA && !form.attribute.isParamNA) {
+      if (mcrBlocks.value && mcrBlocks.value.length > 0) {
+        for (const blk of mcrBlocks.value) {
+          const links = blk.programLinks || blk.data?.metadata?.programs || [];
+          for (const link of links) {
+            if (link.programCode) {
+              try { await releaseProgramCode(link.programCode); } catch(e){}
+            }
+          }
+        }
+        mcrBlocks.value = [];
+      }
+    } else if (!finalIsNA && form.attribute.isParamNA) {
+      if (!mcrBlocks.value || mcrBlocks.value.length === 0) {
+        mcrBlocks.value = [];
+      }
+    }
+
+    form.attribute.isParamNA = finalIsNA;
 
     // 1) PMS → parameter table template
     const tableRows = pmsRes?.data?.data?.table_rows || []
@@ -1597,24 +1825,24 @@ const loadMcrTemplates = async (machineCode) => {
 
     // 2) 條件組 → condition template
     const condList = condRes?.data?.data?.conditions || []
-    // condList 裡每一個長這樣：
-    // { id, name, parameters: ['全鍍', '多層板內外層', ...] }
     const condTemplateArr = condList.map(c => ({
-      name: c.name,   // or c.condition_name，看你實際回傳欄位
+      name: c.name,
       options: (c.parameters || []).map(p => ({
         label: p,
-        value: p,     // 這邊我用同一個字，之後如果有 code 再換
+        value: p,
       })),
     }))
 
     condTemplate.value = condTemplateArr.length ? condTemplateArr : null
   } catch (e) {
     console.error('loadMcrTemplates error:', e)
-    // 出錯就回到預設模板
+    // 出錯就回到預設模板，並強制設為 N/A 防止錯誤操作
     paramTemplate.value = null
     condTemplate.value = null
+    form.attribute.isParamNA = true
   }
 }
+
 // ---------- Step5 驗證用 helper ----------
 // 保險轉成 2D array
 function normalize2DArray(arr) {
@@ -1697,21 +1925,65 @@ function isParamTableValidForBlock(block) {
   for (let r = 1; r < rows.length; r++) {
     const rowNode = rows[r];
     const cells = Array.isArray(rowNode.content) ? rowNode.content : [];
-    console.log("cells: ", cells);
 
     // 欄位 index 對應： 0 "按鈕", 1 "項次", 2 "槽體", 3 "管理項目", 4 "規格下限(OOS-)", 5 "操作下限(OOC-)," 6 "設定值", 7 "操作上限(OOC+)", 8 "規格上限(OOS+)"
-    const cellStatus = cells.slice(2, 7).map(cell => {
-      const text = getText(cell);
+    const value = [];
+    const valueStatus = [];
+    for(let index = 2; index < 7; index++) {
+      const txt = getText(cells[index]);
       let status = 'empty';
-      let val = Number(text);
-      if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
-      return status;
-    });
+      let val = Number(txt);
 
-    // console.log(`row: ${r}, cellStatus: ${cellStatus}`);
-    if (cellStatus.some(status => status == 'invalid')) return false;
-    if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
-    if (cellStatus.every(status => status == 'empty')) return false;
+      if (txt) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+      
+      value.push(val);
+      valueStatus.push(status);
+    }
+
+    // Compare relation from left to right
+    const validIndices = [0, 1, 2, 3, 4].filter(i => valueStatus[i] === 'valid');
+    if (validIndices.length > 1){
+      let maxSoFar = value[validIndices[0]];
+      for (let i = 1; i < validIndices.length; i++) {
+          const item = value[validIndices[i]];
+          if (item <= maxSoFar) valueStatus[validIndices[i]] = 'invalid';
+          else maxSoFar = item;
+      }
+
+      let minSoFar = value[validIndices.at(-1)];;
+      for (let i = validIndices.length - 2; i >= 0; i--) {
+          const item = value[validIndices[i]];
+          if (item >= minSoFar) valueStatus[validIndices[i]] = 'invalid';
+          else minSoFar = item;
+      }
+    }
+
+    if (valueStatus.filter(status => status == 'empty').length != 5 && valueStatus[2] == 'empty') {
+      valueStatus[2] = (valueStatus[2] == 'invalid') ? 'invalid' : 'valid';
+      if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] != 'empty' || valueStatus[4] != 'empty')) { }
+      else if ((valueStatus[0] != 'empty' || valueStatus[1] != 'empty') && (valueStatus[3] == 'empty' || valueStatus[4] == 'empty')) {
+        valueStatus[3] = (valueStatus[3] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[4] = (valueStatus[4] == 'invalid') ? 'invalid' : 'valid';
+      }
+      else if ((valueStatus[3] != 'empty' || valueStatus[4] != 'empty') && (valueStatus[0] == 'empty' || valueStatus[1] == 'empty')) {
+        valueStatus[0] = (valueStatus[0] == 'invalid') ? 'invalid' : 'valid';
+        valueStatus[1] = (valueStatus[1] == 'invalid') ? 'invalid' : 'valid';
+      }
+    }
+    
+    if (valueStatus.some(status => status == 'invalid' || status == 'empty')) return false;
+    // const cellStatus = cells.slice(2, 7).map(cell => {
+    //   const text = getText(cell);
+    //   let status = 'empty';
+    //   let val = Number(text);
+    //   if (text) status = (Number.isNaN(val)) ? 'invalid' : 'valid';
+    //   return status;
+    // });
+
+    // // console.log(`row: ${r}, cellStatus: ${cellStatus}`);
+    // if (cellStatus.some(status => status == 'invalid')) return false;
+    // if (cellStatus[2] == 'valid' && (cellStatus[0] == 'empty' || cellStatus[4] == 'empty')) return false;
+    // if (cellStatus.every(status => status == 'empty')) return false;
   }
 
   return true;
@@ -1744,6 +2016,8 @@ function hasParamTableDuplicates(blocksArr) {
 
 // NEW — send both parameter & condition for each tier + programLinks
 const serializeMCRToParams = () => {
+  if (form.attribute.isParamNA) return []
+
   if (!hasPmsForMcr.value && !hasCondForMcr.value)
     return []
 
@@ -1841,18 +2115,16 @@ const loadExceptionsFromBlocks = (payload) => {
 // ---------- 相關文件 (step 7) ----------
 const docWindowVisible = ref(false);
 const relativeDocuments = ref([]);
-// const addRelativeDocument = ({ formId, formName }) => {
-//   relativeDocuments.value.push({ id: itemID++, docId: formId, docName: formName });
-//   docWindowVisible.value = false;
-// }
+const selectedDocId = ref(null); // 新增：記錄目前選取的文件 ID
+
 const addRelativeDocument = (selectedDocs) => {
   selectedDocs.forEach(doc => {
-    // 檢查是否已經存在，避免重複加入
     if (!relativeDocuments.value.some(d => d.docId === doc.formId)) {
       relativeDocuments.value.push({ 
         id: itemID++, 
         docId: doc.formId, 
-        docName: doc.formName 
+        docName: doc.formName,
+        color: 'black' // 新增：預設顏色為黑色
       });
     }
   });
@@ -1860,23 +2132,28 @@ const addRelativeDocument = (selectedDocs) => {
 }
 const relativeDocumentRemove = id => {
   relativeDocuments.value = relativeDocuments.value.filter(d => d.id !== id);
+  if (selectedDocId.value === id) selectedDocId.value = null; // 刪除時清空選取
+}
+// 新增：改變文件顏色的函式
+const setDocColor = (color) => {
+  if (selectedDocId.value == null) return alert('請先點擊選取要更改顏色的文件列');
+  const target = relativeDocuments.value.find(d => d.id === selectedDocId.value);
+  if (target) target.color = color;
 }
 
 // ---------- 使用表單 (step 8) ----------
 const formWindowVisible = ref(false);
 const usedForms = ref([]);
-// const addUsedForm = ({ formId, formName }) => {
-//   usedForms.value.push({ id: itemID++, formId, formName });
-//   formWindowVisible.value = false;
-// }
+const selectedFormId = ref(null); // 新增：記錄目前選取的表單 ID
+
 const addUsedForm = (selectedForms) => {
   selectedForms.forEach(form => {
-    // 檢查是否已經存在，避免重複加入
     if (!usedForms.value.some(f => f.formId === form.formId)) {
       usedForms.value.push({ 
         id: itemID++, 
         formId: form.formId, 
-        formName: form.formName 
+        formName: form.formName,
+        color: 'black' // 新增：預設顏色為黑色
       });
     }
   });
@@ -1884,6 +2161,13 @@ const addUsedForm = (selectedForms) => {
 }
 const formRemove = id => {
   usedForms.value = usedForms.value.filter(f => f.id !== id);
+  if (selectedFormId.value === id) selectedFormId.value = null; // 刪除時清空選取
+}
+// 新增：改變表單顏色的函式
+const setFormColor = (color) => {
+  if (selectedFormId.value == null) return alert('請先點擊選取要更改顏色的表單列');
+  const target = usedForms.value.find(f => f.id === selectedFormId.value);
+  if (target) target.color = color;
 }
 
 // ---------- 文件產出 (step 9) — skipped per your request ----------
@@ -1946,11 +2230,13 @@ async function fetchPreviewDocx() {
           referenceType: 0,
           referenceDocumentID: d.docId,
           referenceDocumentName: d.docName,
+          color: d.color
         })),
         ...(usedForms.value || []).map(f => ({
           referenceType: 1,
           referenceDocumentID: f.formId,
           referenceDocumentName: f.formName,
+          color: f.color
         })),
       ],
     }
@@ -2009,12 +2295,14 @@ async function generateAndDownloadDocx() {
         ...(relativeDocuments.value || []).map(d => ({
           referenceType: 0,
           referenceDocumentID: d.docId,
-          referenceDocumentName: d.docName
+          referenceDocumentName: d.docName,
+          color: d.color || 'black' // 新增這裡
         })),
         ...(usedForms.value || []).map(f => ({
           referenceType: 1,
           referenceDocumentID: f.formId,
-          referenceDocumentName: f.formName
+          referenceDocumentName: f.formName,
+          color: f.color || 'black' // 新增這裡
         }))
       ]
     }
@@ -2189,9 +2477,20 @@ const applyLoadedData = async (snapshot, { isSnapshot }) => {
   // 6) references
   const r = snapshot.references;
   if (r?.success) {
+    console.log("references data: ", r);
     let nextId = 1;
-    relativeDocuments.value = (r.documents || []).map(d => ({ id: nextId++, docId: d.docId, docName: d.docName }));
-    usedForms.value = (r.forms || []).map(f => ({ id: nextId++, formId: f.formId, formName: f.formName }));
+    relativeDocuments.value = (r.documents || []).map(d => ({ 
+        id: nextId++, 
+        docId: d.docId, 
+        docName: d.docName, 
+        color: d.color || 'black' // 讀取舊資料，若無則預設 black
+    }));
+    usedForms.value = (r.forms || []).map(f => ({ 
+        id: nextId++, 
+        formId: f.formId, 
+        formName: f.formName,
+        color: f.color || 'black' // 讀取舊資料，若無則預設 black
+    }));
   }
 
   flowVersion.value++;
@@ -2227,9 +2526,10 @@ const saveDraft = async () => {
     const excBlocks = serializeExceptionsToBlocks();
 
     const references = {
-      documents: (relativeDocuments.value || []).map(d => ({ docId: d.docId, docName: d.docName })),
-      forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName })),
+      documents: (relativeDocuments.value || []).map(d => ({ docId: d.docId, docName: d.docName, color: d.color || 'black' })),
+      forms: (usedForms.value || []).map(f => ({ formId: f.formId, formName: f.formName, color: f.color || 'black' })),
     };
+    console.log("save references payload: ", references);
 
     const result = await saveDraftAll(t, {
       form,
@@ -2439,5 +2739,40 @@ onMounted(async () => {
   opacity: 0.6;
   cursor: default;
 }
+
+
+/* 文件與表單區塊樣式 */
+.document-block, .form-block { 
+  display: flex; 
+  justify-content: space-between; 
+  padding: 10px; 
+  margin: 10px 10px; 
+  border: 1px solid #ddd; 
+  border-radius: 4px; /* 加點圓角更好看 */
+  cursor: pointer;    /* 讓使用者知道可以點擊 */
+  transition: all 0.2s ease;
+}
+
+/* ★ 被選取時的狀態 (藍色高光) */
+.document-block.is-selected, .form-block.is-selected {
+  outline: 2px solid #2196f3;
+  background-color: #f4f9ff;
+  border-color: #2196f3;
+}
+
+/* 顏色選擇器 */
+.color-picker-group {
+  display: flex;
+  align-items: center;
+  background: #f8f9fa;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid #eee;
+}
+
+/* 共用顏色圓點 (沿用您原本的 .dot 樣式，但稍微修正一下邊距) */
+.dot { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); cursor: pointer; margin-left: 6px; }
+.blue { background: #0000ff; }
+.black { background: #000000; }
 
 </style>

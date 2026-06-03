@@ -1,61 +1,73 @@
 <template>
   <div class="Specification-Parameters-container">
-      <div class="top-controls">
-        <div class="input-action-layout">
-          <p>關鍵字：</p>
-          <input type="text" placeholder="請輸入條件關鍵字" v-model="conditionKeyword" @keyup.enter="fetchConditionsByKeyword(conditionKeyword)"/>
-          <button class="btn-search" @click="fetchConditionsByKeyword(conditionKeyword)">搜尋</button>
+      <div class="page-header">
+        <div>
+          <h2>規則一覽表</h2>
+          <span class="subtitle">維護製造條件規則及其適用的機台群組</span>
         </div>
-        <div class="input-action-layout">
-          <p>關鍵字：</p>
-          <input type="text" placeholder="請輸入機台關鍵字" v-model="machineKeyword" @keyup.enter="fetchConditionsByMachines(machineKeyword)"/>
-          <button class="btn-search" @click="fetchConditionsByMachines(machineKeyword)">搜尋</button>
-        </div>
-        <div class="btn-action-layout">
-          <button class="btn add-condition" @click="openEditWindow(null)">新增條件</button>
-        </div>
+        <button class="btn add-condition" @click="openEditWindow(null)">＋ 新增條件</button>
       </div>
-      
+
       <div class="table-content">
-        <div class="condition-table-wrapper">
-          <table class="conditions-table">
-            <thead>
-              <tr>
-                <th>項次</th>
-                <th>條件名稱</th>
-                <th>條件細項</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(condition, index) in conditions" :key="condition.id" @click="selectConditionRow(index)" :class="{'selected-row': index === selectedIndex}">
-                <td>{{ index + 1 }}</td>
-                <td>{{ condition.name }}</td>
-                <td><ul class="list-param"><li v-for="param in condition.parameters" :key="param">{{ param }}</li></ul></td>
-                <td>
-                  <button class="btn edit" @click="openEditWindow(index)">編輯</button>
-                  <button class="btn delete" @click="deleteCondition(index)">刪除</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- 左欄：條件規則 -->
+        <div class="table-column">
+          <div class="search-row">
+            <label>條件關鍵字：</label>
+            <input type="text" placeholder="請輸入條件名稱或細項" v-model="conditionKeyword" @keyup.enter="fetchConditionsByKeyword(conditionKeyword)"/>
+            <button class="btn-search" @click="fetchConditionsByKeyword(conditionKeyword)">搜尋</button>
+          </div>
+
+          <div class="condition-table-wrapper">
+            <div class="panel-title">條件規則</div>
+            <table class="conditions-table">
+              <thead>
+                <tr>
+                  <th>項次</th>
+                  <th>條件名稱</th>
+                  <th>條件細項</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(condition, index) in conditions" :key="condition.id" @click="selectConditionRow(index)" :class="{'selected-row': index === selectedIndex}">
+                  <td>{{ index + 1 }}</td>
+                  <td>{{ condition.name }}</td>
+                  <td><ul class="list-param"><li v-for="param in condition.parameters" :key="param">{{ param }}</li></ul></td>
+                  <td>
+                    <button class="btn edit" @click="openEditWindow(index)">編輯</button>
+                    <button class="btn delete" @click="deleteCondition(index)">刪除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <div class="machine-table-wrapper">
-          <table class="machines-table">
-            <thead>
-              <tr>
-                <th>機台群組</th>
-                <th>機台名稱</th>
-              </tr>
-            </thead>
-            <tbody v-if="selectedIndex != null">
-              <tr v-for="(mi, mn) in groups" :key="mi.code">
-                <td>{{ mn }}</td>
-                <td>{{ Object.keys(mi.machines).join(', ') }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- 右欄：適用機台群組 -->
+        <div class="table-column">
+          <div class="search-row">
+            <label>機台關鍵字：</label>
+            <input type="text" placeholder="請輸入機台名稱或群組" v-model="machineKeyword" @keyup.enter="fetchConditionsByMachines(machineKeyword)"/>
+            <button class="btn-search" @click="fetchConditionsByMachines(machineKeyword)">搜尋</button>
+          </div>
+
+          <div class="machine-table-wrapper">
+            <div class="panel-title">適用機台群組</div>
+            <table class="machines-table">
+              <thead>
+                <tr>
+                  <th>機台群組</th>
+                  <th>機台名稱</th>
+                </tr>
+              </thead>
+              <tbody v-if="selectedIndex != null">
+                <tr v-for="(mi, mn) in groups" :key="mi.code">
+                  <td>{{ mn }}</td>
+                  <td>{{ Object.keys(mi.machines).join(', ') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -181,44 +193,107 @@ export default {
 </script>
 
 <style scoped>
-.top-controls { display: flex; justify-content: space-between; margin-bottom: 20px; text-align: right; align-items: center; }
-.top-controls input { padding: 4px; font-size: 15px; border-radius: 4px; margin-right: 12px; }
-.top-controls p { margin: 0; }
-.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; }
-.btn.add-condition { background-color: #4CAF50; color: white; }
-.btn.save-conditions { background-color: #008CBA; color: white; }
-.btn.edit { margin: 0 10px 0 0;background-color: #ff9800; color: white; }
-.btn.delete { margin: 0 0 0 10px; background-color: #f44336; color: white; }
+.Specification-Parameters-container {
+  width: 90%;
+  margin: 24px auto;
+  padding: 24px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
 
-.input-action-layout { display: flex; }
+/* 頁首 */
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.page-header h2 { margin: 0; font-size: 20px; color: #023b64; }
+.page-header .subtitle { font-size: 13px; color: #888; }
 
-.Specification-Parameters-container { width: 90%; margin: 30px auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); }
-.table-content { display: flex; width: 100%; vertical-align: top;}
+/* 各欄上方的搜尋列（靠左、含前綴 label） */
+.search-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.search-row label { font-size: 14px; font-weight: bold; color: #555; white-space: nowrap; }
+.search-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
 
-.condition-table-wrapper { margin-right: 8px; max-height: 600px; overflow-y: auto; }
-.conditions-table th, .conditions-table td { border: 1px solid #ddd; padding: 8px; word-wrap: break-word; text-align: center; }
-.conditions-table th { background-color: #f2f2f2; }
-.conditions-table tbody tr { cursor: pointer; transition: background-color 0.3s ease; }
-.conditions-table tbody tr:hover { background-color: #f5f5f5; }
-.conditions-table tbody tr.selected-row { background-color: #e0f7fa; }
+.btn-search {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  background-color: #61a5d6;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-search:hover { background-color: #4f93c4; }
 
-.conditions-table { border-collapse: collapse; table-layout: fixed; width: 100%}
-.conditions-table th:first-child, .conditions-table td:first-child { width: 5%; }
-.conditions-table th:nth-child(1), .conditions-table td:nth-child(1) { width: 5%; }
-.conditions-table th:nth-child(2), .conditions-table td:nth-child(2) { width: 10%; }
-.conditions-table th:nth-child(3), .conditions-table td:nth-child(3) { width: 20%; }
-.conditions-table th:nth-child(4), .conditions-table td:nth-child(4) { width: 15%; }
+.btn { padding: 7px 14px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+.btn.add-condition { background-color: #007bff; color: white; }
+.btn.add-condition:hover { background-color: #0069d9; }
+.btn.edit { margin-right: 8px; background-color: #f0ad4e; color: white; }
+.btn.edit:hover { background-color: #ec9c2d; }
+.btn.delete { background-color: #e15241; color: white; }
+.btn.delete:hover { background-color: #d23c2a; }
 
-.header h3 { padding-bottom: 0px; margin: 0px; }
+/* 雙表佈局：左右 1:1 */
+.table-content { display: flex; width: 100%; gap: 16px; align-items: stretch; }
+.table-column { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 
-.list-item { line-height: 1.5; text-align: center; }
-.list-param { line-height: 1.5; text-align: left; margin: 0; padding: 8px 0px 8px 24px; }
+.condition-table-wrapper,
+.machine-table-wrapper {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 620px;
+  display: flex;
+  flex-direction: column;
+}
 
-.machine-table-wrapper { margin-left: 8px; flex-grow: 1; max-height: 600px; overflow-y: auto; }
-.machines-table{ border-collapse: collapse; table-layout: fixed; width: 100%;}
-.machines-table th, .machines-table td { border: 1px solid #ddd; padding: 8px; word-wrap: break-word; text-align: center;}
-.machines-table th { background-color: #f2f2f2; }
+.panel-title {
+  padding: 10px 14px;
+  font-weight: bold;
+  color: #fff;
+  background-color: #61a5d6;
+  flex-shrink: 0;
+}
 
-.machines-table th:first-child, .machines-table td:first-child { width: 20%; }
-.machines-table th:nth-child(2), .machines-table td:nth-child(2) { width: 30%; text-align: left;}
+/* 表格通用 */
+.conditions-table,
+.machines-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+.conditions-table th, .conditions-table td,
+.machines-table th, .machines-table td {
+  border: 1px solid #eee;
+  padding: 8px;
+  word-wrap: break-word;
+  text-align: center;
+  font-size: 14px;
+}
+.conditions-table thead th,
+.machines-table thead th {
+  background-color: #f6f9fc;
+  color: #333;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.conditions-table tbody tr { cursor: pointer; transition: background-color 0.2s ease; }
+.conditions-table tbody tr:hover { background-color: #f5f9fd; }
+.conditions-table tbody tr.selected-row { background-color: #cfe6fb; }
+
+.conditions-table th:nth-child(1), .conditions-table td:nth-child(1) { width: 8%; }
+.conditions-table th:nth-child(2), .conditions-table td:nth-child(2) { width: 22%; }
+.conditions-table th:nth-child(3), .conditions-table td:nth-child(3) { width: 40%; }
+.conditions-table th:nth-child(4), .conditions-table td:nth-child(4) { width: 30%; }
+
+.list-param { line-height: 1.6; text-align: left; margin: 0; padding: 4px 0 4px 20px; }
+
+.machines-table th:first-child, .machines-table td:first-child { width: 35%; }
+.machines-table th:nth-child(2), .machines-table td:nth-child(2) { text-align: left; }
+
+/* 讓表格本身可捲動，表頭固定 */
+.condition-table-wrapper,
+.machine-table-wrapper { overflow-y: auto; }
 </style>
