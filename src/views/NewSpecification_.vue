@@ -834,11 +834,49 @@ const applyLoadedData = async () => {
   finally { isloading.value = false; }
 }
 
+// 複製模式：從來源 copyToken 載入自訂內容到「新 token 草稿」。
+// 忽略「製造參數一覽表(manufacture)」與「品目/式樣」，並重置文管編號/版本/變版來源 → 成為全新文件。
+const applyCopiedData = async () => {
+  isloading.value = true;
+  try {
+    const result = await loadSpecification(copyToken.value, sessionStorage.getItem('loggedInUserNo'));
+    if (!result || !result.form) { alert('讀取來源文件失敗，無法複製'); return; }
+
+    form.department = sessionStorage.getItem('loggedInUserdeptName');
+    form.author_id  = sessionStorage.getItem('loggedInUserNo');
+    form.author     = sessionStorage.getItem('loggedInUserName');
+
+    Object.assign(form, {
+      ...result.form,
+      department: form.department, author_id: form.author_id, author: form.author,
+      attribute: form.attribute,        // 保留現有 attribute 物件參照（下面再 assign）
+      document_id: '',                  // 新文件，無文管編號
+      document_name: '',                // 由式樣重新產生
+      document_version: 1.0,
+      previous_document_token: '',      // 複製非變版
+    });
+    // 品目/式樣/適用工程清空，待使用者重選；其餘 attribute 欄位沿用
+    Object.assign(form.attribute, { ...result.form.attribute, itemType: '', styleNo: '', specification: [] });
+
+    // 自訂區塊：製作條件規範 / 適用品質 / 其它 帶過去；製造參數一覽表不複製
+    blocks.production.splice(0, blocks.production.length, ...forestFromResult(result, 'production', 4));
+    blocks.quality.splice(0, blocks.quality.length, ...forestFromResult(result, 'quality', 6));
+    blocks.other.splice(0, blocks.other.length, ...forestFromResult(result, 'other', 7));
+    blocks.manufacture = [];
+
+    Object.assign(references, { ...result.references });
+    formJson.purpose = result.form_attribute?.purpose ?? null;
+  }
+  catch (e) { console.error(e); alert('複製文件失敗'); }
+  finally { isloading.value = false; }
+};
+
 resetAll();
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll, { passive: true });
   await ensureDraftToken();
-  await applyLoadedData();
+  if (isCopyMode.value) await applyCopiedData();
+  else await applyLoadedData();
 });
 
 // 關閉頁簽（從 keep-alive 移除 → unmount）時詢問是否存檔；切換頁簽是 deactivate，不會觸發。
